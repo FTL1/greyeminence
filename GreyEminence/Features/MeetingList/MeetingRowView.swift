@@ -13,17 +13,18 @@ struct MeetingRowView: View {
         }
 
         let weekday = date.formatted(.dateTime.weekday(.wide))
-
-        if let weekInterval = calendar.dateInterval(of: .weekOfYear, for: .now),
-           weekInterval.contains(date) {
-            return "\(weekday), \(time)"
-        }
-
+        let month = date.formatted(.dateTime.month(.abbreviated))
         let day = calendar.component(.day, from: date)
         let ordinal = NumberFormatter()
         ordinal.numberStyle = .ordinal
         let dayString = ordinal.string(from: NSNumber(value: day)) ?? "\(day)"
-        return "\(weekday) \(dayString), \(time)"
+
+        let nowYear = calendar.component(.year, from: .now)
+        let dateYear = calendar.component(.year, from: date)
+        if dateYear == nowYear {
+            return "\(weekday), \(month) \(dayString) · \(time)"
+        }
+        return "\(weekday), \(month) \(dayString), \(dateYear) · \(time)"
     }
 
     var body: some View {

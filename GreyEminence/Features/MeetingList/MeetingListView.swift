@@ -17,13 +17,16 @@ struct MeetingListView: View {
             } else if let weekInterval = calendar.dateInterval(of: .weekOfYear, for: .now),
                       weekInterval.contains(meeting.date) {
                 return "This Week"
+            } else if let monthInterval = calendar.dateInterval(of: .month, for: .now),
+                      monthInterval.contains(meeting.date) {
+                return "This Month"
             } else {
                 let formatter = DateFormatter()
                 formatter.dateFormat = "MMMM yyyy"
                 return formatter.string(from: meeting.date)
             }
         }
-        let order = ["Today", "Yesterday", "This Week"]
+        let order = ["Today", "Yesterday", "This Week", "This Month"]
         return grouped.sorted { a, b in
             let aIdx = order.firstIndex(of: a.key) ?? Int.max
             let bIdx = order.firstIndex(of: b.key) ?? Int.max
