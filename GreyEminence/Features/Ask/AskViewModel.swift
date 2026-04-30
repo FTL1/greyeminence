@@ -168,27 +168,33 @@ final class AskViewModel {
         results.enumerated().map { i, r in
             let number = i + 1
             let prefix = "[\(number)] (\(r.meetingTitle), \(DateFormatter.shortDate.string(from: r.meetingDate)))"
+            // Transcript records are now ~paragraph chunks, so r.text already
+            // carries enough conversational context. The contextWindow setting
+            // adds N segments before the chunk's start anchor for cases where
+            // the user wants a wider lead-in.
             if r.sourceKind == .transcriptSegment, contextWindow > 0 {
-                let neighbors = fetchSegmentContext(
+                let lead = fetchSegmentLeadIn(
                     meetingID: r.meetingID,
                     segmentID: r.sourceID,
                     window: contextWindow,
                     mainContext: mainContext
                 )
-                return "\(prefix) \(neighbors)"
+                if !lead.isEmpty {
+                    return "\(prefix)\n\(lead)\n\(r.text)"
+                }
             }
-            return "\(prefix) \(r.text)"
+            return "\(prefix)\n\(r.text)"
         }.joined(separator: "\n\n")
     }
 
-    private func fetchSegmentContext(meetingID: UUID, segmentID: UUID, window: Int, mainContext: ModelContext) -> String {
+    private func fetchSegmentLeadIn(meetingID: UUID, segmentID: UUID, window: Int, mainContext: ModelContext) -> String {
         let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.id == meetingID })
         guard let meeting = try? mainContext.fetch(descriptor).first else { return "" }
         let sorted = meeting.segments.sorted { $0.startTime < $1.startTime }
         guard let idx = sorted.firstIndex(where: { $0.id == segmentID }) else { return "" }
         let lo = max(0, idx - window)
-        let hi = min(sorted.count - 1, idx + window)
-        return sorted[lo...hi].map { $0.text }.joined(separator: " ")
+        guard lo < idx else { return "" }
+        return sorted[lo..<idx].map { "\($0.speaker.displayName): \($0.text)" }.joined(separator: "\n")
     }
 
     // MARK: - History

@@ -21,16 +21,21 @@ final class EmbeddingIndexer {
         let title = meeting.title
         let date = meeting.date
 
-        for segment in meeting.segments {
-            guard let vec = await service.embed(segment.text) else { continue }
+        // Embedding short transcript segments individually produced terrible
+        // results: tiny phrases like "What is it?" cluster by question pattern
+        // rather than topic, drowning real matches. Chunk consecutive segments
+        // into ~paragraph-sized units with speaker labels + a meeting-title
+        // prefix so embeddings carry actual semantic content.
+        for chunk in Self.buildTranscriptChunks(segments: meeting.segments, meetingTitle: title) {
+            guard let vec = await service.embed(chunk.embeddingText) else { continue }
             let record = EmbeddingRecord(
-                id: "segment:\(segment.id)",
-                sourceID: segment.id,
+                id: "chunk:\(chunk.firstSegmentID)",
+                sourceID: chunk.firstSegmentID,
                 sourceKind: .transcriptSegment,
                 meetingID: meetingID,
                 meetingTitle: title,
                 meetingDate: date,
-                text: segment.text,
+                text: chunk.displayText,
                 vector: vec,
                 modelIdentifier: service.modelIdentifier
             )
@@ -101,5 +106,59 @@ final class EmbeddingIndexer {
             await indexMeeting(meeting)
         }
         onProgress(total, total)
+    }
+
+    // MARK: - Chunking
+
+    struct TranscriptChunk {
+        /// First segment in the chunk. Used as the stable id for upsert and as
+        /// the anchor for retrieval-time context expansion.
+        let firstSegmentID: UUID
+        /// Plain conversation text shown in the UI / sent to the LLM.
+        let displayText: String
+        /// Text actually fed to the embedding model — includes a meeting-title
+        /// prefix so topic words are present even in short chunks.
+        let embeddingText: String
+    }
+
+    /// Target ~paragraph size. NLEmbedding handles a few hundred chars well;
+    /// going much larger dilutes the vector and hurts top-k recall.
+    private static let chunkTargetChars = 600
+    /// One-segment overlap so a topic that spans a chunk boundary still has
+    /// at least one chunk containing both sides of the transition.
+    private static let chunkOverlapSegments = 1
+
+    static func buildTranscriptChunks(segments: [TranscriptSegment], meetingTitle: String) -> [TranscriptChunk] {
+        let sorted = segments.sorted { $0.startTime < $1.startTime }
+        guard !sorted.isEmpty else { return [] }
+
+        var chunks: [TranscriptChunk] = []
+        var i = 0
+        while i < sorted.count {
+            var lines: [String] = []
+            var charCount = 0
+            var j = i
+            while j < sorted.count {
+                let seg = sorted[j]
+                let text = seg.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { j += 1; continue }
+                let line = "\(seg.speaker.displayName): \(text)"
+                lines.append(line)
+                charCount += line.count
+                j += 1
+                if charCount >= chunkTargetChars { break }
+            }
+            guard !lines.isEmpty else { break }
+            let display = lines.joined(separator: "\n")
+            let embedding = "Meeting: \(meetingTitle)\n\(display)"
+            chunks.append(TranscriptChunk(
+                firstSegmentID: sorted[i].id,
+                displayText: display,
+                embeddingText: embedding
+            ))
+            if j >= sorted.count { break }
+            i = max(j - chunkOverlapSegments, i + 1)
+        }
+        return chunks
     }
 }

@@ -77,12 +77,12 @@ struct AskSettingsView: View {
                     step: 1
                 )
                 Stepper(
-                    "Transcript context (segments before/after): \(askContextWindow)",
+                    "Transcript lead-in (segments before each chunk): \(askContextWindow)",
                     value: $askContextWindow,
                     in: 0...10,
                     step: 1
                 )
-                Text("More snippets give the LLM broader coverage; more context gives it richer conversational flow around each match. Both cost more tokens.")
+                Text("Each ranked snippet is now a paragraph-sized chunk that already includes surrounding turns. The lead-in adds extra segments before the chunk for cases where the answer hinges on what was said just before. Both settings cost more tokens.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {

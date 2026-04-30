@@ -11,7 +11,7 @@ protocol EmbeddingService: Sendable {
 /// Quality is adequate for personal meeting search but lags behind current
 /// API-based models (Voyage v3, Titan v2). Good default.
 final class NLEmbeddingService: EmbeddingService, @unchecked Sendable {
-    let modelIdentifier = "apple-nlembedding-sentence-en"
+    let modelIdentifier = "apple-nlembedding-sentence-en-chunked-v1"
 
     private let embedding: NLEmbedding?
 

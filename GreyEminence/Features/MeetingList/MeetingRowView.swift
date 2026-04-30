@@ -3,6 +3,29 @@ import SwiftUI
 struct MeetingRowView: View {
     let meeting: Meeting
 
+    private var dateLabel: String {
+        let calendar = Calendar.current
+        let date = meeting.date
+        let time = date.formatted(date: .omitted, time: .shortened)
+
+        if calendar.isDateInToday(date) || calendar.isDateInYesterday(date) {
+            return time
+        }
+
+        let weekday = date.formatted(.dateTime.weekday(.wide))
+
+        if let weekInterval = calendar.dateInterval(of: .weekOfYear, for: .now),
+           weekInterval.contains(date) {
+            return "\(weekday), \(time)"
+        }
+
+        let day = calendar.component(.day, from: date)
+        let ordinal = NumberFormatter()
+        ordinal.numberStyle = .ordinal
+        let dayString = ordinal.string(from: NSNumber(value: day)) ?? "\(day)"
+        return "\(weekday) \(dayString), \(time)"
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -19,7 +42,7 @@ struct MeetingRowView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text(meeting.date, style: .time)
+                    Text(dateLabel)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
