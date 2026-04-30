@@ -4,6 +4,7 @@ struct AudioSettingsView: View {
     @State private var audioManager = AudioSessionManager()
     @State private var monitor = MicLevelMonitor()
     @AppStorage("inputGain") private var inputGain: Double = 1.0
+    @AppStorage("autoReprocessMeetings") private var autoReprocessMeetings: Bool = true
     @State private var captureSystemAudio = true
 
     var body: some View {
@@ -62,6 +63,21 @@ struct AudioSettingsView: View {
                 }
             } header: {
                 Label("System Audio", systemImage: "speaker.wave.2")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+            }
+
+            Section {
+                Toggle("Re-transcribe meetings after recording", isOn: $autoReprocessMeetings)
+                Text("Live transcription uses a fast model (FluidAudio Parakeet). When a meeting ends, the audio is re-transcribed in the background with WhisperKit large-v3, and AI insights + embeddings are rebuilt on the upgraded transcript. Re-processing pauses automatically while another recording is in progress.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("First run downloads the large-v3 model (~1.5 GB).")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } header: {
+                Label("High-accuracy re-transcription", systemImage: "waveform.badge.checkmark")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                     .textCase(nil)
