@@ -4,6 +4,7 @@ import SwiftData
 enum SidebarDestination: String, Hashable, CaseIterable {
     case dashboard = "Dashboard"
     case meetings = "Meetings"
+    case archive = "Archive"
     case recording = "New Recording"
     case tasks = "Tasks"
     case interviews = "Interviews"
@@ -17,6 +18,7 @@ enum SidebarDestination: String, Hashable, CaseIterable {
         switch self {
         case .dashboard: "square.grid.2x2"
         case .meetings: "list.bullet.rectangle"
+        case .archive: "archivebox"
         case .recording: "record.circle"
         case .tasks: "checkmark.circle"
         case .interviews: "person.badge.shield.checkmark"
@@ -32,6 +34,7 @@ enum SidebarDestination: String, Hashable, CaseIterable {
         switch self {
         case .dashboard: .blue
         case .meetings: .indigo
+        case .archive: .brown
         case .recording: .red
         case .tasks: .orange
         case .interviews: .cyan
@@ -94,7 +97,7 @@ struct ContentView: View {
             ReProcessingStatusBar()
         }
         .toolbar {
-            if selectedDestination == .meetings || selectedDestination == .recording || selectedDestination == .interviews {
+            if selectedDestination == .meetings || selectedDestination == .archive || selectedDestination == .recording || selectedDestination == .interviews {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showInspector.toggle()
@@ -302,7 +305,10 @@ struct ContentView: View {
             }
         case .meetings:
             NavigationSplitView {
-                MeetingListView(selectedMeeting: $selectedMeeting)
+                MeetingListView(
+                    selectedMeeting: $selectedMeeting,
+                    onShowArchive: { selectedDestination = .archive }
+                )
                     .navigationSplitViewColumnWidth(min: 280, ideal: 300)
             } detail: {
                 if let meeting = selectedMeeting {
@@ -343,6 +349,47 @@ struct ContentView: View {
                         "No Meeting Selected",
                         systemImage: "doc.text",
                         description: Text("Select a meeting to view its details")
+                    )
+                }
+            }
+        case .archive:
+            NavigationSplitView {
+                ArchiveView(selectedMeeting: $selectedMeeting)
+                    .navigationSplitViewColumnWidth(min: 360, ideal: 480)
+            } detail: {
+                if let meeting = selectedMeeting {
+                    GeometryReader { geo in
+                        let defaultWidth = geo.size.width * 0.4
+                        let width = inspectorWidth ?? defaultWidth
+                        let clampedWidth = min(max(width, 280), geo.size.width * 0.45)
+
+                        HStack(spacing: 0) {
+                            VStack(spacing: 0) {
+                                MeetingHeaderBar(meeting: meeting)
+                                Divider()
+                                MeetingIntelligenceView(meeting: meeting)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(2)
+                            if showInspector {
+                                inspectorDragHandle(containerWidth: geo.size.width)
+                                TranscriptPanelView(
+                                    meeting: meeting,
+                                    onSplitMeeting: { newMeeting in
+                                        selectedMeeting = newMeeting
+                                    },
+                                    scrollToSegmentID: $pendingScrollSegmentID
+                                )
+                                .frame(width: clampedWidth)
+                                .layoutPriority(0)
+                            }
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Meeting Selected",
+                        systemImage: "doc.text",
+                        description: Text("Pick a meeting from the archive to view its details")
                     )
                 }
             }

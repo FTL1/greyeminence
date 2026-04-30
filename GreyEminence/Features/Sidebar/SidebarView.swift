@@ -27,6 +27,7 @@ struct SidebarView: View {
 
                     sectionHeader("Library")
                     sidebarItem(.meetings)
+                    sidebarItem(.archive)
                     tasksItem
                     sidebarItem(.interviews)
                     sidebarItem(.people)

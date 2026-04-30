@@ -5,11 +5,32 @@ struct MeetingListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Meeting.date, order: .reverse) private var meetings: [Meeting]
     @Binding var selectedMeeting: Meeting?
+    var onShowArchive: (() -> Void)?
+
+    /// Recent list shows the current month plus the two prior months. Anything
+    /// older lives in the Archive. Keeps the sidebar list bounded as the
+    /// meeting count grows over time.
+    private static let monthsVisible = 3
+
+    private var cutoffDate: Date {
+        let cal = Calendar.current
+        let startOfCurrentMonth = cal.dateInterval(of: .month, for: .now)?.start ?? .now
+        return cal.date(byAdding: .month, value: -(Self.monthsVisible - 1), to: startOfCurrentMonth) ?? .distantPast
+    }
+
+    private var visibleMeetings: [Meeting] {
+        let cutoff = cutoffDate
+        return meetings.filter { !$0.isInterviewMeeting && $0.date >= cutoff }
+    }
+
+    private var archivedCount: Int {
+        let cutoff = cutoffDate
+        return meetings.filter { !$0.isInterviewMeeting && $0.date < cutoff }.count
+    }
 
     private var groupedMeetings: [(String, [Meeting])] {
         let calendar = Calendar.current
-        let regularMeetings = meetings.filter { !$0.isInterviewMeeting }
-        let grouped = Dictionary(grouping: regularMeetings) { meeting -> String in
+        let grouped = Dictionary(grouping: visibleMeetings) { meeting -> String in
             if calendar.isDateInToday(meeting.date) {
                 return "Today"
             } else if calendar.isDateInYesterday(meeting.date) {
@@ -69,11 +90,31 @@ struct MeetingListView: View {
                         .textCase(nil)
                 }
             }
+
+            if archivedCount > 0, let onShowArchive {
+                Section {
+                    Button {
+                        onShowArchive()
+                    } label: {
+                        HStack {
+                            Image(systemName: "archivebox")
+                                .foregroundStyle(.secondary)
+                            Text("View archive")
+                            Spacer()
+                            Text("\(archivedCount)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
         .listStyle(.inset)
         .navigationTitle("Meetings")
         .overlay {
-            if meetings.isEmpty {
+            if visibleMeetings.isEmpty && archivedCount == 0 {
                 ContentUnavailableView(
                     "No Meetings Yet",
                     systemImage: "waveform",
