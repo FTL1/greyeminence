@@ -6,6 +6,7 @@ struct AskSettingsView: View {
     @AppStorage("embeddingProvider") private var embeddingProviderRaw = EmbeddingProvider.nlEmbedding.rawValue
     @AppStorage("askSnippetCount") private var askSnippetCount: Int = 15
     @AppStorage("askContextWindow") private var askContextWindow: Int = 2
+    @AppStorage("lastReindexAt") private var lastReindexAt: Double = 0
 
     @State private var reindexTotal = 0
     @State private var reindexDone = 0
@@ -28,6 +29,13 @@ struct AskSettingsView: View {
                 LabeledContent("Indexed items") {
                     Text("\(embeddingCount)")
                         .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Last reindex") {
+                    Text(lastReindexAt > 0
+                         ? Date(timeIntervalSince1970: lastReindexAt).formatted(date: .abbreviated, time: .shortened)
+                         : "Never")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 HStack {
@@ -97,5 +105,6 @@ struct AskSettingsView: View {
             reindexDone = done
             reindexTotal = total
         }
+        lastReindexAt = Date.now.timeIntervalSince1970
     }
 }
