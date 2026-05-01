@@ -108,22 +108,26 @@ struct ArchiveView: View {
                 .padding(.vertical, 12)
                 .background(.background)
             Divider()
-            if archivedMeetings.isEmpty {
-                ContentUnavailableView(
-                    "Nothing in the archive yet",
-                    systemImage: "archivebox",
-                    description: Text("Meetings older than three months will appear here.")
-                )
-            } else if filteredMeetings.isEmpty {
-                ContentUnavailableView(
-                    "No matches",
-                    systemImage: "magnifyingglass",
-                    description: Text("Try a different search term, year, or clear the filters.")
-                )
-            } else {
-                meetingList
+            Group {
+                if archivedMeetings.isEmpty {
+                    ContentUnavailableView(
+                        "Nothing in the archive yet",
+                        systemImage: "archivebox",
+                        description: Text("Meetings older than three months will appear here.")
+                    )
+                } else if filteredMeetings.isEmpty {
+                    ContentUnavailableView(
+                        "No matches",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try a different search term, year, or clear the filters.")
+                    )
+                } else {
+                    meetingList
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Archive")
     }
 
