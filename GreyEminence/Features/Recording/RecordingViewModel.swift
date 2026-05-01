@@ -454,7 +454,11 @@ final class RecordingViewModel {
                 do {
                     if let result = try await service.performFinalAnalysis(segments: finalSegmentSnapshots) {
                         self.streamingSummary = result.summary
-                        self.actionItems = result.actionItems.map { ActionItem(text: $0.text, assignee: $0.assignee) }
+                        self.actionItems = result.actionItems.map { parsed in
+                            let item = ActionItem(text: parsed.text, assignee: parsed.assignee)
+                            item.sourceSegmentID = meeting.segmentID(matchingQuote: parsed.sourceQuote)
+                            return item
+                        }
                         self.followUpQuestions = result.followUps
                         self.topics = result.topics
                         self.latestRawResponse = result.rawResponse
@@ -851,8 +855,10 @@ final class RecordingViewModel {
                     if let result = try await service.analyze(segments: snapshots) {
                         await MainActor.run {
                             self.streamingSummary = result.summary
-                            self.actionItems = result.actionItems.map {
-                                ActionItem(text: $0.text, assignee: $0.assignee)
+                            self.actionItems = result.actionItems.map { parsed in
+                                let item = ActionItem(text: parsed.text, assignee: parsed.assignee)
+                                item.sourceSegmentID = self.segments.segmentID(matchingQuote: parsed.sourceQuote)
+                                return item
                             }
                             self.followUpQuestions = result.followUps
                             self.topics = result.topics

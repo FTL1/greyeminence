@@ -7,10 +7,25 @@ struct TaskDetailView: View {
 
     private var meeting: Meeting? { task.meeting }
 
-    private var summarySections: [SummarySection] {
-        guard let raw = meeting?.latestInsight?.summary else { return [] }
-        return SummarySection.parse(raw) ?? []
+    /// Segments around the one that produced this task, ordered by start time.
+    /// Empty when the task has no sourceSegmentID (legacy items) or the source
+    /// segment is no longer in the meeting (unlikely, but possible after edits).
+    private var contextSegments: [TranscriptSegment] {
+        guard let meeting,
+              let sourceID = task.sourceSegmentID else { return [] }
+        let sorted = meeting.segments.sorted { $0.startTime < $1.startTime }
+        guard let idx = sorted.firstIndex(where: { $0.id == sourceID }) else { return [] }
+        let lo = max(0, idx - Self.contextWindow)
+        let hi = min(sorted.count - 1, idx + Self.contextWindow)
+        return Array(sorted[lo...hi])
     }
+
+    private var sourceSegmentID: UUID? { task.sourceSegmentID }
+
+    /// Number of segments to show on each side of the source segment.
+    /// 3 ± 3 ≈ 60–90 seconds of conversation, enough to understand intent
+    /// without dumping the whole meeting.
+    private static let contextWindow = 3
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +37,7 @@ struct TaskDetailView: View {
                     if let meeting {
                         meetingBlock(meeting)
                     }
-                    if !summarySections.isEmpty {
+                    if !contextSegments.isEmpty {
                         contextBlock
                     }
                 }
@@ -101,39 +116,44 @@ struct TaskDetailView: View {
 
     private var contextBlock: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Meeting Summary")
+            Text("Conversation Context")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(Array(summarySections.enumerated()), id: \.offset) { _, section in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(section.title)
-                            .font(.subheadline.weight(.semibold))
-                        if let intro = section.intro, !intro.isEmpty {
-                            Text(intro)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(Array(section.points.enumerated()), id: \.offset) { _, pt in
-                            HStack(alignment: .top, spacing: 6) {
-                                Text("•")
-                                    .foregroundStyle(.tertiary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(pt.label)
-                                        .font(.caption.weight(.semibold))
-                                    Text(pt.detail)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(contextSegments) { segment in
+                    contextRow(segment)
                 }
             }
             .padding(12)
             .background(Color.gray.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+
+    private func contextRow(_ segment: TranscriptSegment) -> some View {
+        let isSource = segment.id == sourceSegmentID
+        return HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(segment.speaker.displayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isSource ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                Text(segment.formattedTimestamp)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(width: 80, alignment: .leading)
+            Text(segment.text)
+                .font(.callout)
+                .foregroundStyle(isSource ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(
+            isSource ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
+            in: RoundedRectangle(cornerRadius: 6)
+        )
     }
 
     private var footer: some View {

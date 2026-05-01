@@ -23,6 +23,11 @@ struct AnalysisResult: Sendable {
 struct ParsedActionItem: Sendable {
     let text: String
     let assignee: String?
+    /// Verbatim snippet from the transcript the AI cites as the source for this
+    /// action item. Used to resolve a `sourceSegmentID` so the task detail can
+    /// show the surrounding conversation instead of the full meeting summary.
+    /// Nil for legacy items or when the AI didn't (or couldn't) provide one.
+    let sourceQuote: String?
 }
 
 // MARK: - Structured Summary Types
@@ -212,7 +217,8 @@ actor AIIntelligenceService {
             for item in items {
                 if let text = item["text"] as? String {
                     let assignee = item["assignee"] as? String
-                    actionItems.append(ParsedActionItem(text: text, assignee: assignee))
+                    let sourceQuote = item["source_quote"] as? String
+                    actionItems.append(ParsedActionItem(text: text, assignee: assignee, sourceQuote: sourceQuote))
                 }
             }
         }

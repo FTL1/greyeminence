@@ -623,6 +623,7 @@ struct TranscriptPanelView: View {
                 for parsed in result.actionItems {
                     let item = ActionItem(text: parsed.text, assignee: parsed.assignee)
                     item.meeting = target
+                    item.sourceSegmentID = target.segmentID(matchingQuote: parsed.sourceQuote)
                     target.actionItems.append(item)
                 }
             }

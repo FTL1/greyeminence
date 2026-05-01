@@ -400,6 +400,7 @@ final class ReProcessingQueue {
             for parsed in result.actionItems {
                 let item = ActionItem(text: parsed.text, assignee: parsed.assignee)
                 item.meeting = meeting
+                item.sourceSegmentID = meeting.segmentID(matchingQuote: parsed.sourceQuote)
                 meeting.actionItems.append(item)
             }
             PersistenceGate.save(context, site: "reProcess/aiAnalysis", critical: true, meetingID: meeting.id)

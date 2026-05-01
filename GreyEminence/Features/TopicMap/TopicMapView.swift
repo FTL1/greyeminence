@@ -456,6 +456,7 @@ struct TopicMapView: View {
                 for item in result.actionItems {
                     let action = ActionItem(text: item.text, assignee: item.assignee)
                     action.meeting = meeting
+                    action.sourceSegmentID = meeting.segmentID(matchingQuote: item.sourceQuote)
                     modelContext.insert(action)
                 }
 

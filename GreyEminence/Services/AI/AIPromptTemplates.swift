@@ -179,7 +179,7 @@ enum AIPromptTemplates {
               ]
             }
           ],
-          "action_items": [{"text": "description of action", "assignee": "person or null"}],
+          "action_items": [{"text": "description of action", "assignee": "person or null", "source_quote": "verbatim phrase from the transcript that triggered this item"}],
           "follow_ups": ["question that should be followed up on"],
           "topics": ["Theme Topic", "specific-tool", "ACRONYM", "PersonName"]
         }
@@ -195,7 +195,11 @@ enum AIPromptTemplates {
         - The "intro" field is optional — include it only when a sentence of context genuinely helps \
         frame the points below it. Otherwise omit the key entirely.
         - "action_items" should only include concrete commitments or tasks, not vague statements. \
-        Set "assignee" to the speaker's name if identifiable, otherwise null.
+        Set "assignee" to the speaker's name if identifiable, otherwise null. \
+        Set "source_quote" to a short verbatim snippet (one sentence, 5-25 words) copied from \
+        the transcript that triggered this action — the exact words a speaker said, not your \
+        paraphrase. This anchors the task to a specific moment in the conversation. Pick the \
+        single most direct sentence; do not concatenate multiple turns.
         - "follow_ups" are open questions or unresolved points that need attention after the meeting.
         - "topics" should include TWO types, merged into one flat array ordered by prominence: \
         (1) Theme topics: broad subjects discussed (e.g. "System Design", "Code Review Process") \

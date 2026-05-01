@@ -108,4 +108,38 @@ final class Meeting {
     var latestInsight: MeetingInsight? {
         insights.sorted { $0.createdAt > $1.createdAt }.first
     }
+
+    func segmentID(matchingQuote rawQuote: String?) -> UUID? {
+        segments.segmentID(matchingQuote: rawQuote)
+    }
+}
+
+extension Array where Element == TranscriptSegment {
+    /// Find the transcript segment that best matches an AI-supplied verbatim
+    /// quote. Substring containment in either direction wins decisively;
+    /// otherwise we fall back to the segment with the largest token overlap
+    /// (≥3 shared meaningful tokens). Used to anchor action items to the
+    /// part of the conversation that produced them.
+    func segmentID(matchingQuote rawQuote: String?) -> UUID? {
+        guard let raw = rawQuote?.trimmingCharacters(in: .whitespacesAndNewlines),
+              raw.count >= 8 else { return nil }
+        let needle = raw.lowercased()
+        let needleTokens = Set(needle.split(separator: " ").map(String.init).filter { $0.count >= 3 })
+
+        var bestID: UUID? = nil
+        var bestScore = 0
+        for segment in self {
+            let hay = segment.text.lowercased()
+            if hay.contains(needle) || (needle.count >= hay.count && needle.contains(hay)) {
+                return segment.id
+            }
+            let hayTokens = Set(hay.split(separator: " ").map(String.init).filter { $0.count >= 3 })
+            let overlap = needleTokens.intersection(hayTokens).count
+            if overlap > bestScore {
+                bestScore = overlap
+                bestID = segment.id
+            }
+        }
+        return bestScore >= 3 ? bestID : nil
+    }
 }
