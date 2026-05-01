@@ -149,55 +149,91 @@ struct ArchiveView: View {
             .padding(.vertical, 8)
             .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
+            // Wraps to multiple rows when the column is narrow so chips stop
+            // collapsing into vertical letter stacks. fixedSize on each chip
+            // pins the natural width — no mid-word breaks.
+            FlowLayout(spacing: 6) {
+                yearMenu
+                filterChip("Insights", systemImage: "lightbulb", isOn: $requireInsights)
+                filterChip("Exported", systemImage: "arrow.up.doc", isOn: $requireExported)
+                filterChip("Actions", systemImage: "checkmark.circle", isOn: $requireActionItems)
+            }
+
             HStack(spacing: 8) {
-                Menu {
-                    Button("All years") { selectedYear = nil }
-                    Divider()
-                    ForEach(availableYears, id: \.self) { year in
-                        Button {
-                            selectedYear = year
-                        } label: {
-                            HStack {
-                                Text(String(year))
-                                if selectedYear == year {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "calendar")
-                        Text(selectedYear.map(String.init) ?? "All years")
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-
-                filterToggle("Has insights", systemImage: "lightbulb", isOn: $requireInsights)
-                filterToggle("Exported", systemImage: "arrow.up.doc", isOn: $requireExported)
-                filterToggle("Action items", systemImage: "checkmark.circle", isOn: $requireActionItems)
-
-                Spacer()
-
-                if hasActiveFilters {
-                    Button("Clear") { clearFilters() }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
-                }
                 Text("\(filteredMeetings.count) of \(archivedMeetings.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                Spacer()
+                if hasActiveFilters {
+                    Button("Clear filters") { clearFilters() }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
 
-    private func filterToggle(_ label: String, systemImage: String, isOn: Binding<Bool>) -> some View {
-        Toggle(isOn: isOn) {
-            Label(label, systemImage: systemImage)
-                .labelStyle(.titleAndIcon)
+    private var yearMenu: some View {
+        Menu {
+            Button("All years") { selectedYear = nil }
+            Divider()
+            ForEach(availableYears, id: \.self) { year in
+                Button {
+                    selectedYear = year
+                } label: {
+                    HStack {
+                        Text(String(year))
+                        if selectedYear == year {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "calendar")
+                Text(selectedYear.map(String.init) ?? "All years")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                (selectedYear != nil ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.secondary.opacity(0.10))),
+                in: Capsule()
+            )
+            .foregroundStyle(selectedYear != nil ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
         }
-        .toggleStyle(ChipToggleStyle())
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func filterChip(_ label: String, systemImage: String, isOn: Binding<Bool>) -> some View {
+        Button {
+            isOn.wrappedValue.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                Text(label)
+            }
+            .font(.caption)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                isOn.wrappedValue ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.secondary.opacity(0.10)),
+                in: Capsule()
+            )
+            .foregroundStyle(isOn.wrappedValue ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+        }
+        .buttonStyle(.plain)
     }
 
     private var meetingList: some View {
@@ -248,22 +284,3 @@ struct ArchiveView: View {
     }
 }
 
-/// Compact pill-shaped toggle for filter rows.
-private struct ChipToggleStyle: ToggleStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        Button {
-            configuration.isOn.toggle()
-        } label: {
-            configuration.label
-                .font(.caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    configuration.isOn ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.secondary.opacity(0.08)),
-                    in: Capsule()
-                )
-                .foregroundStyle(configuration.isOn ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-        }
-        .buttonStyle(.plain)
-    }
-}
