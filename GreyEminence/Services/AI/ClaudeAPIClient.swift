@@ -76,7 +76,9 @@ struct ClaudeAPIClient: AIClient, Sendable {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.httpBody = try JSONEncoder().encode(body)
-        request.timeoutInterval = 30
+        // Sized to fit inside the outer 90s withTimeout budget across the
+        // full retry sequence: 25 + 2 + 25 + 6 + 25 = 83s worst case.
+        request.timeoutInterval = 25
 
         return request
     }

@@ -59,19 +59,35 @@ final class ReProcessingQueue {
     }
 
     /// On launch, any meeting still showing a re-processing state from a prior
-    /// session is orphaned (the in-memory job died with the app). Clear every
-    /// one — the persisted queue is also discarded on launch, so nothing is in
-    /// flight yet.
+    /// session represents work the user asked for that the app didn't finish.
+    /// Re-enqueue the ones that were actively in progress so the work resumes
+    /// instead of silently disappearing. Failed jobs stay failed (the user
+    /// already saw the error and gets to decide whether to retry); cancelling
+    /// means the user explicitly asked to stop, so we honor that.
     private func clearOrphanedStates() {
         guard let context = modelContainer?.mainContext else { return }
         let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.reProcessingState != nil })
         guard let stuck = try? context.fetch(descriptor), !stuck.isEmpty else { return }
+
+        var resumed: [UUID] = []
+        var cleared = 0
         for meeting in stuck {
+            let priorState = meeting.reProcessingState.flatMap(ReProcessingState.init(rawValue:))
             meeting.reProcessingState = nil
             meeting.reProcessingError = nil
+            cleared += 1
+            switch priorState {
+            case .queued, .transcribing, .analyzing, .reindexing:
+                resumed.append(meeting.id)
+            case .cancelling, .failed, nil:
+                break
+            }
         }
         PersistenceGate.save(context, site: "reProcess/clearOrphaned")
-        LogManager.send("Cleared orphaned re-processing state on \(stuck.count) meeting(s)", category: .transcription)
+        LogManager.send("Cleared orphaned re-processing state on \(cleared) meeting(s); auto-resuming \(resumed.count)", category: .transcription)
+        for meetingID in resumed {
+            enqueue(meetingID: meetingID)
+        }
     }
 
     /// Add a meeting to the queue. Safe to call from any isolation.

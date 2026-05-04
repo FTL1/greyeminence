@@ -126,7 +126,8 @@ actor AIIntelligenceService {
         }
         LogManager.send("AI raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
 
-        let result = try parseResponse(response, raw: response)
+        let parsed = try parseResponse(response, raw: response)
+        let result = applyResultPreservingPrevious(parsed)
         previousSummary = result.summary
         previousActionItems = result.actionItems
         previousFollowUps = result.followUps
@@ -134,6 +135,24 @@ actor AIIntelligenceService {
         lastAnalyzedSegmentCount = nonEmpty.count
         LogManager.send("AI analysis complete", category: .ai, meetingID: meetingID)
         return result
+    }
+
+    /// Guard against a structurally-valid response that ships an empty
+    /// summary array overwriting non-empty accumulated state. Claude
+    /// occasionally returns `{"summary": []}` for short delta passes; we'd
+    /// rather keep the prior pass's summary than wipe the user's screen.
+    private func applyResultPreservingPrevious(_ parsed: AnalysisResult) -> AnalysisResult {
+        let isEmptySummary = parsed.summary.isEmpty || parsed.summary == "[]"
+        guard isEmptySummary, !previousSummary.isEmpty else { return parsed }
+        LogManager.send("AI returned empty summary — keeping previous accumulated state", category: .ai, level: .warning, meetingID: meetingID)
+        return AnalysisResult(
+            title: parsed.title,
+            summary: previousSummary,
+            actionItems: parsed.actionItems.isEmpty ? previousActionItems : parsed.actionItems,
+            followUps: parsed.followUps.isEmpty ? previousFollowUps : parsed.followUps,
+            topics: parsed.topics.isEmpty ? previousTopics : parsed.topics,
+            rawResponse: parsed.rawResponse
+        )
     }
 
     func performFinalAnalysis(segments: [SegmentSnapshot]) async throws -> AnalysisResult? {
@@ -170,7 +189,8 @@ actor AIIntelligenceService {
         }
         LogManager.send("AI final cleanup raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
 
-        let result = try parseResponse(response, raw: response)
+        let parsed = try parseResponse(response, raw: response)
+        let result = applyResultPreservingPrevious(parsed)
         LogManager.send("AI final cleanup complete", category: .ai, meetingID: meetingID)
         return result
     }

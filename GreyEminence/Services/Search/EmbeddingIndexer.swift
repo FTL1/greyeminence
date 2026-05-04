@@ -17,24 +17,23 @@ final class EmbeddingIndexer {
     /// Embed everything in a single meeting. Writes one SwiftData save at the end.
     func indexMeeting(_ meeting: Meeting) async {
         guard service.isAvailable else { return }
-        let meetingID = meeting.id
-        let title = meeting.title
-        let date = meeting.date
 
-        // Embedding short transcript segments individually produced terrible
-        // results: tiny phrases like "What is it?" cluster by question pattern
-        // rather than topic, drowning real matches. Chunk consecutive segments
-        // into ~paragraph-sized units with speaker labels + a meeting-title
-        // prefix so embeddings carry actual semantic content.
-        for chunk in Self.buildTranscriptChunks(segments: meeting.segments, meetingTitle: title) {
+        // Snapshot every value we need BEFORE the first await. Indexing kicks
+        // off from stopRecording, which means the meeting is on screen — and
+        // the user can delete it from the list while we're suspended on
+        // `service.embed(...)`. After resumption, accessing tombstoned
+        // SwiftData properties is at best lossy and at worst a crash.
+        let snapshot = MeetingSnapshot(meeting: meeting)
+
+        for chunk in Self.buildTranscriptChunks(segments: snapshot.segments, meetingTitle: snapshot.title) {
             guard let vec = await service.embed(chunk.embeddingText) else { continue }
             let record = EmbeddingRecord(
                 id: "chunk:\(chunk.firstSegmentID)",
                 sourceID: chunk.firstSegmentID,
                 sourceKind: .transcriptSegment,
-                meetingID: meetingID,
-                meetingTitle: title,
-                meetingDate: date,
+                meetingID: snapshot.id,
+                meetingTitle: snapshot.title,
+                meetingDate: snapshot.date,
                 text: chunk.displayText,
                 vector: vec,
                 modelIdentifier: service.modelIdentifier
@@ -42,32 +41,31 @@ final class EmbeddingIndexer {
             store.upsert(record)
         }
 
-        for item in meeting.actionItems {
-            let text = item.assignee.map { "\(item.text) (assigned: \($0))" } ?? item.text
-            guard let vec = await service.embed(text) else { continue }
+        for action in snapshot.actionItems {
+            guard let vec = await service.embed(action.text) else { continue }
             let record = EmbeddingRecord(
-                id: "action:\(item.id)",
-                sourceID: item.id,
+                id: "action:\(action.id)",
+                sourceID: action.id,
                 sourceKind: .actionItem,
-                meetingID: meetingID,
-                meetingTitle: title,
-                meetingDate: date,
-                text: text,
+                meetingID: snapshot.id,
+                meetingTitle: snapshot.title,
+                meetingDate: snapshot.date,
+                text: action.text,
                 vector: vec,
                 modelIdentifier: service.modelIdentifier
             )
             store.upsert(record)
         }
 
-        for insight in meeting.insights {
+        for insight in snapshot.insights {
             if !insight.summary.isEmpty, let vec = await service.embed(insight.summary) {
                 let record = EmbeddingRecord(
                     id: "summary:\(insight.id)",
                     sourceID: insight.id,
                     sourceKind: .meetingSummary,
-                    meetingID: meetingID,
-                    meetingTitle: title,
-                    meetingDate: date,
+                    meetingID: snapshot.id,
+                    meetingTitle: snapshot.title,
+                    meetingDate: snapshot.date,
                     text: insight.summary,
                     vector: vec,
                     modelIdentifier: service.modelIdentifier
@@ -80,9 +78,9 @@ final class EmbeddingIndexer {
                     id: "followup:\(insight.id):\(i)",
                     sourceID: insight.id,
                     sourceKind: .followUpQuestion,
-                    meetingID: meetingID,
-                    meetingTitle: title,
-                    meetingDate: date,
+                    meetingID: snapshot.id,
+                    meetingTitle: snapshot.title,
+                    meetingDate: snapshot.date,
                     text: question,
                     vector: vec,
                     modelIdentifier: service.modelIdentifier
@@ -92,6 +90,40 @@ final class EmbeddingIndexer {
         }
 
         store.save()
+    }
+
+    private struct MeetingSnapshot {
+        let id: UUID
+        let title: String
+        let date: Date
+        let segments: [TranscriptSegment]
+        let actionItems: [ActionSnapshot]
+        let insights: [InsightSnapshot]
+
+        init(meeting: Meeting) {
+            self.id = meeting.id
+            self.title = meeting.title
+            self.date = meeting.date
+            self.segments = meeting.segments
+            self.actionItems = meeting.actionItems.map { item in
+                let text = item.assignee.map { "\(item.text) (assigned: \($0))" } ?? item.text
+                return ActionSnapshot(id: item.id, text: text)
+            }
+            self.insights = meeting.insights.map {
+                InsightSnapshot(id: $0.id, summary: $0.summary, followUpQuestions: $0.followUpQuestions)
+            }
+        }
+    }
+
+    private struct ActionSnapshot {
+        let id: UUID
+        let text: String
+    }
+
+    private struct InsightSnapshot {
+        let id: UUID
+        let summary: String
+        let followUpQuestions: [String]
     }
 
     /// Full reindex across all meetings in the main store. Call after the user
