@@ -274,6 +274,17 @@ final class RecordingViewModel {
         }
 
         modelContext.insert(meeting)
+        // Persist the meeting row immediately so a crash within the first 10s
+        // (before the periodic save fires) doesn't leave audio on disk with
+        // no SwiftData row to claim it. The lock file below is the second
+        // safety net, but only the row guarantees the audio won't be purged
+        // as orphan on next launch.
+        PersistenceGate.save(
+            modelContext,
+            site: "startRecording/insert",
+            critical: true,
+            meetingID: meeting.id
+        )
         self.modelContext = modelContext
         currentMeeting = meeting
         state = .recording
@@ -721,16 +732,23 @@ final class RecordingViewModel {
                     }
 
                     // After 60 s of all-silent buffers, surface a clear
-                    // errorMessage. Common causes: device hardware-mute
-                    // pressed, system input volume at 0, or another app
-                    // (Teams) holding the device with exclusive access.
+                    // errorMessage AND auto-pause. Common causes: mic perm
+                    // revoked in System Settings mid-recording, device
+                    // hardware-mute pressed, system input volume at 0, or
+                    // another app (Teams) holding exclusive access. Auto-
+                    // pausing means we stop writing minutes of silent audio
+                    // while the user is unaware. They can resume after
+                    // fixing the underlying issue.
                     if !silenceWarningSurfaced,
                        Date().timeIntervalSince(captureStart) > 60,
                        summedAmplitude / Float(max(bufferCount, 1)) < 0.0005 {
                         silenceWarningSurfaced = true
                         await MainActor.run {
-                            self.errorMessage = "Mic is silent — check System Settings → Sound → Input that the device isn't muted and the input level is up. Yeti users: tap the mute button on the mic. If you're in a Teams call, leaving and rejoining sometimes helps."
-                            self.log.log("Mic silent for 60s after capture start (avg RMS < 0.0005). Surfacing user-facing warning.", category: .audio, level: .error)
+                            self.errorMessage = "Mic is silent — recording auto-paused. Check System Settings → Privacy & Security → Microphone, Sound → Input level, and any conferencing app holding the mic, then resume."
+                            self.log.log("Mic silent for 60s after capture start (avg RMS < 0.0005). Auto-pausing recording.", category: .audio, level: .error)
+                            if self.state == .recording {
+                                self.pauseRecording()
+                            }
                         }
                     }
 
@@ -1096,6 +1114,14 @@ final class RecordingViewModel {
         if consecutive >= 10 {
             log.log("\(source) write failed 10+ times consecutively — stopping capture loop (total failures: \(total))", category: .audio, level: .error)
             errorMessage = "\(source.capitalized) audio capture stopped after repeated write failures. Saving what we have."
+            // Auto-finalize the meeting so the user isn't watching a running
+            // timer with no audio being written. Without this the capture
+            // loop exits but the recording UI keeps ticking, and any further
+            // user speech is silently lost.
+            if state == .recording, let context = modelContext {
+                log.log("Auto-stopping recording due to sustained \(source) write failures", category: .audio, level: .error)
+                stopRecording(in: context)
+            }
             return true
         }
         return false

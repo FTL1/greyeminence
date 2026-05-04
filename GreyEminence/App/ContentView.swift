@@ -206,12 +206,20 @@ struct ContentView: View {
             $0.status == statusRecording || $0.status == statusPaused
         }
 
-        // Sweep Recordings/ for folders whose UUID is no longer referenced by
-        // any meeting (or its audioSourceMeetingID, for split meetings).
+        // Build the protected-IDs set BEFORE purging. The lock-file scan must
+        // come first so a recording whose meeting row failed to save (so it's
+        // missing from `allMeetings`) doesn't get its audio nuked just because
+        // SwiftData doesn't know about it. The lock file is the on-disk
+        // breadcrumb that "this audio is in-progress, don't touch."
+        let lockFiles = RecordingLockFile.scanAll()
         var referenced = Set(allMeetings.map(\.id))
         for m in allMeetings {
             if let src = m.audioSourceMeetingID { referenced.insert(src) }
         }
+        for lock in lockFiles {
+            referenced.insert(lock.meetingID)
+        }
+
         let purged = StorageManager.shared.purgeOrphanedRecordings(referencedIDs: referenced)
         if purged.count > 0 {
             let mb = Double(purged.bytes) / 1_048_576
@@ -221,11 +229,6 @@ struct ContentView: View {
             )
         }
 
-        // Any lock file whose meeting ID isn't in the fetched meetings list
-        // represents audio on disk that has no SwiftData row — a persistence
-        // failure during an earlier session. Log it loudly so the user can
-        // investigate.
-        let lockFiles = RecordingLockFile.scanAll()
         if !lockFiles.isEmpty {
             let knownIDs = Set(allMeetings.map(\.id))
             let ghosts = lockFiles.filter { !knownIDs.contains($0.meetingID) }
@@ -720,10 +723,15 @@ struct AllTasksView: View {
 }
 
 struct ActionItemRow: View {
+    @Environment(\.modelContext) private var modelContext
     @Bindable var item: ActionItem
     var onDelete: ((ActionItem) -> Void)?
     var onShowDetails: ((ActionItem) -> Void)?
     @State private var showContactPicker = false
+
+    private func persist(_ site: String) {
+        PersistenceGate.save(modelContext, site: "ActionItemRow.\(site)", meetingID: item.meeting?.id)
+    }
 
     private var excludedIDs: Set<PersistentIdentifier> {
         if let contact = item.assignedContact {
@@ -736,6 +744,7 @@ struct ActionItemRow: View {
         HStack {
             Button {
                 item.isCompleted.toggle()
+                persist("toggleCompleted")
             } label: {
                 Image(systemName: item.isCompleted ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(item.isCompleted ? .green : .secondary)
@@ -807,6 +816,7 @@ struct ActionItemRow: View {
             if item.assignedContact != nil {
                 Button("Unlink Contact") {
                     item.assignedContact = nil
+                    persist("unlinkContact")
                 }
             }
             if let onDelete {
@@ -822,6 +832,7 @@ struct ActionItemRow: View {
                 prioritizedContacts: item.meeting?.attendees ?? []
             ) { contact in
                 item.assignedContact = contact
+                persist("assignContact")
                 showContactPicker = false
             }
         }
