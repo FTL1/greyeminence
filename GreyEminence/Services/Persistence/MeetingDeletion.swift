@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 
+@MainActor
 enum MeetingDeletion {
     /// A split meeting references its parent's audio via `audioSourceMeetingID`,
     /// so the parent's recording directory must not be removed while any other
@@ -13,6 +14,13 @@ enum MeetingDeletion {
 
         context.delete(meeting)
         PersistenceGate.save(context, site: "MeetingDeletion.delete", meetingID: meetingID)
+
+        if let store = EmbeddingStore.shared {
+            let removed = store.deleteRecords(forMeetingID: meetingID)
+            if removed > 0 {
+                LogManager.send("Removed \(removed) embedding(s) for deleted meeting \(meetingID)", category: .general)
+            }
+        }
 
         let stillReferenced = others.contains { other in
             guard other.id != meetingID else { return false }

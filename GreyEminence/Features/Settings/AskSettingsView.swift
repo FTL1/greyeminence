@@ -83,9 +83,46 @@ struct AskSettingsView: View {
                     .foregroundStyle(.primary)
                     .textCase(nil)
             }
+
+            Section {
+                HStack {
+                    Button(isMaintaining ? "Cleaning…" : "Run cleanup now") {
+                        Task { await runMaintenance() }
+                    }
+                    .disabled(isMaintaining)
+                    if let summary = maintenanceSummary {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Text("Removes orphan embeddings, prunes stale segment chunks left behind by older re-processing runs, clears stuck analysis flags, and backfills the conversation context for legacy tasks. Runs automatically once per day at launch — this button forces it now.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Maintenance", systemImage: "wrench.and.screwdriver")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+            }
         }
         .formStyle(.grouped)
         .onAppear { embeddingCount = EmbeddingStore.shared?.count() ?? 0 }
+    }
+
+    @State private var isMaintaining = false
+    @State private var maintenanceSummary: String?
+
+    @MainActor
+    private func runMaintenance() async {
+        isMaintaining = true
+        defer {
+            isMaintaining = false
+            embeddingCount = EmbeddingStore.shared?.count() ?? 0
+        }
+        let report = MaintenanceService.runStartupMaintenance(modelContext: modelContext, force: true)
+        maintenanceSummary = report.summary
     }
 
     @MainActor

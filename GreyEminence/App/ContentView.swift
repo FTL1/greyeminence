@@ -136,6 +136,9 @@ struct ContentView: View {
             recordingViewModel.configureAutoDetection(enabled: autoStartRecording) { [modelContext] in
                 modelContext
             }
+            Task(priority: .background) { @MainActor [modelContext] in
+                MaintenanceService.runStartupMaintenance(modelContext: modelContext)
+            }
         }
         .onChange(of: autoStartRecording) { _, enabled in
             recordingViewModel.setAutoDetectionEnabled(enabled)

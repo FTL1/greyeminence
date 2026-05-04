@@ -410,6 +410,13 @@ final class ReProcessingQueue {
 
     private func reIndexEmbeddings(meeting: Meeting) async {
         guard let store = EmbeddingStore.shared else { return }
+        // Old chunk records key on the previous transcription's segment UUIDs;
+        // the upsert in indexMeeting can't reach them since the new pass uses
+        // fresh UUIDs. Drop them first so search isn't polluted with both.
+        let pruned = store.deleteRecords(forMeetingID: meeting.id)
+        if pruned > 0 {
+            LogManager.send("Pruned \(pruned) stale embedding(s) before re-index for meeting \(meeting.id)", category: .general)
+        }
         let providerRaw = UserDefaults.standard.string(forKey: "embeddingProvider") ?? EmbeddingProvider.nlEmbedding.rawValue
         let provider = EmbeddingProvider(rawValue: providerRaw) ?? .nlEmbedding
         let indexer = EmbeddingIndexer(store: store, service: provider.makeService())
