@@ -26,18 +26,8 @@ enum ObsidianExportService {
         let includeActionItems = defaults.bool(forKey: "obsidianIncludeActionItems")
         let includeWikilinks = defaults.bool(forKey: "obsidianIncludeWikilinks")
 
-        // Activate security-scoped bookmark
-        ObsidianSettingsView.restoreVaultAccess()
-
         let vaultURL = URL(fileURLWithPath: vaultPath)
         let folderURL = vaultURL.appendingPathComponent(subfolder)
-
-        // Create subfolder if needed
-        do {
-            try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
-        } catch {
-            throw ExportError.vaultAccessDenied
-        }
 
         let insight = meeting.latestInsight
         let markdown = buildMarkdown(
@@ -52,10 +42,25 @@ enum ObsidianExportService {
         let baseName = sanitizeFilename("\(meeting.title) — \(dateString)")
         let fileURL = uniqueURL(in: folderURL, baseName: baseName, suffix: meeting.id)
 
-        do {
-            try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
-        } catch {
-            throw ExportError.writeFailure(error)
+        // All file work happens inside the security-scoped access block so
+        // start/stop pair correctly — no retain leak on repeat exports.
+        let result: Result<Void, ExportError>? = ObsidianSettingsView.withVaultAccess {
+            do {
+                try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+            } catch {
+                return .failure(.vaultAccessDenied)
+            }
+            do {
+                try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
+            } catch {
+                return .failure(.writeFailure(error))
+            }
+            return .success(())
+        }
+        switch result {
+        case .none: throw ExportError.vaultAccessDenied
+        case .some(.failure(let err)): throw err
+        case .some(.success): break
         }
 
         meeting.isExportedToObsidian = true

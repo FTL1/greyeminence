@@ -54,6 +54,21 @@ struct AskSettingsView: View {
                 Text("Embeddings are stored in a separate database from your meetings so wiping or re-indexing can't corrupt your main store.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let failure = EmbeddingStore.initFailureMessage {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Embedding store can't open: \(failure)")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Button("Rebuild embedding store") {
+                                rebuildStore()
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                }
             } header: {
                 Label("Index", systemImage: "rectangle.stack")
                     .font(.subheadline.weight(.semibold))
@@ -113,6 +128,16 @@ struct AskSettingsView: View {
 
     @State private var isMaintaining = false
     @State private var maintenanceSummary: String?
+
+    private func rebuildStore() {
+        do {
+            try EmbeddingStore.resetOnDisk()
+            embeddingCount = EmbeddingStore.shared?.count() ?? 0
+        } catch {
+            // resetOnDisk surfaced the error; user can retry from the
+            // banner that's still visible.
+        }
+    }
 
     @MainActor
     private func runMaintenance() async {

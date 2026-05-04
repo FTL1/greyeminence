@@ -96,7 +96,10 @@ struct ObsidianSettingsView: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            Self.restoreVaultAccess()
+            // Touch the bookmark once so the system updates any "vault
+            // disconnected" tracking — but balance the start/stop pair so
+            // we don't accumulate a retain on every Settings open.
+            Self.withVaultAccess { /* no-op */ }
         }
     }
 
@@ -149,9 +152,14 @@ struct ObsidianSettingsView: View {
         }
     }
 
-    static func restoreVaultAccess() {
+    /// Run `body` with the vault security-scoped resource active, balancing
+    /// the start/stop pair via defer. Replaces the previous unbalanced
+    /// `startAccessingSecurityScopedResource()` call that accumulated one
+    /// retain per export.
+    @discardableResult
+    static func withVaultAccess<T>(_ body: () throws -> T) -> T? {
         guard let bookmarkData = UserDefaults.standard.data(forKey: "obsidianVaultBookmark") else {
-            return
+            return nil
         }
 
         var isStale = false
@@ -161,12 +169,14 @@ struct ObsidianSettingsView: View {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else {
-            return
+            return nil
         }
 
-        _ = url.startAccessingSecurityScopedResource()
+        let started = url.startAccessingSecurityScopedResource()
+        defer {
+            if started { url.stopAccessingSecurityScopedResource() }
+        }
 
-        // Re-persist if bookmark was stale
         if isStale {
             if let newData = try? url.bookmarkData(
                 options: .withSecurityScope,
@@ -176,6 +186,8 @@ struct ObsidianSettingsView: View {
                 UserDefaults.standard.set(newData, forKey: "obsidianVaultBookmark")
             }
         }
+
+        return try? body()
     }
 
     // MARK: - Preview

@@ -6,9 +6,54 @@ import SwiftData
 /// and so wiping/re-indexing doesn't risk the user's meeting data.
 @MainActor
 final class EmbeddingStore {
-    static let shared: EmbeddingStore? = {
-        try? EmbeddingStore()
-    }()
+    /// Cached instance, replaced when init succeeds. We retry every access
+    /// because failing once at app launch (corrupted file, locked WAL,
+    /// transient permission) used to disable Ask + indexing for the rest of
+    /// the session with no recovery path.
+    private static var cached: EmbeddingStore?
+    private static var lastInitError: String?
+
+    static var shared: EmbeddingStore? {
+        if let cached { return cached }
+        do {
+            let instance = try EmbeddingStore()
+            cached = instance
+            lastInitError = nil
+            return instance
+        } catch {
+            let message = error.localizedDescription
+            if lastInitError != message {
+                LogManager.send("EmbeddingStore init failed: \(message)", category: .general, level: .error)
+                lastInitError = message
+            }
+            return nil
+        }
+    }
+
+    /// Surface the most recent failure so Settings can show it and offer a
+    /// "Rebuild embedding store" action.
+    static var initFailureMessage: String? { lastInitError }
+
+    /// Wipe the on-disk embedding store and clear the cached instance so the
+    /// next `shared` access re-creates it. Loses every embedding — caller is
+    /// expected to follow up with a reindex.
+    static func resetOnDisk() throws {
+        cached = nil
+        lastInitError = nil
+        let url = storeURL()
+        let fm = FileManager.default
+        // SwiftData writes .store, .store-shm, .store-wal alongside each
+        // other; remove the whole sidecar set so the next init starts clean.
+        for suffix in ["", "-shm", "-wal"] {
+            let candidate = url.deletingPathExtension().appendingPathExtension("store\(suffix)")
+            if fm.fileExists(atPath: candidate.path) {
+                try fm.removeItem(at: candidate)
+            }
+        }
+        if fm.fileExists(atPath: url.path) {
+            try fm.removeItem(at: url)
+        }
+    }
 
     let container: ModelContainer
 
