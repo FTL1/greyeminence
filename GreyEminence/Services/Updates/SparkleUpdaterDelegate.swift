@@ -8,6 +8,11 @@ import Foundation
 /// can paste back to us).
 final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate {
 
+    /// Set by the app once `RecordingViewModel` is wired up. Defaults to
+    /// `false` so updates behave normally during the brief window between
+    /// app init (when this delegate is constructed) and view-model bind.
+    @MainActor var isRecordingActive: () -> Bool = { false }
+
     // MARK: - Helpers
 
     nonisolated private static func log(_ message: String, level: LogEntry.Level = .info, detail: String? = nil) {
@@ -122,6 +127,10 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
     // MARK: - SPUStandardUserDriverDelegate
 
     func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInState state: SPUUserUpdateState) -> Bool {
+        if isRecordingActive() {
+            Self.log("UserDriver: deferring scheduled update — recording in progress | \(Self.describe(update))")
+            return false
+        }
         Self.log("UserDriver: showing scheduled update — \(Self.describe(update)) | userInitiated=\(state.userInitiated)")
         return true
     }

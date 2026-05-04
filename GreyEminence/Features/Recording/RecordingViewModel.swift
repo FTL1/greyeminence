@@ -333,6 +333,72 @@ final class RecordingViewModel {
         log.log("Recording resumed", category: .audio)
     }
 
+    /// Termination-time flush. Stops audio capture, finalizes the m4a file,
+    /// drains the recognition coordinator, and persists whatever segments are
+    /// in memory — but skips the final AI analysis because it can take up to
+    /// 90 seconds and shouldn't hold up app quit. Designed to be called from
+    /// `applicationShouldTerminate` with a hard ~5s timeout on the caller side.
+    /// Returns once the audio + transcript are durable on disk.
+    func flushForTermination() async {
+        guard let meeting = currentMeeting else { return }
+        let meetingID = meeting.id
+        timer?.invalidate()
+        timer = nil
+
+        for task in processingTasks {
+            task.cancel()
+        }
+        processingTasks = []
+        intelligenceService = nil
+
+        await micCapture.stopCapture()
+        await systemCapture.stopCapture()
+        let micWriter = self.micFileWriter
+        let sysWriter = self.systemFileWriter
+        self.micFileWriter = nil
+        self.systemFileWriter = nil
+        await micWriter?.stop()
+        await sysWriter?.stop()
+        await coordinator.stop()
+
+        let rawSegments = self.coordinator.segments
+        let dedupResult = TranscriptDeduplicator.deduplicate(rawSegments)
+        self.segments = dedupResult.segments
+
+        guard let context = self.modelContext else { return }
+
+        for existing in meeting.segments {
+            context.delete(existing)
+        }
+        meeting.segments.removeAll()
+
+        for segment in self.segments {
+            let persisted = TranscriptSegment(
+                speaker: segment.speaker,
+                text: segment.text,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                isFinal: true
+            )
+            persisted.confidence = self.segmentConfidence[segment.id] ?? 1.0
+            persisted.sectionTag = segment.sectionTag
+            persisted.sectionTagID = segment.sectionTagID
+            persisted.meeting = meeting
+            meeting.segments.append(persisted)
+        }
+
+        // The meeting stays `.recording` so launch-time orphan recovery picks
+        // it up and marks it `(interrupted)` — that's the contract for an
+        // unexpected exit. Quitting mid-recording shouldn't pretend the
+        // meeting completed cleanly.
+        PersistenceGate.save(
+            context,
+            site: "flushForTermination",
+            critical: true,
+            meetingID: meetingID
+        )
+    }
+
     func stopRecording(in modelContext: ModelContext, autoDetected: Bool = false) {
         meetingDetector.noteStop(autoDetected ? .auto : .manual)
 

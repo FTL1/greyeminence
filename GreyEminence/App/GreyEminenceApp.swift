@@ -4,6 +4,7 @@ import Sparkle
 
 @main
 struct GreyEminenceApp: App {
+    @NSApplicationDelegateAdaptor(AppLifecycleCoordinator.self) private var lifecycle
     @State private var appEnvironment = AppEnvironment()
     @State private var recordingViewModel = RecordingViewModel()
     @State private var interviewRecordingViewModel: InterviewRecordingViewModel?
@@ -83,6 +84,13 @@ struct GreyEminenceApp: App {
                             modelContainer: container,
                             recordingViewModel: recordingViewModel
                         )
+                        lifecycle.bind(
+                            recordingViewModel: recordingViewModel,
+                            modelContextProvider: { container.mainContext }
+                        )
+                        updaterDelegate.isRecordingActive = { [recordingViewModel] in
+                            recordingViewModel.state != .idle
+                        }
                     }
                     .modelContainer(container)
             } else {
