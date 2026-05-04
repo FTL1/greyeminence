@@ -27,8 +27,16 @@ enum AIRetry {
     ) async throws -> T {
         var lastError: Error?
         for attempt in 0..<maxAttempts {
+            // Bail before each attempt if the parent Task was cancelled —
+            // most often when the user clicks Stop mid-AI. Without this the
+            // retry loop kept calling operation() after cancellation.
+            try Task.checkCancellation()
             do {
                 return try await operation()
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let urlError as URLError where urlError.code == .cancelled {
+                throw CancellationError()
             } catch {
                 lastError = error
                 guard isRetryable(error), attempt < maxAttempts - 1 else {
@@ -41,7 +49,9 @@ enum AIRetry {
                     level: .warning,
                     meetingID: meetingID
                 )
-                try? await Task.sleep(for: .seconds(delay))
+                // Use throwing sleep so cancellation during backoff exits
+                // the loop instead of being swallowed.
+                try await Task.sleep(for: .seconds(delay))
             }
         }
         // Unreachable in practice — the last attempt either returns or throws

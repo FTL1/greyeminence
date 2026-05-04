@@ -127,6 +127,26 @@ final class ReProcessingQueue {
         LogManager.send("Cancel requested for \"\(current.title)\"", category: .transcription)
     }
 
+    /// A live recording just started — yield by cancelling the running job
+    /// (WhisperKit will exit on its next sub-chunk boundary, ≤15 s) and
+    /// pushing it back to the front of the queue. The queue's existing
+    /// "skip when recording is active" guard then keeps it idle until the
+    /// recording finishes. Without this, mid-transcription jobs would
+    /// continue to compete with live transcription for the full duration
+    /// of the current pass.
+    func yieldToLiveRecording() {
+        guard let current else { return }
+        let id = current.id
+        LogManager.send("Yielding re-processing of \"\(current.title)\" to live recording", category: .transcription)
+        pending.insert(id, at: 0)
+        persistPending()
+        if let context = modelContainer?.mainContext,
+           let meeting = fetchMeeting(meetingID: id, in: context) {
+            markState(meeting: meeting, state: .queued, in: context)
+        }
+        jobTask?.cancel()
+    }
+
     // MARK: - Worker
 
     private func startWorker() {

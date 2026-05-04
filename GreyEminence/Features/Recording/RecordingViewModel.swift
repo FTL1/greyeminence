@@ -312,6 +312,9 @@ final class RecordingViewModel {
         RecordingLockFile.write(for: meeting.id, isInterviewMeeting: meeting.isInterviewMeeting)
 
         log.log("Recording started", category: .audio)
+        // Free up the ANE / CPU for live transcription — any in-flight
+        // re-processing job stays mid-transcribe for minutes otherwise.
+        ReProcessingQueue.shared.yieldToLiveRecording()
         startTimer()
         startRealCapture(meetingID: meeting.id)
         startIntelligenceService()
