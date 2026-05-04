@@ -258,9 +258,8 @@ struct MeetingIntelligenceView: View {
         for parsedItem in parsed {
             let key = Self.normalizeKey(parsedItem.text)
             guard !existingKeys.contains(key), !suppressedKeys.contains(key) else { continue }
-            let item = ActionItem(text: parsedItem.text, assignee: parsedItem.assignee)
+            let item = ActionItem(parsed: parsedItem, sourceSegments: meeting.segments)
             item.meeting = meeting
-            item.sourceSegmentID = meeting.segmentID(matchingQuote: parsedItem.sourceQuote)
             modelContext.insert(item)
         }
     }

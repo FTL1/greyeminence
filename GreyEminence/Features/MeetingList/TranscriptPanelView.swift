@@ -621,9 +621,8 @@ struct TranscriptPanelView: View {
                 insight.meeting = target
                 target.insights.append(insight)
                 for parsed in result.actionItems {
-                    let item = ActionItem(text: parsed.text, assignee: parsed.assignee)
+                    let item = ActionItem(parsed: parsed, sourceSegments: target.segments)
                     item.meeting = target
-                    item.sourceSegmentID = target.segmentID(matchingQuote: parsed.sourceQuote)
                     target.actionItems.append(item)
                 }
             }

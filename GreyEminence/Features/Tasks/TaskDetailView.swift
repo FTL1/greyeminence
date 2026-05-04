@@ -7,25 +7,14 @@ struct TaskDetailView: View {
 
     private var meeting: Meeting? { task.meeting }
 
-    /// Segments around the one that produced this task, ordered by start time.
-    /// Empty when the task has no sourceSegmentID (legacy items) or the source
-    /// segment is no longer in the meeting (unlikely, but possible after edits).
-    private var contextSegments: [TranscriptSegment] {
-        guard let meeting,
-              let sourceID = task.sourceSegmentID else { return [] }
-        let sorted = meeting.segments.sorted { $0.startTime < $1.startTime }
-        guard let idx = sorted.firstIndex(where: { $0.id == sourceID }) else { return [] }
-        let lo = max(0, idx - Self.contextWindow)
-        let hi = min(sorted.count - 1, idx + Self.contextWindow)
-        return Array(sorted[lo...hi])
-    }
-
-    private var sourceSegmentID: UUID? { task.sourceSegmentID }
-
-    /// Number of segments to show on each side of the source segment.
-    /// 3 ± 3 ≈ 60–90 seconds of conversation, enough to understand intent
-    /// without dumping the whole meeting.
+    /// 3 segments on each side ≈ 60–90 seconds of conversation — enough to
+    /// understand intent without dumping the whole meeting.
     private static let contextWindow = 3
+
+    private var contextSegments: [TranscriptSegment] {
+        guard let meeting, let sourceID = task.sourceSegmentID else { return [] }
+        return meeting.segments.segments(around: sourceID, lead: Self.contextWindow, trail: Self.contextWindow)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -131,12 +120,15 @@ struct TaskDetailView: View {
     }
 
     private func contextRow(_ segment: TranscriptSegment) -> some View {
-        let isSource = segment.id == sourceSegmentID
+        let isSource = segment.id == task.sourceSegmentID
+        let nameStyle: AnyShapeStyle = isSource ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary)
+        let textStyle: AnyShapeStyle = isSource ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)
+        let bgStyle: AnyShapeStyle = isSource ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear)
         return HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(segment.speaker.displayName)
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(isSource ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+                    .foregroundStyle(nameStyle)
                 Text(segment.formattedTimestamp)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
@@ -144,16 +136,13 @@ struct TaskDetailView: View {
             .frame(width: 80, alignment: .leading)
             Text(segment.text)
                 .font(.callout)
-                .foregroundStyle(isSource ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .foregroundStyle(textStyle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
-        .background(
-            isSource ? AnyShapeStyle(.tint.opacity(0.12)) : AnyShapeStyle(.clear),
-            in: RoundedRectangle(cornerRadius: 6)
-        )
+        .background(bgStyle, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private var footer: some View {

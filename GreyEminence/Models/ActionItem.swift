@@ -24,6 +24,15 @@ final class ActionItem {
         self.createdAt = .now
     }
 
+    /// Build an action item from an AI-parsed result and resolve its source
+    /// segment from the supplied transcript. The caller still owns attaching
+    /// the item to a meeting — done separately because some flows defer the
+    /// attachment until after analysis completes.
+    convenience init(parsed: ParsedActionItem, sourceSegments: [TranscriptSegment]) {
+        self.init(text: parsed.text, assignee: parsed.assignee)
+        self.sourceSegmentID = sourceSegments.segmentID(matchingQuote: parsed.sourceQuote)
+    }
+
     var displayAssignee: String? {
         assignedContact?.name ?? assignee
     }

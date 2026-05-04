@@ -8,12 +8,17 @@ struct AddContactSheet: View {
     @State private var name = ""
     @State private var nickname = ""
     @State private var email = ""
-    @State private var pendingAction: PendingAction?
-    @State private var duplicateMatch: Contact?
+    @State private var pendingDuplicate: PendingDuplicate?
     @FocusState private var focusedField: Field?
 
     private enum Field { case name, nickname, email }
     private enum PendingAction { case addAndDismiss, addAndCreateAnother }
+
+    private struct PendingDuplicate: Identifiable {
+        let match: Contact
+        let action: PendingAction
+        var id: PersistentIdentifier { match.persistentModelID }
+    }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
     private var trimmedEmail: String { email.trimmingCharacters(in: .whitespaces) }
@@ -60,34 +65,29 @@ struct AddContactSheet: View {
         .frame(width: 360)
         .onAppear { focusedField = .name }
         .alert(
-            duplicateAlertTitle,
+            "Contact already exists",
             isPresented: Binding(
-                get: { duplicateMatch != nil },
-                set: { if !$0 { duplicateMatch = nil; pendingAction = nil } }
+                get: { pendingDuplicate != nil },
+                set: { if !$0 { pendingDuplicate = nil } }
             ),
-            presenting: duplicateMatch
-        ) { _ in
+            presenting: pendingDuplicate
+        ) { pending in
             Button("Cancel", role: .cancel) {
-                duplicateMatch = nil
-                pendingAction = nil
+                pendingDuplicate = nil
             }
             Button("Add anyway") {
-                let action = pendingAction
-                duplicateMatch = nil
-                pendingAction = nil
-                if let action {
-                    performSave(action)
-                }
+                let action = pending.action
+                pendingDuplicate = nil
+                performSave(action)
             }
-        } message: { match in
-            Text(duplicateAlertMessage(for: match))
+        } message: { pending in
+            Text(duplicateAlertMessage(for: pending.match))
         }
     }
 
     private func attemptSave(_ action: PendingAction) {
         if let match = findDuplicate() {
-            pendingAction = action
-            duplicateMatch = match
+            pendingDuplicate = PendingDuplicate(match: match, action: action)
             return
         }
         performSave(action)
@@ -101,10 +101,8 @@ struct AddContactSheet: View {
         }
     }
 
-    /// Match by case-insensitive name OR same email (when provided). Email is
-    /// the strongest signal — two people legitimately share names but rarely
-    /// share an email. Name-only matches still warn since the more common
-    /// "oh I already added Sarah" case has no email yet.
+    /// Email is the strongest signal; name-only still warns because the
+    /// "did I already add Sarah?" case typically has no email yet.
     private func findDuplicate() -> Contact? {
         let nameKey = trimmedName.lowercased()
         let emailKey = trimmedEmail.lowercased()
@@ -114,10 +112,6 @@ struct AddContactSheet: View {
             }
             return contact.name.lowercased() == nameKey
         }
-    }
-
-    private var duplicateAlertTitle: String {
-        "Contact already exists"
     }
 
     private func duplicateAlertMessage(for match: Contact) -> String {

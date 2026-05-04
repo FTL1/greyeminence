@@ -23,10 +23,7 @@ struct AnalysisResult: Sendable {
 struct ParsedActionItem: Sendable {
     let text: String
     let assignee: String?
-    /// Verbatim snippet from the transcript the AI cites as the source for this
-    /// action item. Used to resolve a `sourceSegmentID` so the task detail can
-    /// show the surrounding conversation instead of the full meeting summary.
-    /// Nil for legacy items or when the AI didn't (or couldn't) provide one.
+    /// Verbatim transcript snippet used to anchor the item to a source segment.
     let sourceQuote: String?
 }
 

@@ -8,32 +8,28 @@ struct ContactPicker: View {
     @FocusState private var searchFocused: Bool
     var excludedContacts: Set<PersistentIdentifier>
     /// Contacts to surface above the divider — typically the attendees of the
-    /// meeting this picker is being shown from. The same contact never appears
-    /// in both groups; if a contact is in `prioritizedContacts`, it's omitted
-    /// from the "other" list below the divider.
+    /// meeting this picker is being shown from.
     var prioritizedContacts: [Contact] = []
-    /// Header shown above the prioritized group. Only rendered when there's
-    /// at least one prioritized contact and the user hasn't typed a search.
-    var prioritizedHeader: String = "Meeting attendees"
     var onSelect: (Contact) -> Void
 
-    private var availableContacts: [Contact] {
-        allContacts.filter { !$0.isArchived && !excludedContacts.contains($0.persistentModelID) }
+    private struct Partition {
+        let prioritized: [Contact]
+        let other: [Contact]
+        var isEmpty: Bool { prioritized.isEmpty && other.isEmpty }
     }
 
-    private var prioritizedIDs: Set<PersistentIdentifier> {
-        Set(prioritizedContacts.map(\.persistentModelID))
-    }
-
-    private var prioritizedAvailable: [Contact] {
-        let available = availableContacts
-        return prioritizedContacts
-            .filter { contact in available.contains(where: { $0.persistentModelID == contact.persistentModelID }) }
-    }
-
-    private var otherAvailable: [Contact] {
-        let priorIDs = prioritizedIDs
-        return availableContacts.filter { !priorIDs.contains($0.persistentModelID) }
+    private var partition: Partition {
+        let availableIDs = Set(
+            allContacts
+                .filter { !$0.isArchived && !excludedContacts.contains($0.persistentModelID) }
+                .map(\.persistentModelID)
+        )
+        let prioritizedIDs = Set(prioritizedContacts.map(\.persistentModelID))
+        let prior = prioritizedContacts.filter { availableIDs.contains($0.persistentModelID) }
+        let other = allContacts.filter {
+            availableIDs.contains($0.persistentModelID) && !prioritizedIDs.contains($0.persistentModelID)
+        }
+        return Partition(prioritized: prior, other: other)
     }
 
     private func match(_ contact: Contact, query: String) -> Bool {
@@ -42,24 +38,16 @@ struct ContactPicker: View {
         (contact.email?.lowercased().contains(query) ?? false)
     }
 
-    /// Flat list used when the user is searching — grouping headers go away
-    /// so a query like "sa" shows every match without forcing the user to
-    /// scan two sections. Prioritized contacts still appear first within the
-    /// flat list since their relevance hasn't changed.
     private var flatSearchResults: [Contact] {
         let query = searchText.lowercased()
-        return (prioritizedAvailable + otherAvailable).filter { match($0, query: query) }
-    }
-
-    private var allFilteredCount: Int {
-        searchText.isEmpty
-            ? prioritizedAvailable.count + otherAvailable.count
-            : flatSearchResults.count
+        let p = partition
+        return (p.prioritized + p.other).filter { match($0, query: query) }
     }
 
     private var firstSelectable: Contact? {
         if !searchText.isEmpty { return flatSearchResults.first }
-        return prioritizedAvailable.first ?? otherAvailable.first
+        let p = partition
+        return p.prioritized.first ?? p.other.first
     }
 
     var body: some View {
@@ -84,7 +72,8 @@ struct ContactPicker: View {
 
             Divider()
 
-            if allFilteredCount == 0 {
+            let isEmpty = searchText.isEmpty ? partition.isEmpty : flatSearchResults.isEmpty
+            if isEmpty {
                 VStack(spacing: 4) {
                     Image(systemName: "person.slash")
                         .font(.title2)
@@ -99,7 +88,7 @@ struct ContactPicker: View {
                 ScrollView {
                     LazyVStack(spacing: 1) {
                         if searchText.isEmpty {
-                            groupedRows
+                            groupedRows(partition)
                         } else {
                             ForEach(flatSearchResults) { contact in
                                 row(for: contact)
@@ -116,19 +105,19 @@ struct ContactPicker: View {
     }
 
     @ViewBuilder
-    private var groupedRows: some View {
-        if !prioritizedAvailable.isEmpty {
-            sectionHeader(prioritizedHeader)
-            ForEach(prioritizedAvailable) { contact in
+    private func groupedRows(_ partition: Partition) -> some View {
+        if !partition.prioritized.isEmpty {
+            sectionHeader("Meeting attendees")
+            ForEach(partition.prioritized) { contact in
                 row(for: contact)
             }
-            if !otherAvailable.isEmpty {
+            if !partition.other.isEmpty {
                 Divider()
                     .padding(.vertical, 4)
                 sectionHeader("Other contacts")
             }
         }
-        ForEach(otherAvailable) { contact in
+        ForEach(partition.other) { contact in
             row(for: contact)
         }
     }

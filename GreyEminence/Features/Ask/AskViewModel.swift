@@ -190,11 +190,9 @@ final class AskViewModel {
     private func fetchSegmentLeadIn(meetingID: UUID, segmentID: UUID, window: Int, mainContext: ModelContext) -> String {
         let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.id == meetingID })
         guard let meeting = try? mainContext.fetch(descriptor).first else { return "" }
-        let sorted = meeting.segments.sorted { $0.startTime < $1.startTime }
-        guard let idx = sorted.firstIndex(where: { $0.id == segmentID }) else { return "" }
-        let lo = max(0, idx - window)
-        guard lo < idx else { return "" }
-        return sorted[lo..<idx].map { "\($0.speaker.displayName): \($0.text)" }.joined(separator: "\n")
+        let around = meeting.segments.segments(around: segmentID, lead: window, trail: 0)
+        guard let last = around.last, last.id == segmentID, around.count > 1 else { return "" }
+        return around.dropLast().map { "\($0.speaker.displayName): \($0.text)" }.joined(separator: "\n")
     }
 
     // MARK: - History

@@ -102,24 +102,17 @@ final class Meeting {
     }
 
     var pendingActionCount: Int {
-        actionItems.filter { !$0.isCompleted }.count
+        actionItems.count(where: { !$0.isCompleted })
     }
 
     var latestInsight: MeetingInsight? {
-        insights.sorted { $0.createdAt > $1.createdAt }.first
-    }
-
-    func segmentID(matchingQuote rawQuote: String?) -> UUID? {
-        segments.segmentID(matchingQuote: rawQuote)
+        insights.max(by: { $0.createdAt < $1.createdAt })
     }
 }
 
 extension Array where Element == TranscriptSegment {
-    /// Find the transcript segment that best matches an AI-supplied verbatim
-    /// quote. Substring containment in either direction wins decisively;
-    /// otherwise we fall back to the segment with the largest token overlap
-    /// (≥3 shared meaningful tokens). Used to anchor action items to the
-    /// part of the conversation that produced them.
+    /// Best segment match for an AI-supplied verbatim quote. Substring
+    /// containment wins; otherwise falls back to ≥3 shared meaningful tokens.
     func segmentID(matchingQuote rawQuote: String?) -> UUID? {
         guard let raw = rawQuote?.trimmingCharacters(in: .whitespacesAndNewlines),
               raw.count >= 8 else { return nil }
@@ -141,5 +134,16 @@ extension Array where Element == TranscriptSegment {
             }
         }
         return bestScore >= 3 ? bestID : nil
+    }
+
+    /// Segments around the one with `id`, sorted by start time. Returns up to
+    /// `lead` segments before and `trail` after, clamped to array bounds.
+    /// Empty when `id` isn't found.
+    func segments(around id: UUID, lead: Int, trail: Int) -> [TranscriptSegment] {
+        let sorted = self.sorted { $0.startTime < $1.startTime }
+        guard let idx = sorted.firstIndex(where: { $0.id == id }) else { return [] }
+        let lo = Swift.max(0, idx - lead)
+        let hi = Swift.min(sorted.count - 1, idx + trail)
+        return Array(sorted[lo...hi])
     }
 }
