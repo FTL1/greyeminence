@@ -27,18 +27,20 @@ final class CalendarService {
 
     /// Find the current or upcoming calendar event within a time window.
     func currentOrUpcomingEvent(within minutes: TimeInterval = 15) -> EKEvent? {
-        guard authorizationState == .authorized else { return nil }
+        eventsInWindow(minutes: minutes).first
+    }
+
+    /// All calendar events within ±`minutes` of now, sorted by proximity to now.
+    /// Used by the recording toolbar's manual "Match calendar event" picker so
+    /// the user can override an incorrect or missed auto-match.
+    func eventsInWindow(minutes: TimeInterval = 60) -> [EKEvent] {
+        guard authorizationState == .authorized else { return [] }
         let now = Date.now
         let start = now.addingTimeInterval(-minutes * 60)
         let end = now.addingTimeInterval(minutes * 60)
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        let events = store.events(matching: predicate)
-
-        // Prefer event happening now, then nearest upcoming
-        return events
-            .filter { $0.startDate <= now.addingTimeInterval(minutes * 60) }
+        return store.events(matching: predicate)
             .sorted { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
-            .first
     }
 
     /// Extract attendee names from an event.

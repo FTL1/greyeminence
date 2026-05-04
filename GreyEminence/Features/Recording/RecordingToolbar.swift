@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import EventKit
 
 struct RecordingToolbar: View {
     @Bindable var viewModel: RecordingViewModel
@@ -73,6 +74,13 @@ struct RecordingToolbar: View {
                 }
             }
 
+            // Calendar match menu — visible while recording so the user can
+            // override an incorrect auto-match or supply one the auto-detector
+            // missed (e.g., ad-hoc Teams meeting joined late).
+            if viewModel.state != .idle {
+                CalendarMatchMenu(viewModel: viewModel, modelContext: modelContext)
+            }
+
             // Mic level + segment count
             if viewModel.state != .idle {
                 Divider()
@@ -126,6 +134,58 @@ struct RecordingToolbar: View {
                 .background(.orange.opacity(0.1), in: Capsule())
                 .offset(y: 16)
             }
+        }
+    }
+}
+
+/// Toolbar menu for manually matching the in-progress meeting to a calendar
+/// event. Lists events within ±60 min of now; on selection, applies title,
+/// attendees, and recurring-series linkage to the current meeting.
+private struct CalendarMatchMenu: View {
+    @Bindable var viewModel: RecordingViewModel
+    let modelContext: ModelContext
+    @State private var nearbyEvents: [EKEvent] = []
+
+    private var matchedEventID: String? {
+        viewModel.currentMeeting?.calendarEventID
+    }
+
+    var body: some View {
+        Menu {
+            Section("Nearby calendar events") {
+                if nearbyEvents.isEmpty {
+                    Text("No events within ±1 hour")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(nearbyEvents, id: \.eventIdentifier) { event in
+                        Button {
+                            viewModel.matchCalendarEventManually(event, in: modelContext)
+                        } label: {
+                            let isMatched = event.calendarItemIdentifier == matchedEventID
+                            let prefix = isMatched ? "✓ " : ""
+                            let time = event.startDate.formatted(date: .omitted, time: .shortened)
+                            Text("\(prefix)\(event.title ?? "Untitled") — \(time)")
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Refresh") { refresh() }
+        } label: {
+            Image(systemName: "calendar.badge.checkmark")
+                .help("Match to calendar event")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .onAppear { refresh() }
+    }
+
+    private func refresh() {
+        Task { @MainActor in
+            if viewModel.calendarService.authorizationState != .authorized {
+                await viewModel.calendarService.requestAccess()
+            }
+            nearbyEvents = viewModel.calendarService.eventsInWindow(minutes: 60)
         }
     }
 }

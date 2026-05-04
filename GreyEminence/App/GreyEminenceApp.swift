@@ -20,6 +20,12 @@ struct GreyEminenceApp: App {
     private let updaterController: SPUStandardUpdaterController
 
     init() {
+        // Register defaults so non-@AppStorage readers (UserDefaults.standard.bool)
+        // see the intended default before the user has touched the toggle.
+        UserDefaults.standard.register(defaults: [
+            "calendarIntegration": true
+        ])
+
         let delegate = SparkleUpdaterDelegate()
         self.updaterDelegate = delegate
         self.updaterController = SPUStandardUpdaterController(

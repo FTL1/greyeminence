@@ -9,7 +9,7 @@ struct GeneralSettingsView: View {
     @AppStorage("autoStartRecording") private var autoStart = false
     @AppStorage("showMenuBarIcon") private var showMenuBar = true
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @AppStorage("calendarIntegration") private var calendarIntegration = false
+    @AppStorage("calendarIntegration") private var calendarIntegration = true
     @AppStorage("stalledThresholdDays") private var stalledThresholdDays = 7
     @AppStorage("appFontSize") private var appFontSize = "medium"
     @AppStorage("myContactID") private var myContactIDString = ""

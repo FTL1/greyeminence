@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import SwiftData
 import AVFoundation
+import EventKit
 
 @Observable
 @MainActor
@@ -130,6 +131,49 @@ final class RecordingViewModel {
         )
     }
 
+    /// Apply a calendar event's metadata (title, attendees, series) to a meeting.
+    /// Used both at record-start (auto-match from `currentOrUpcomingEvent`) and
+    /// from the toolbar's manual picker when the user wants to override or
+    /// supply a match the auto-detector missed.
+    func applyCalendarMatch(
+        event: EKEvent,
+        to meeting: Meeting,
+        in modelContext: ModelContext,
+        source: String
+    ) {
+        meeting.title = event.title ?? meeting.title
+        meeting.calendarEventID = event.calendarItemIdentifier
+        meeting.calendarEventTitle = event.title
+
+        let attendeeNames = calendarService.attendeeNames(for: event)
+        let descriptor = FetchDescriptor<Contact>()
+        let contacts = (try? modelContext.fetch(descriptor)) ?? []
+        let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
+        for (_, contact) in matched {
+            if let contact, !meeting.attendees.contains(where: { $0.id == contact.id }) {
+                meeting.attendees.append(contact)
+            }
+        }
+
+        speakerContactMapper.prepopulate(from: meeting.attendees)
+        calendarService.matchToSeries(event: event, meeting: meeting, in: modelContext)
+
+        log.log("Calendar event matched (\(source)): \(event.title ?? "untitled")", category: .general)
+    }
+
+    /// Manual variant invoked from the recording toolbar. Operates on the
+    /// in-progress `currentMeeting` and persists immediately so a crash
+    /// before the next periodic save doesn't drop the user's choice.
+    func matchCalendarEventManually(_ event: EKEvent, in modelContext: ModelContext) {
+        guard let meeting = currentMeeting else { return }
+        applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "manual")
+        PersistenceGate.save(
+            modelContext,
+            site: "matchCalendarEventManually",
+            meetingID: meeting.id
+        )
+    }
+
     var formattedTime: String {
         let hours = Int(elapsedTime) / 3600
         let minutes = (Int(elapsedTime) % 3600) / 60
@@ -239,28 +283,7 @@ final class RecordingViewModel {
         // Calendar integration: auto-set title and match attendees
         let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
         if calendarEnabled, let event = calendarService.currentOrUpcomingEvent() {
-            meeting.title = event.title ?? meeting.title
-            meeting.calendarEventID = event.calendarItemIdentifier
-            meeting.calendarEventTitle = event.title
-
-            // Match attendees to contacts
-            let attendeeNames = calendarService.attendeeNames(for: event)
-            let descriptor = FetchDescriptor<Contact>()
-            let contacts = (try? modelContext.fetch(descriptor)) ?? []
-            let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
-            for (_, contact) in matched {
-                if let contact, !meeting.attendees.contains(where: { $0.id == contact.id }) {
-                    meeting.attendees.append(contact)
-                }
-            }
-
-            // Pre-populate speaker mapper from attendee aliases
-            speakerContactMapper.prepopulate(from: meeting.attendees)
-
-            // Match to recurring series
-            calendarService.matchToSeries(event: event, meeting: meeting, in: modelContext)
-
-            log.log("Calendar event matched: \(event.title ?? "untitled")", category: .general)
+            applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "auto")
         }
 
         // Always add "me" as an attendee — the user must be present to record.
