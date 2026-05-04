@@ -814,7 +814,10 @@ struct ActionItemRow: View {
             }
         }
         .popover(isPresented: $showContactPicker) {
-            ContactPicker(excludedContacts: excludedIDs) { contact in
+            ContactPicker(
+                excludedContacts: excludedIDs,
+                prioritizedContacts: item.meeting?.attendees ?? []
+            ) { contact in
                 item.assignedContact = contact
                 showContactPicker = false
             }
