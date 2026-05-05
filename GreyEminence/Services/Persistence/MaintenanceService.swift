@@ -20,6 +20,7 @@ enum MaintenanceService {
         var stuckAnalyzingFlagsReset = 0
         var actionItemsBackfilled = 0
         var interviewsBackfilledToPhases = 0
+        var criterionGuidanceBackfilled = 0
         var skipped = false
 
         var summary: String {
@@ -30,7 +31,8 @@ enum MaintenanceService {
             \(staleSegmentEmbeddingsRemoved) stale segment embedding(s) removed, \
             \(stuckAnalyzingFlagsReset) stuck analysis flag(s) cleared, \
             \(actionItemsBackfilled) action item source(s) backfilled, \
-            \(interviewsBackfilledToPhases) legacy interview(s) wrapped in phases
+            \(interviewsBackfilledToPhases) legacy interview(s) wrapped in phases, \
+            \(criterionGuidanceBackfilled) evaluation note(s) migrated to guidance bullets
             """
         }
     }
@@ -55,6 +57,7 @@ enum MaintenanceService {
         report.stuckAnalyzingFlagsReset = resetStuckAnalyzingFlags(meetings: meetings, in: modelContext)
         report.actionItemsBackfilled = backfillActionItemSources(meetings: meetings, in: modelContext)
         report.interviewsBackfilledToPhases = backfillInterviewPhases(in: modelContext)
+        report.criterionGuidanceBackfilled = backfillCriterionGuidance(in: modelContext)
 
         UserDefaults.standard.set(Date(), forKey: lastRunKey)
         LogManager.send(report.summary, category: .general)
@@ -183,6 +186,33 @@ enum MaintenanceService {
         }
         if backfilled > 0 {
             PersistenceGate.save(context, site: "Maintenance.backfillInterviewPhases")
+        }
+        return backfilled
+    }
+
+    /// Migrate the legacy `RubricCriterion.evaluationNotes` free-text field
+    /// into a single `CriterionGuidance` bullet (audience: interviewer)
+    /// for any criterion that has notes but no guidance yet. Idempotent —
+    /// once the criterion has any guidance, this leaves it alone.
+    private static func backfillCriterionGuidance(in context: ModelContext) -> Int {
+        let descriptor = FetchDescriptor<RubricCriterion>()
+        guard let criteria = try? context.fetch(descriptor) else { return 0 }
+        var backfilled = 0
+        for criterion in criteria {
+            guard let notes = criterion.evaluationNotes,
+                  !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  criterion.guidance.isEmpty else { continue }
+            let guidance = CriterionGuidance(
+                text: notes,
+                audience: .interviewer,
+                sortOrder: 0
+            )
+            guidance.criterion = criterion
+            criterion.guidance.append(guidance)
+            backfilled += 1
+        }
+        if backfilled > 0 {
+            PersistenceGate.save(context, site: "Maintenance.backfillCriterionGuidance")
         }
         return backfilled
     }

@@ -82,6 +82,7 @@ enum SchemaV2: VersionedSchema {
         RubricSection.self,
         RubricCriterion.self,
         RubricBonusSignal.self,
+        CriterionGuidance.self,
         Candidate.self,
         Interview.self,
         InterviewPhase.self,

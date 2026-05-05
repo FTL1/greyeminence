@@ -204,6 +204,16 @@ private func deepCopyRubricContents(from source: Rubric, to target: Rubric) {
                 evaluationNotes: criterion.evaluationNotes
             )
             newCriterion.section = newSection
+            // Carry over guidance bullets so the duplicated rubric is a
+            // true clone, not a stripped-down copy.
+            for guidance in criterion.guidance.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+                let copy = CriterionGuidance(
+                    text: guidance.text,
+                    audience: guidance.audience,
+                    sortOrder: guidance.sortOrder
+                )
+                copy.criterion = newCriterion
+            }
         }
         for signal in section.bonusSignals.sorted(by: { $0.sortOrder < $1.sortOrder }) {
             let newSignal = RubricBonusSignal(

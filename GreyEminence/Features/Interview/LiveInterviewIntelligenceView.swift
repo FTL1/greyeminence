@@ -341,10 +341,10 @@ private struct ActiveSectionDetail: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    ForEach(rubricSection.criteria, id: \.self) { criterionSignal in
+                    ForEach(rubricSection.criteria, id: \.signal) { criterion in
                         CriterionRow(
-                            signal: criterionSignal,
-                            evaluation: evalDict[criterionSignal],
+                            signal: criterion.signal,
+                            evaluation: evalDict[criterion.signal],
                             onTapTimestamp: { timestamp in
                                 interviewViewModel.scrollTranscriptToTimestamp(timestamp)
                             }

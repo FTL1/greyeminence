@@ -123,7 +123,10 @@ enum InterviewPromptTemplates {
         }
         result += "Criteria:\n"
         for criterion in section.criteria {
-            result += "  - \(criterion)\n"
+            result += "  - \(criterion.signal)\n"
+            for guidance in criterion.llmGuidance {
+                result += "      • Scoring guidance: \(guidance)\n"
+            }
         }
         if !section.bonusSignals.isEmpty {
             result += "Bonus/Penalty Signals:\n"

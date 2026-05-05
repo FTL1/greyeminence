@@ -11,9 +11,19 @@ struct RubricSectionSnapshot: Sendable {
     let id: UUID
     let title: String
     let description: String
-    let criteria: [String]
+    let criteria: [CriterionSnapshot]
     let bonusSignals: [BonusSignalSnapshot]
     let weight: Double
+}
+
+/// Snapshot of one criterion plus any LLM-targeted guidance bullets the
+/// interviewer attached to it. The signal is the criterion text the AI
+/// scores against; the guidance is appended to the prompt as
+/// "Scoring guidance:" lines so the AI uses the same interpretation
+/// the interviewer has in mind.
+struct CriterionSnapshot: Sendable, Hashable {
+    let signal: String
+    let llmGuidance: [String]
 }
 
 struct BonusSignalSnapshot: Sendable {

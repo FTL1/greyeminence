@@ -30,34 +30,13 @@ struct RubricSectionEditorView: View {
             // Criteria
             if !sortedCriteria.isEmpty {
                 ForEach(sortedCriteria) { criterion in
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            TextField("Signal", text: Binding(
-                                get: { criterion.signal },
-                                set: { criterion.signal = $0 }
-                            ))
-                            .font(.body)
-                            TextField("What to look for (optional, for interviewer reference)", text: Binding(
-                                get: { criterion.evaluationNotes ?? "" },
-                                set: { criterion.evaluationNotes = $0.isEmpty ? nil : $0 }
-                            ))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button {
+                    CriterionRow(
+                        criterion: criterion,
+                        onDelete: {
                             section.criteria.removeAll { $0.id == criterion.id }
                             modelContext.delete(criterion)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.plain)
-                    }
+                    )
                 }
             }
 
@@ -183,5 +162,201 @@ struct RubricSectionEditorView: View {
         newBonusLabel = ""
         newBonusExpected = "yes"
         newBonusValue = 1
+    }
+}
+
+// MARK: - Criterion Row with Guidance Accordion
+
+/// One criterion in a rubric section, plus its accordion of audience-tagged
+/// guidance bullets. Bullets can be directed at the human interviewer
+/// (display-only), the LLM scorer (appended to the AI prompt), or both.
+private struct CriterionRow: View {
+    @Bindable var criterion: RubricCriterion
+    @Environment(\.modelContext) private var modelContext
+    var onDelete: () -> Void
+
+    @State private var isExpanded = false
+    @State private var newBulletText = ""
+    @State private var newBulletAudience: GuidanceAudience = .both
+
+    private var sortedGuidance: [CriterionGuidance] {
+        criterion.guidance.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 6) {
+                Image(systemName: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                TextField("Signal", text: Binding(
+                    get: { criterion.signal },
+                    set: { criterion.signal = $0 }
+                ))
+                .font(.body)
+                Spacer()
+                Button {
+                    isExpanded.toggle()
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                        if !sortedGuidance.isEmpty {
+                            Text("\(sortedGuidance.count)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Add notes")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Show scoring guidance for this criterion")
+                Button {
+                    onDelete()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if isExpanded {
+                guidancePanel
+                    .padding(.leading, 18)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var guidancePanel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(sortedGuidance) { bullet in
+                HStack(alignment: .top, spacing: 4) {
+                    audienceBadge(bullet: bullet)
+                    TextField("Guidance", text: Binding(
+                        get: { bullet.text },
+                        set: { bullet.text = $0 }
+                    ), axis: .vertical)
+                    .lineLimit(1...3)
+                    .font(.caption)
+                    .textFieldStyle(.plain)
+                    Spacer()
+                    Button {
+                        criterion.guidance.removeAll { $0.id == bullet.id }
+                        modelContext.delete(bullet)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            // Add-bullet row
+            HStack(spacing: 4) {
+                audienceMenu(
+                    selection: $newBulletAudience,
+                    label: {
+                        Image(systemName: newBulletAudience.symbolName)
+                            .font(.caption2)
+                            .foregroundStyle(.cyan)
+                            .frame(width: 18, height: 18)
+                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                    }
+                )
+                TextField("Add a bullet (e.g., \"Look for incremental design\" or \"Score lower if they jump straight to ERD\")", text: $newBulletText, axis: .vertical)
+                    .lineLimit(1...3)
+                    .font(.caption)
+                    .textFieldStyle(.plain)
+                    .onSubmit { addBullet() }
+                Button("Add") { addBullet() }
+                    .controlSize(.small)
+                    .disabled(newBulletText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.top, 2)
+
+            HStack(spacing: 8) {
+                legendItem(.interviewer)
+                legendItem(.llm)
+                legendItem(.both)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private func audienceBadge(bullet: CriterionGuidance) -> some View {
+        audienceMenu(
+            selection: Binding(
+                get: { bullet.audience },
+                set: { bullet.audience = $0 }
+            ),
+            label: {
+                Image(systemName: bullet.audience.symbolName)
+                    .font(.caption2)
+                    .foregroundStyle(audienceColor(bullet.audience))
+                    .frame(width: 18, height: 18)
+                    .background(audienceColor(bullet.audience).opacity(0.15), in: Capsule())
+            }
+        )
+        .help("Audience: \(bullet.audience.label)")
+    }
+
+    private func audienceMenu<L: View>(
+        selection: Binding<GuidanceAudience>,
+        @ViewBuilder label: () -> L
+    ) -> some View {
+        Menu {
+            Picker("Audience", selection: selection) {
+                ForEach(GuidanceAudience.allCases, id: \.self) { audience in
+                    Label(audience.label, systemImage: audience.symbolName)
+                        .tag(audience)
+                }
+            }
+        } label: {
+            label()
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func legendItem(_ audience: GuidanceAudience) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: audience.symbolName)
+                .font(.system(size: 8))
+            Text(audience.label)
+                .font(.caption2)
+        }
+        .foregroundStyle(audienceColor(audience))
+    }
+
+    private func audienceColor(_ audience: GuidanceAudience) -> Color {
+        switch audience {
+        case .interviewer: .blue
+        case .llm: .purple
+        case .both: .cyan
+        }
+    }
+
+    private func addBullet() {
+        let text = newBulletText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        let bullet = CriterionGuidance(
+            text: text,
+            audience: newBulletAudience,
+            sortOrder: criterion.guidance.count
+        )
+        bullet.criterion = criterion
+        criterion.guidance.append(bullet)
+        newBulletText = ""
     }
 }
