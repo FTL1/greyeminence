@@ -40,7 +40,7 @@ struct GreyEminenceApp: App {
         // Every model change should bump to a new SchemaV* and register a
         // migration stage so existing user stores evolve safely instead of
         // breaking silently.
-        let schema = Schema(versionedSchema: SchemaV1.self)
+        let schema = Schema(versionedSchema: SchemaV2.self)
         let config = ModelConfiguration(
             "GreyEminence",
             schema: schema,

@@ -19,6 +19,7 @@ enum MaintenanceService {
         var staleSegmentEmbeddingsRemoved = 0
         var stuckAnalyzingFlagsReset = 0
         var actionItemsBackfilled = 0
+        var interviewsBackfilledToPhases = 0
         var skipped = false
 
         var summary: String {
@@ -28,7 +29,8 @@ enum MaintenanceService {
             \(orphanEmbeddingsRemoved) orphan embedding(s) removed, \
             \(staleSegmentEmbeddingsRemoved) stale segment embedding(s) removed, \
             \(stuckAnalyzingFlagsReset) stuck analysis flag(s) cleared, \
-            \(actionItemsBackfilled) action item source(s) backfilled
+            \(actionItemsBackfilled) action item source(s) backfilled, \
+            \(interviewsBackfilledToPhases) legacy interview(s) wrapped in phases
             """
         }
     }
@@ -52,6 +54,7 @@ enum MaintenanceService {
         report.staleSegmentEmbeddingsRemoved = pruneStaleSegmentEmbeddings(meetings: meetings)
         report.stuckAnalyzingFlagsReset = resetStuckAnalyzingFlags(meetings: meetings, in: modelContext)
         report.actionItemsBackfilled = backfillActionItemSources(meetings: meetings, in: modelContext)
+        report.interviewsBackfilledToPhases = backfillInterviewPhases(in: modelContext)
 
         UserDefaults.standard.set(Date(), forKey: lastRunKey)
         LogManager.send(report.summary, category: .general)
@@ -139,6 +142,47 @@ enum MaintenanceService {
         }
         if backfilled > 0 {
             PersistenceGate.save(context, site: "Maintenance.backfillActionItemSources")
+        }
+        return backfilled
+    }
+
+    /// Wraps legacy single-rubric interviews in a single-phase tree so the
+    /// new phase-shaped UI can read them. An interview is "legacy" when its
+    /// `phases` array is empty but it has either a `rubric` or
+    /// `sectionScores` from before phase support shipped.
+    ///
+    /// The synthesized phase covers the meeting's full duration (so the AI
+    /// loop's "segments since phase start" filter degenerates to "all
+    /// segments" for legacy data) and is marked `.completed` so the live
+    /// transition UI doesn't try to re-activate it.
+    private static func backfillInterviewPhases(in context: ModelContext) -> Int {
+        let descriptor = FetchDescriptor<Interview>()
+        guard let interviews = try? context.fetch(descriptor) else { return 0 }
+        var backfilled = 0
+        for interview in interviews where interview.phases.isEmpty {
+            let hasLegacyData = interview.rubric != nil || !interview.sectionScores.isEmpty
+            guard hasLegacyData else { continue }
+
+            let phaseTitle = interview.rubric?.name ?? "Interview"
+            let phase = InterviewPhase(
+                title: phaseTitle,
+                rubric: interview.rubric,
+                plannedOrder: 0,
+                status: .completed
+            )
+            phase.startedAt = interview.meeting?.date ?? interview.createdAt
+            phase.endedAt = interview.meeting.map { $0.date.addingTimeInterval($0.duration) } ?? .now
+            phase.interview = interview
+            interview.phases.append(phase)
+
+            for score in interview.sectionScores where score.phase == nil {
+                score.phase = phase
+                phase.sectionScores.append(score)
+            }
+            backfilled += 1
+        }
+        if backfilled > 0 {
+            PersistenceGate.save(context, site: "Maintenance.backfillInterviewPhases")
         }
         return backfilled
     }

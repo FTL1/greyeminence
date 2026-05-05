@@ -76,6 +76,14 @@ final class Interview {
     @Relationship(deleteRule: .cascade, inverse: \InterviewSectionScore.interview)
     var sectionScores: [InterviewSectionScore]
 
+    /// Ordered phases that compose this interview. Each phase has its own
+    /// rubric (or none, for intro/conclusion) and its own scoring window.
+    /// Empty for legacy interviews created before phase support; the
+    /// startup backfill in MaintenanceService converts those to a single
+    /// phase containing the legacy `rubric`.
+    @Relationship(deleteRule: .cascade, inverse: \InterviewPhase.interview)
+    var phases: [InterviewPhase] = []
+
     @Relationship(deleteRule: .cascade, inverse: \InterviewImpression.interview)
     var impressions: [InterviewImpression]
 
@@ -105,10 +113,22 @@ final class Interview {
         self.rubric = rubric
         self.createdAt = .now
         self.sectionScores = []
+        self.phases = []
         self.impressions = []
         self.bookmarks = []
         self.notes = []
         self.interviewers = []
+    }
+
+    /// Phases ordered by their planned position. Use this for display and
+    /// transition navigation rather than relying on `phases` insertion order.
+    var orderedPhases: [InterviewPhase] {
+        phases.sorted { $0.plannedOrder < $1.plannedOrder }
+    }
+
+    /// The phase currently `.active`, if any. There should be at most one.
+    var activePhase: InterviewPhase? {
+        phases.first(where: { $0.status == .active })
     }
 
     var compositeGradePoints: Double? {

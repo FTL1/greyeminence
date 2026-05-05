@@ -56,26 +56,65 @@ enum SchemaV1: VersionedSchema {
     }
 }
 
+/// SchemaV2 adds `InterviewPhase` and the relationships that link it to
+/// `Interview` and `InterviewSectionScore`. The change is purely additive
+/// (a new model + optional relationships on existing models), so SwiftData
+/// can migrate from V1 → V2 with a `.lightweight` stage. Existing
+/// interviews keep their `rubric` and `sectionScores`; the runtime
+/// backfill in `MaintenanceService` retroactively wraps them in a single
+/// `.completed` phase so all UI code can read the phase-shaped tree.
+enum SchemaV2: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
+
+    static var models: [any PersistentModel.Type] {
+        [
+        Meeting.self,
+        TranscriptSegment.self,
+        ActionItem.self,
+        MeetingInsight.self,
+        Contact.self,
+        // Interview feature
+        Department.self,
+        Team.self,
+        RoleLevel.self,
+        InterviewRole.self,
+        Rubric.self,
+        RubricSection.self,
+        RubricCriterion.self,
+        RubricBonusSignal.self,
+        Candidate.self,
+        Interview.self,
+        InterviewPhase.self,
+        InterviewSectionScore.self,
+        InterviewImpression.self,
+        InterviewImpressionTrait.self,
+        InterviewBookmark.self,
+        InterviewNote.self,
+        ScoreEvidence.self,
+        CriterionEvaluation.self,
+        CriterionEvidence.self,
+        ]
+    }
+}
+
 /// Migration plan for the SwiftData store. Each new `SchemaV*` version is
 /// appended to `schemas` along with a corresponding `MigrationStage` in
-/// `stages`. Lightweight migration (adding optional fields, etc.) works
-/// automatically and doesn't need an explicit stage.
+/// `stages`. Lightweight migration (adding optional fields, new models)
+/// works automatically and doesn't need property-level transforms.
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self]
+        [SchemaV1.self, SchemaV2.self]
     }
 
     static var stages: [MigrationStage] {
-        // No migrations yet — SchemaV1 is the first versioned snapshot.
-        // When you add SchemaV2, add a stage like:
-        //   .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self)
-        // or for property renames / custom transforms:
-        //   .custom(
-        //     fromVersion: SchemaV1.self,
-        //     toVersion: SchemaV2.self,
-        //     willMigrate: { context in ... },
-        //     didMigrate: { context in ... }
-        //   )
-        []
+        [
+            // V1 → V2: adds InterviewPhase and the optional relationships
+            // linking it to Interview and InterviewSectionScore. Lightweight
+            // because the change is additive — existing rows materialize
+            // with empty `phases` arrays and `phase: nil` on scores. The
+            // runtime backfill in MaintenanceService converts those legacy
+            // shapes to the new tree on first launch after upgrade.
+            .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self)
+        ]
     }
 }

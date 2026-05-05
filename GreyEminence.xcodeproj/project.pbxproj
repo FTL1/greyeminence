@@ -133,6 +133,7 @@
 		CA4D93E6FAEA9C013721DD8D /* AIPromptTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69AB1E3DF6577FB00871B539 /* AIPromptTemplates.swift */; };
 		CAC7E2AF7351F7B2664B6A43 /* ReProcessingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4827BB932B5FF822DACE3261 /* ReProcessingState.swift */; };
 		CAE631B21FD4390A98F4BD5E /* InterviewPromptTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9A10AF91F15CA169F503A2 /* InterviewPromptTemplates.swift */; };
+		CBDAED661B2F395A01665B98 /* InterviewPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3342DA3D292F447AD03C19D1 /* InterviewPhase.swift */; };
 		CC29BCBB453D0F8515604013 /* SparkleUpdaterDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02203A251A6442629C7C3EA5 /* SparkleUpdaterDelegate.swift */; };
 		D05877DA620547F1B8059550 /* MeetingDeletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32E8A78D90F7F6032C45662E /* MeetingDeletion.swift */; };
 		D0D02AD902D348ADFE6F2935 /* InterviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1883C32FA38176C32ED9B57 /* InterviewListView.swift */; };
@@ -212,6 +213,7 @@
 		300EAE12152D87923A870EA9 /* ReProcessingStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReProcessingStatusBar.swift; sourceTree = "<group>"; };
 		3064E03937611C03B74553CD /* AudioFormatConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFormatConverter.swift; sourceTree = "<group>"; };
 		32E8A78D90F7F6032C45662E /* MeetingDeletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDeletion.swift; sourceTree = "<group>"; };
+		3342DA3D292F447AD03C19D1 /* InterviewPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewPhase.swift; sourceTree = "<group>"; };
 		355D52E442FFB5C7B6F89C4F /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
 		3808CC293C20D0583278C3F9 /* TranscriptDeduplicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptDeduplicator.swift; sourceTree = "<group>"; };
 		3946643E25AD52CD5C5B4307 /* AIRetryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRetryTests.swift; sourceTree = "<group>"; };
@@ -676,6 +678,7 @@
 				3F08738D7D9258962EA6B659 /* InterviewImpression.swift */,
 				9F43B13AE41AF8236D03AB34 /* InterviewImpressionTrait.swift */,
 				1F2EE3D3FF1C35A523A8F56C /* InterviewNote.swift */,
+				3342DA3D292F447AD03C19D1 /* InterviewPhase.swift */,
 				CA9332875D8DF9786389A129 /* InterviewRole.swift */,
 				1B95809735E6E5534ED30962 /* InterviewSectionScore.swift */,
 				8FFDC9ABAD40D943DE809198 /* Meeting.swift */,
@@ -990,6 +993,7 @@
 				4049FE1019DF0F0079883216 /* InterviewIntelligenceService.swift in Sources */,
 				D0D02AD902D348ADFE6F2935 /* InterviewListView.swift in Sources */,
 				C5FC15AF53305A50055CF338 /* InterviewNote.swift in Sources */,
+				CBDAED661B2F395A01665B98 /* InterviewPhase.swift in Sources */,
 				CAE631B21FD4390A98F4BD5E /* InterviewPromptTemplates.swift in Sources */,
 				3191CB3A44A1238D798130F5 /* InterviewRecordingViewModel.swift in Sources */,
 				3FAC8EEE1160183F8FF49BA1 /* InterviewRole.swift in Sources */,
