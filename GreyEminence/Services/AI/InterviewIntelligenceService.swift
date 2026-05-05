@@ -26,6 +26,22 @@ struct CriterionSnapshot: Sendable, Hashable {
     let llmGuidance: [String]
 }
 
+/// Background facts about the candidate that the AI should keep in mind
+/// while scoring. Currently just name + resume text (when one's
+/// attached); could grow to include role, level, prior interview
+/// summaries, etc. Sendable so it survives the cross-actor hop into
+/// the analysis loop.
+struct CandidateContext: Sendable {
+    let name: String
+    let role: String?
+    /// Already truncated to a sane character cap by `ResumeTextExtractor`.
+    let resumeText: String?
+
+    var hasContent: Bool {
+        !name.isEmpty || (role?.isEmpty == false) || (resumeText?.isEmpty == false)
+    }
+}
+
 struct BonusSignalSnapshot: Sendable {
     let label: String
     let expected: String
@@ -109,14 +125,22 @@ actor InterviewIntelligenceService {
     private let client: any AIClient
     private let rubricContext: RubricSnapshot
     private let impressionTraits: [ImpressionTraitSnapshot]
+    private let candidateContext: CandidateContext?
     private let meetingID: UUID?
     private var previousScoresJSON: String = ""
     private var lastAnalyzedSegmentCount: Int = 0
 
-    init(client: any AIClient, rubricContext: RubricSnapshot, impressionTraits: [ImpressionTraitSnapshot] = [], meetingID: UUID? = nil) {
+    init(
+        client: any AIClient,
+        rubricContext: RubricSnapshot,
+        impressionTraits: [ImpressionTraitSnapshot] = [],
+        candidateContext: CandidateContext? = nil,
+        meetingID: UUID? = nil
+    ) {
         self.client = client
         self.rubricContext = rubricContext
         self.impressionTraits = impressionTraits
+        self.candidateContext = candidateContext
         self.meetingID = meetingID
     }
 
@@ -135,7 +159,8 @@ actor InterviewIntelligenceService {
                 activeSectionID: activeSectionID,
                 previousScores: "",
                 newTranscript: transcript,
-                impressionTraits: impressionTraits
+                impressionTraits: impressionTraits,
+                candidateContext: candidateContext
             )
         } else {
             let transcript = AIPromptTemplates.formatSegments(newSegments)
@@ -144,7 +169,8 @@ actor InterviewIntelligenceService {
                 activeSectionID: activeSectionID,
                 previousScores: previousScoresJSON,
                 newTranscript: transcript,
-                impressionTraits: impressionTraits
+                impressionTraits: impressionTraits,
+                candidateContext: candidateContext
             )
         }
 
@@ -180,7 +206,8 @@ actor InterviewIntelligenceService {
             rubric: rubricContext,
             accumulatedScores: previousScoresJSON,
             fullTranscript: fullTranscript,
-            impressionTraits: impressionTraits
+            impressionTraits: impressionTraits,
+            candidateContext: candidateContext
         )
 
         LogManager.send("Interview final analysis starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)

@@ -149,13 +149,18 @@ enum InterviewPromptTemplates {
         activeSectionID: UUID?,
         previousScores: String,
         newTranscript: String,
-        impressionTraits: [ImpressionTraitSnapshot] = []
+        impressionTraits: [ImpressionTraitSnapshot] = [],
+        candidateContext: CandidateContext? = nil
     ) -> String {
         let activeSection = activeSectionID.flatMap { id in
             rubric.sections.first { $0.id == id }
         }
 
         var prompt = ""
+
+        if let block = formatCandidateContext(candidateContext) {
+            prompt += block + "\n\n"
+        }
 
         if !previousScores.isEmpty {
             prompt += """
@@ -259,10 +264,17 @@ enum InterviewPromptTemplates {
         rubric: RubricSnapshot,
         accumulatedScores: String,
         fullTranscript: String,
-        impressionTraits: [ImpressionTraitSnapshot] = []
+        impressionTraits: [ImpressionTraitSnapshot] = [],
+        candidateContext: CandidateContext? = nil
     ) -> String {
-        """
-        The interview has ended. Below is the complete transcript and rubric. \
+        let candidatePrelude: String
+        if let block = formatCandidateContext(candidateContext) {
+            candidatePrelude = block + "\n\n"
+        } else {
+            candidatePrelude = ""
+        }
+        return """
+        \(candidatePrelude)The interview has ended. Below is the complete transcript and rubric. \
         Produce final, definitive scores for each rubric section.
 
         Score EVERY section in detail now, regardless of which phase was active during \
@@ -278,6 +290,30 @@ enum InterviewPromptTemplates {
         FULL TRANSCRIPT:
         \(fullTranscript)
         """
+    }
+
+    /// Render candidate background as a delimited block at the top of the
+    /// prompt. The AI is told to use it as context for understanding the
+    /// candidate's claims but not to score against it directly — the
+    /// scoring rubric is the source of truth.
+    static func formatCandidateContext(_ context: CandidateContext?) -> String? {
+        guard let context, context.hasContent else { return nil }
+        var lines: [String] = []
+        lines.append("CANDIDATE BACKGROUND:")
+        if !context.name.isEmpty {
+            lines.append("Name: \(context.name)")
+        }
+        if let role = context.role, !role.isEmpty {
+            lines.append("Role under consideration: \(role)")
+        }
+        if let resume = context.resumeText, !resume.isEmpty {
+            lines.append("")
+            lines.append("Resume / CV (may be summarized; use to contextualize claims, not as scoring evidence on its own):")
+            lines.append("---")
+            lines.append(resume)
+            lines.append("---")
+        }
+        return lines.joined(separator: "\n")
     }
 
 }

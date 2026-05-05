@@ -232,6 +232,10 @@ final class InterviewRecordingViewModel {
             activatePhase(first, in: modelContext)
         }
 
+        // Build candidate-context snapshot once (resume extraction is
+        // synchronous file I/O — keep it off the per-cycle hot path).
+        buildCandidateContextSnapshot()
+
         // Start rubric analysis loop (offset from standard AI by ~20s).
         // The loop reads the active phase's rubric per cycle, so it
         // tolerates phase changes without restart.
@@ -446,6 +450,7 @@ final class InterviewRecordingViewModel {
             client: client,
             rubricContext: snapshot,
             impressionTraits: self.impressionTraitSnapshots,
+            candidateContext: self.candidateContextSnapshot,
             meetingID: meetingID
         )
 
@@ -616,6 +621,7 @@ final class InterviewRecordingViewModel {
                     client: client,
                     rubricContext: cycle.rubricSnapshot,
                     impressionTraits: cycle.traits,
+                    candidateContext: cycle.candidateContext,
                     meetingID: cycle.meetingID
                 )
                 let allSnapshots = await MainActor.run { self.recordingViewModel.snapshotSegments() }
@@ -655,6 +661,7 @@ final class InterviewRecordingViewModel {
         let phaseID: UUID
         let rubricSnapshot: RubricSnapshot
         let traits: [ImpressionTraitSnapshot]
+        let candidateContext: CandidateContext?
         let meetingID: UUID?
         let startedAt: Date?
         let endedAt: Date?
@@ -669,11 +676,37 @@ final class InterviewRecordingViewModel {
             phaseID: phase.id,
             rubricSnapshot: phase.rubric!.toSnapshot(),
             traits: impressionTraitSnapshots,
+            candidateContext: candidateContextSnapshot,
             meetingID: recordingViewModel.currentMeeting?.id,
             startedAt: phase.startedAt,
             endedAt: phase.endedAt,
             activeSectionID: activeSectionID
         )
+    }
+
+    /// Cached candidate context (name, role, extracted resume text). Built
+    /// once at interview start so the resume isn't re-read from disk on
+    /// every analysis cycle (and so the truncated prompt-cost stays
+    /// stable as the resume file is replaced or removed mid-call).
+    private var candidateContextSnapshot: CandidateContext?
+
+    private func buildCandidateContextSnapshot() {
+        guard let candidate = interview?.candidate else {
+            candidateContextSnapshot = nil
+            return
+        }
+        let resumeText: String? = {
+            guard let url = candidate.resumeURL else { return nil }
+            return ResumeTextExtractor.extractText(from: url)
+        }()
+        candidateContextSnapshot = CandidateContext(
+            name: candidate.name,
+            role: candidate.role?.fullDescription,
+            resumeText: resumeText
+        )
+        if let count = resumeText?.count, count > 0 {
+            LogManager.shared.log("Resume context loaded for AI prompt (\(count) chars)", category: .ai)
+        }
     }
 
     private func waitSeconds(_ seconds: Int) async {
