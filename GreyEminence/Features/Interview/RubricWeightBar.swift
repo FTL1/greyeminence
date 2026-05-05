@@ -22,8 +22,11 @@ struct RubricWeightBar: View {
     @Bindable var rubric: Rubric
 
     /// Minimum weight for any single section. Keeps each segment wide
-    /// enough that the divider hit area stays reachable.
+    /// enough that the divider hit area stays reachable. Also doubles as
+    /// the snap step — every drag value is rounded to the nearest
+    /// multiple of `snapStep` so the bar produces clean 5% increments.
     private static let minWeight: Double = 5
+    private static let snapStep: Double = 5
     private static let barHeight: CGFloat = 28
     private static let handleHitWidth: CGFloat = 16
     private static let coordSpaceName = "rubricWeightBar"
@@ -233,9 +236,18 @@ struct RubricWeightBar: View {
         let cursorOffsetFromAnchor = location.x - leftAnchorX
         // Convert to weight units. Total weight maps to barWidth pixels.
         let proposedLeft = Double(cursorOffsetFromAnchor / barWidth) * total
-        let clampedLeft = min(max(proposedLeft, Self.minWeight), combined - Self.minWeight)
+        // Snap to the nearest 5% increment. Snapping the LEFT side and
+        // computing right = combined - left preserves the sum exactly,
+        // so the rest of the bar stays at 100% even if `combined` isn't
+        // itself a multiple of 5.
+        let snappedLeft = (proposedLeft / Self.snapStep).rounded() * Self.snapStep
+        let clampedLeft = min(max(snappedLeft, Self.minWeight), combined - Self.minWeight)
         let clampedRight = combined - clampedLeft
 
+        // Skip the write if it didn't actually change — avoids redundant
+        // SwiftData mutations on every pixel of cursor movement between
+        // snap points.
+        guard clampedLeft != leftSection.weight else { return }
         leftSection.weight = clampedLeft
         rightSection.weight = clampedRight
     }
