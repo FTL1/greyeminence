@@ -10,7 +10,7 @@ struct InterviewSetupView: View {
     var interviewViewModel: InterviewRecordingViewModel
 
     @State private var selectedCandidate: Candidate?
-    @State private var selectedRubric: Rubric?
+    @State private var plannedPhases: [PlannedPhase] = [.intro(), .conclusion()]
     @State private var selectedInterviewers: Set<UUID> = []
     @State private var preNotes: String = ""
     @State private var showAddCandidate = false
@@ -27,14 +27,23 @@ struct InterviewSetupView: View {
         rubrics.filter { !$0.isArchived }
     }
 
-    private var filteredRubrics: [Rubric] {
+    /// Rubrics likely relevant to this candidate's role — used to seed
+    /// suggestions and order the rubric picker.
+    private var roleScopedRubrics: [Rubric] {
         guard let role = selectedCandidate?.role else { return activeRubrics }
         let matching = activeRubrics.filter { $0.role?.id == role.id }
         return matching.isEmpty ? activeRubrics : matching
     }
 
+    /// At least one scored phase (with a rubric) is required to start —
+    /// otherwise the AI loop will skip every cycle and the interview
+    /// produces no scores.
+    private var hasScoredPhase: Bool {
+        plannedPhases.contains { $0.rubric != nil }
+    }
+
     private var canStart: Bool {
-        selectedCandidate != nil && selectedRubric != nil
+        selectedCandidate != nil && hasScoredPhase
     }
 
     var body: some View {
@@ -49,7 +58,7 @@ struct InterviewSetupView: View {
                         .foregroundStyle(.cyan)
                     Text("Interview Setup")
                         .font(.title2.weight(.semibold))
-                    Text("Configure the interview before recording")
+                    Text("Plan the phases you'll run through")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -80,26 +89,57 @@ struct InterviewSetupView: View {
                         }
                     }
 
-                    Section("Rubric") {
-                        Picker("Rubric", selection: $selectedRubric) {
-                            Text("Select...").tag(nil as Rubric?)
-                            ForEach(filteredRubrics) { rubric in
-                                VStack(alignment: .leading) {
-                                    Text(rubric.name)
-                                    if let role = rubric.role {
-                                        Text(role.displayTitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .tag(rubric as Rubric?)
-                            }
-                        }
-                        if let rubric = selectedRubric {
-                            Text("\(rubric.sections.count) sections")
+                    Section {
+                        if plannedPhases.isEmpty {
+                            Text("No phases planned. Add one below.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        ForEach(Array(plannedPhases.enumerated()), id: \.element.id) { index, phase in
+                            phaseRow(at: index, phase: phase)
+                        }
+                        .onMove { source, destination in
+                            plannedPhases.move(fromOffsets: source, toOffset: destination)
+                        }
+
+                        HStack(spacing: 8) {
+                            Menu {
+                                ForEach(roleScopedRubrics) { rubric in
+                                    Button(rubric.name) {
+                                        plannedPhases.append(.from(rubric: rubric))
+                                    }
+                                }
+                                if roleScopedRubrics.isEmpty {
+                                    Text("No rubrics defined")
+                                }
+                            } label: {
+                                Label("Add Rubric Phase", systemImage: "plus.rectangle.on.rectangle")
+                            }
+                            Button {
+                                plannedPhases.append(PlannedPhase(title: "Discussion", rubric: nil))
+                            } label: {
+                                Label("Add Unscored", systemImage: "plus.bubble")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.top, 4)
+                    } header: {
+                        HStack {
+                            Text("Planned Phases")
+                            Spacer()
+                            Button {
+                                resetToRoleDefaults()
+                            } label: {
+                                Text("Defaults")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Replace with the default phase plan for this candidate's role")
+                        }
+                    } footer: {
+                        Text("Phases run in order. The AI scores only during phases that have a rubric attached.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
                     }
 
                     Section {
@@ -145,8 +185,7 @@ struct InterviewSetupView: View {
                     }
                 }
                 .formStyle(.grouped)
-                .scrollDisabled(true)
-                .frame(maxWidth: 500, maxHeight: 500)
+                .frame(maxWidth: 560, maxHeight: 600)
 
                 // Start button
                 Button {
@@ -168,24 +207,95 @@ struct InterviewSetupView: View {
         .sheet(isPresented: $showAddCandidate) {
             AddCandidateSheet()
         }
-        .onChange(of: selectedCandidate) { _, candidate in
-            // Auto-select rubric if candidate has a role with rubrics
-            if let role = candidate?.role,
-               let rubric = activeRubrics.first(where: { $0.role?.id == role.id }) {
-                selectedRubric = rubric
-            }
+        .onChange(of: selectedCandidate) { _, _ in
+            resetToRoleDefaults()
         }
     }
 
+    // MARK: - Phase Row
+
+    @ViewBuilder
+    private func phaseRow(at index: Int, phase: PlannedPhase) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: phase.rubric != nil ? "checklist" : "bubble.left.and.bubble.right")
+                .foregroundStyle(phase.rubric != nil ? .cyan : .secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                TextField("Phase title", text: Binding(
+                    get: { phase.title },
+                    set: { plannedPhases[index].title = $0 }
+                ))
+                .textFieldStyle(.plain)
+                .font(.body)
+
+                if !activeRubrics.isEmpty {
+                    Picker("Rubric", selection: Binding(
+                        get: { plannedPhases[index].rubric?.id },
+                        set: { newID in
+                            plannedPhases[index].rubric = activeRubrics.first { $0.id == newID }
+                            // Auto-update title when rubric is freshly assigned
+                            // and the user hasn't customized the title yet.
+                            if let rubric = plannedPhases[index].rubric,
+                               plannedPhases[index].title.isEmpty
+                                || plannedPhases[index].title == "Phase"
+                                || plannedPhases[index].title == "Discussion" {
+                                plannedPhases[index].title = rubric.name
+                            }
+                        }
+                    )) {
+                        Text("(unscored)").tag(nil as UUID?)
+                        ForEach(roleScopedRubrics) { rubric in
+                            Text(rubric.name).tag(rubric.id as UUID?)
+                        }
+                        if !roleScopedRubrics.isEmpty
+                            && roleScopedRubrics.count != activeRubrics.count {
+                            Divider()
+                            ForEach(activeRubrics.filter { r in !roleScopedRubrics.contains(where: { $0.id == r.id }) }) { rubric in
+                                Text(rubric.name).tag(rubric.id as UUID?)
+                            }
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                }
+            }
+
+            Spacer()
+
+            Button {
+                plannedPhases.remove(at: index)
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(.red.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .help("Remove this phase")
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - Actions
+
+    /// Build a sensible default phase plan for the selected candidate's role.
+    /// Pattern: Intro → all role-scoped rubrics in their natural order →
+    /// Conclusion. If no role is selected or no rubrics match, falls back
+    /// to a bare Intro/Conclusion shell that the user fills in manually.
+    private func resetToRoleDefaults() {
+        var phases: [PlannedPhase] = [.intro()]
+        for rubric in roleScopedRubrics {
+            phases.append(.from(rubric: rubric))
+        }
+        phases.append(.conclusion())
+        plannedPhases = phases
+    }
+
     private func startInterview() {
-        guard let candidate = selectedCandidate,
-              let rubric = selectedRubric else { return }
-
+        guard let candidate = selectedCandidate else { return }
         let interviewerContacts = activeInterviewers.filter { selectedInterviewers.contains($0.id) }
-
         interviewViewModel.startInterview(
             candidate: candidate,
-            rubric: rubric,
+            plannedPhases: plannedPhases,
             interviewers: interviewerContacts,
             notes: preNotes.isEmpty ? nil : preNotes,
             in: modelContext
