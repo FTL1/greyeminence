@@ -7,6 +7,9 @@ struct SegmentSnapshot: Sendable, Codable {
     let text: String
     let formattedTimestamp: String
     let isFinal: Bool
+    /// Seconds elapsed since the recording started. Used by interview phase
+    /// scoping to bound analysis to a phase's time window.
+    var startTime: TimeInterval = 0
 }
 
 struct AnalysisResult: Sendable {

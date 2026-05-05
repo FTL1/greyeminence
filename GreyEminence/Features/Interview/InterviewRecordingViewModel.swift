@@ -2,6 +2,32 @@ import Foundation
 import SwiftUI
 import SwiftData
 
+/// Pre-call planning input describing one phase the interviewer intends to
+/// run. `rubric` may be nil to represent unscored phases (intro, conclusion,
+/// freeform discussion). `title` defaults to the rubric name when nil.
+struct PlannedPhase: Identifiable {
+    let id: UUID
+    var title: String
+    var rubric: Rubric?
+
+    init(id: UUID = UUID(), title: String, rubric: Rubric? = nil) {
+        self.id = id
+        self.title = title
+        self.rubric = rubric
+    }
+
+    static func intro() -> PlannedPhase { PlannedPhase(title: "Intro", rubric: nil) }
+    static func conclusion() -> PlannedPhase { PlannedPhase(title: "Conclusion", rubric: nil) }
+    static func from(rubric: Rubric) -> PlannedPhase {
+        PlannedPhase(title: rubric.name, rubric: rubric)
+    }
+}
+
+extension PlannedPhase: Hashable {
+    static func == (lhs: PlannedPhase, rhs: PlannedPhase) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 @Observable
 @MainActor
 final class InterviewRecordingViewModel {
@@ -10,6 +36,9 @@ final class InterviewRecordingViewModel {
     // Interview state
     var interview: Interview?
     var completedInterview: Interview?
+    /// Section scores for the currently active phase, mirrored for UI binding.
+    /// When the active phase changes, this array is repopulated from the new
+    /// phase's `sectionScores`.
     var sectionScores: [InterviewSectionScore] = []
     var impressions: [InterviewImpression] = []
     var bookmarks: [InterviewBookmark] = []
@@ -51,6 +80,9 @@ final class InterviewRecordingViewModel {
 
     // Criterion evaluations per section
     var criterionEvaluations: [UUID: [CriterionEvaluationSnapshot]] = [:]
+    /// Snapshot of the *currently active phase's* rubric. Recomputed each
+    /// time the active phase changes. Nil when no phase is active or the
+    /// active phase has no rubric (intro / conclusion / freeform).
     var rubricSnapshot: RubricSnapshot?
     var impressionTraitSnapshots: [ImpressionTraitSnapshot] = []
 
@@ -76,6 +108,9 @@ final class InterviewRecordingViewModel {
 
     // MARK: - Interview Lifecycle
 
+    /// Single-rubric convenience kept for backward compatibility with callers
+    /// that haven't migrated to multi-phase planning yet. Wraps the rubric in
+    /// a single planned phase plus an intro and conclusion phase.
     func startInterview(
         candidate: Candidate,
         rubric: Rubric,
@@ -83,22 +118,65 @@ final class InterviewRecordingViewModel {
         notes: String?,
         in modelContext: ModelContext
     ) {
-        let interview = Interview(candidate: candidate, rubric: rubric)
+        startInterview(
+            candidate: candidate,
+            plannedPhases: [.intro(), .from(rubric: rubric), .conclusion()],
+            interviewers: interviewers,
+            notes: notes,
+            in: modelContext
+        )
+    }
+
+    /// Multi-phase interview start. `plannedPhases` is the ordered sequence
+    /// the interviewer intends to run. The first phase (whatever it is) is
+    /// activated immediately; subsequent phases stay `.planned` until the
+    /// interviewer transitions through them.
+    func startInterview(
+        candidate: Candidate,
+        plannedPhases: [PlannedPhase],
+        interviewers: [Contact],
+        notes: String?,
+        in modelContext: ModelContext
+    ) {
+        // Use the first scored phase's rubric as the legacy `Interview.rubric`
+        // pointer so older code paths and the backfill keep working. If
+        // there's no scored phase, leave it nil.
+        let firstScoredRubric = plannedPhases.compactMap(\.rubric).first
+        let interview = Interview(candidate: candidate, rubric: firstScoredRubric)
         interview.status = .recording
         interview.interviewerNotes = notes
         interview.interviewers = interviewers
         modelContext.insert(interview)
 
-        var scores: [InterviewSectionScore] = []
-        for section in rubric.sections.sorted(by: { $0.sortOrder < $1.sortOrder }) {
-            let score = InterviewSectionScore(
-                rubricSectionID: section.id,
-                rubricSectionTitle: section.title,
-                sortOrder: section.sortOrder,
-                weight: section.weight
+        // Build phase models from the planning input. Order matters; we
+        // assign plannedOrder by position so reordering later doesn't
+        // require array index gymnastics.
+        for (idx, planned) in plannedPhases.enumerated() {
+            let phase = InterviewPhase(
+                title: planned.title,
+                rubric: planned.rubric,
+                plannedOrder: idx,
+                status: .planned
             )
-            score.interview = interview
-            scores.append(score)
+            phase.interview = interview
+            interview.phases.append(phase)
+
+            // Pre-create section scores for scored phases so they're visible
+            // in the UI before the AI starts populating them.
+            if let rubric = planned.rubric {
+                for section in rubric.sections.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+                    let score = InterviewSectionScore(
+                        rubricSectionID: section.id,
+                        rubricSectionTitle: section.title,
+                        sortOrder: section.sortOrder,
+                        weight: section.weight
+                    )
+                    score.interview = interview
+                    score.phase = phase
+                    phase.sectionScores.append(score)
+                    interview.sectionScores.append(score)
+                }
+            }
         }
 
         let traitDescriptor = FetchDescriptor<InterviewImpressionTrait>(
@@ -116,7 +194,6 @@ final class InterviewRecordingViewModel {
             ImpressionTraitSnapshot(name: $0.name, labels: $0.labels)
         }
         self.interview = interview
-        self.sectionScores = scores
         self.impressions = imps
         self.bookmarks = []
         self.strengths = []
@@ -148,13 +225,152 @@ final class InterviewRecordingViewModel {
             )
         }
 
-        // Tag initial section (Intro)
-        recordingViewModel.currentSectionTag = "Intro"
-        recordingViewModel.currentSectionTagID = Self.introID
+        // Activate the first planned phase. If the first phase is unscored
+        // (intro), the AI loop will silently skip cycles until the
+        // interviewer advances to a scored phase.
+        if let first = interview.orderedPhases.first {
+            activatePhase(first, in: modelContext)
+        }
 
-        // Start rubric analysis loop (offset from standard AI by ~20s)
-        self.rubricSnapshot = rubric.toSnapshot()
+        // Start rubric analysis loop (offset from standard AI by ~20s).
+        // The loop reads the active phase's rubric per cycle, so it
+        // tolerates phase changes without restart.
         startRubricAnalysis()
+    }
+
+    // MARK: - Phase Transitions
+
+    /// Mark the given phase active and refresh derived state (section
+    /// scores mirror, rubric snapshot, segment tag). Closes any other
+    /// `.active` phase first to maintain the "at most one active" invariant.
+    private func activatePhase(_ phase: InterviewPhase, in modelContext: ModelContext) {
+        guard let interview else { return }
+        // Close any currently active phase first.
+        for other in interview.phases where other.status == .active && other.id != phase.id {
+            other.status = .completed
+            other.endedAt = .now
+        }
+        phase.status = .active
+        if phase.startedAt == nil {
+            phase.startedAt = .now
+        }
+        // Mirror the active phase's section scores into the VM array so
+        // existing UI bindings keep working without per-view rewrites.
+        sectionScores = phase.sectionScores.sorted { $0.sortOrder < $1.sortOrder }
+        rubricSnapshot = phase.rubric?.toSnapshot()
+        // Tag transcript segments with the phase title + ID so live
+        // attribution survives across pause/resume — phase boundaries are
+        // persisted now, not just held in this VM.
+        recordingViewModel.currentSectionTag = phase.title
+        recordingViewModel.currentSectionTagID = phase.id
+        // Reset section focus to the phase's first section (if any).
+        activePhaseID = phase.sectionScores.sorted { $0.sortOrder < $1.sortOrder }.first?.rubricSectionID
+            ?? phase.id
+
+        PersistenceGate.save(
+            modelContext,
+            site: "InterviewRecordingViewModel.activatePhase",
+            meetingID: recordingViewModel.currentMeeting?.id
+        )
+        LogManager.shared.log("Interview phase activated: \(phase.title)", category: .ai)
+    }
+
+    /// Advance to the next planned phase in order. Closes the current active
+    /// phase and activates the next `.planned` one. No-op if no further
+    /// phases remain — the interviewer should call `stopInterview` instead.
+    func advancePhase(in modelContext: ModelContext) {
+        guard let interview else { return }
+        let ordered = interview.orderedPhases
+        guard let current = interview.activePhase,
+              let currentIdx = ordered.firstIndex(where: { $0.id == current.id }) else {
+            // No active phase — activate the first planned one.
+            if let first = ordered.first(where: { $0.status == .planned }) {
+                activatePhase(first, in: modelContext)
+            }
+            return
+        }
+        let remaining = ordered.dropFirst(currentIdx + 1)
+        if let next = remaining.first(where: { $0.status == .planned }) {
+            activatePhase(next, in: modelContext)
+        } else {
+            // No more planned phases — close current without re-activation.
+            current.status = .completed
+            current.endedAt = .now
+            sectionScores = []
+            rubricSnapshot = nil
+            recordingViewModel.currentSectionTag = nil
+            recordingViewModel.currentSectionTagID = nil
+            PersistenceGate.save(
+                modelContext,
+                site: "InterviewRecordingViewModel.advancePhase/lastClosed",
+                meetingID: recordingViewModel.currentMeeting?.id
+            )
+        }
+    }
+
+    /// Mark the active phase `.completed` without auto-advancing. Useful when
+    /// the next phase needs to be picked manually (e.g., the interviewer
+    /// wants to add an ad-hoc phase rather than the next planned one).
+    func endActivePhase(in modelContext: ModelContext) {
+        guard let active = interview?.activePhase else { return }
+        active.status = .completed
+        active.endedAt = .now
+        sectionScores = []
+        rubricSnapshot = nil
+        recordingViewModel.currentSectionTag = nil
+        recordingViewModel.currentSectionTagID = nil
+        PersistenceGate.save(
+            modelContext,
+            site: "InterviewRecordingViewModel.endActivePhase",
+            meetingID: recordingViewModel.currentMeeting?.id
+        )
+    }
+
+    /// Mark a planned phase as `.skipped` without ever activating it. The
+    /// interviewer typically calls this when realizing mid-call that they
+    /// won't have time for a phase they'd planned.
+    func skipPhase(_ phase: InterviewPhase, in modelContext: ModelContext) {
+        guard phase.status == .planned else { return }
+        phase.status = .skipped
+        PersistenceGate.save(
+            modelContext,
+            site: "InterviewRecordingViewModel.skipPhase",
+            meetingID: recordingViewModel.currentMeeting?.id
+        )
+    }
+
+    /// Append a new phase mid-interview and activate it immediately. This is
+    /// the "pull in a code-review rubric on the fly" affordance — the
+    /// interviewer realized they want to score against an additional rubric
+    /// that wasn't in the original plan.
+    func addAdHocPhase(title: String, rubric: Rubric?, in modelContext: ModelContext) {
+        guard let interview else { return }
+        let nextOrder = (interview.phases.map(\.plannedOrder).max() ?? -1) + 1
+        let phase = InterviewPhase(
+            title: title,
+            rubric: rubric,
+            plannedOrder: nextOrder,
+            status: .planned
+        )
+        phase.interview = interview
+        interview.phases.append(phase)
+
+        if let rubric {
+            for section in rubric.sections.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+                let score = InterviewSectionScore(
+                    rubricSectionID: section.id,
+                    rubricSectionTitle: section.title,
+                    sortOrder: section.sortOrder,
+                    weight: section.weight
+                )
+                score.interview = interview
+                score.phase = phase
+                phase.sectionScores.append(score)
+                interview.sectionScores.append(score)
+            }
+        }
+
+        activatePhase(phase, in: modelContext)
     }
 
     func stopInterview(in modelContext: ModelContext) {
@@ -166,7 +382,11 @@ final class InterviewRecordingViewModel {
 
         if let interview {
             interview.status = .completed
-            interview.sectionScores = sectionScores
+            // Close any still-active phase so finalized state is consistent.
+            if let active = interview.activePhase {
+                active.status = .completed
+                active.endedAt = .now
+            }
             interview.impressions = impressions
             interview.bookmarks = bookmarks
             interview.notes = notes.filter { $0.parentNote == nil }
@@ -178,19 +398,33 @@ final class InterviewRecordingViewModel {
             meetingID: recordingViewModel.currentMeeting?.id
         )
 
-        // Capture what we need for the final analysis before stopping
-        let hasRubric = rubricSnapshot != nil
+        // Snapshot all scored phases for final analysis. We run one final
+        // pass per phase against its own rubric so each gets a clean
+        // re-score on the full transcript window for that phase.
+        let scoredPhases: [(UUID, RubricSnapshot, Date?, Date?)] = interview?.phases
+            .filter { $0.rubric != nil }
+            .map { ($0.id, $0.rubric!.toSnapshot(), $0.startedAt, $0.endedAt) }
+            ?? []
         let meetingID = recordingViewModel.currentMeeting?.id
 
         // Stop the underlying recording (triggers standard final analysis too)
         recordingViewModel.stopRecording(in: modelContext)
 
-        // Run final rubric analysis on the complete transcript
-        if hasRubric {
+        // Run final rubric analysis per scored phase.
+        if !scoredPhases.isEmpty {
             rubricAnalysisState = .analyzing
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await self.runFinalRubricAnalysis(meetingID: meetingID, in: modelContext)
+                for (phaseID, snapshot, startedAt, endedAt) in scoredPhases {
+                    await self.runFinalRubricAnalysis(
+                        phaseID: phaseID,
+                        snapshot: snapshot,
+                        startedAt: startedAt,
+                        endedAt: endedAt,
+                        meetingID: meetingID,
+                        in: modelContext
+                    )
+                }
                 self.rubricAnalysisState = .idle
             }
         } else {
@@ -198,38 +432,62 @@ final class InterviewRecordingViewModel {
         }
     }
 
-    private func runFinalRubricAnalysis(meetingID: UUID?, in modelContext: ModelContext) async {
-        guard let client = try? await AIClientFactory.makeClient(),
-              let rubricSnapshot else { return }
+    private func runFinalRubricAnalysis(
+        phaseID: UUID,
+        snapshot: RubricSnapshot,
+        startedAt: Date?,
+        endedAt: Date?,
+        meetingID: UUID?,
+        in modelContext: ModelContext
+    ) async {
+        guard let client = try? await AIClientFactory.makeClient() else { return }
 
         let service = InterviewIntelligenceService(
             client: client,
-            rubricContext: rubricSnapshot,
+            rubricContext: snapshot,
             impressionTraits: self.impressionTraitSnapshots,
             meetingID: meetingID
         )
 
-        let snapshots = recordingViewModel.snapshotSegments()
-        guard !snapshots.isEmpty else { return }
+        // Bound segments to this phase's time window so AI sees only the
+        // conversation that happened during this rubric's coverage.
+        let allSegments = recordingViewModel.snapshotSegments()
+        let phaseSegments = filterSegments(allSegments, between: startedAt, and: endedAt)
+        guard !phaseSegments.isEmpty else { return }
 
         do {
-            if let result = try await service.performFinalInterviewAnalysis(segments: snapshots) {
-                applyAnalysisResult(result)
-                // Persist final scores
-                if let interview {
-                    interview.sectionScores = sectionScores
-                }
+            if let result = try await service.performFinalInterviewAnalysis(segments: phaseSegments) {
+                applyAnalysisResult(result, toPhaseID: phaseID)
                 PersistenceGate.save(
                     modelContext,
                     site: "InterviewRecordingViewModel.runFinalRubricAnalysis",
                     critical: true,
                     meetingID: meetingID
                 )
-                LogManager.shared.log("Final rubric analysis complete", category: .ai)
+                LogManager.shared.log("Final rubric analysis complete for phase \(phaseID)", category: .ai)
             }
         } catch {
-            LogManager.shared.log("Final rubric analysis failed: \(error.localizedDescription)", category: .ai, level: .warning)
+            LogManager.shared.log("Final rubric analysis failed for phase \(phaseID): \(error.localizedDescription)", category: .ai, level: .warning)
         }
+    }
+
+    /// Filter segments to the time window `[startedAt, endedAt]`. If
+    /// `startedAt` is nil the window opens at -inf; if `endedAt` is nil the
+    /// window extends to +inf. Segment timestamps are in seconds elapsed
+    /// since recording start, but phase boundaries are wall-clock dates —
+    /// we convert phases to elapsed seconds via the recording's start.
+    private func filterSegments(
+        _ segments: [SegmentSnapshot],
+        between startedAt: Date?,
+        and endedAt: Date?
+    ) -> [SegmentSnapshot] {
+        guard let recordingStart = recordingViewModel.currentRecordingStartDate
+            ?? recordingViewModel.currentMeeting?.date else {
+            return segments
+        }
+        let lower = startedAt.map { $0.timeIntervalSince(recordingStart) } ?? -.infinity
+        let upper = endedAt.map { $0.timeIntervalSince(recordingStart) } ?? .infinity
+        return segments.filter { $0.startTime >= lower && $0.startTime <= upper }
     }
 
     // MARK: - Bookmarks
@@ -323,8 +581,6 @@ final class InterviewRecordingViewModel {
     // MARK: - Rubric Analysis Loop
 
     private func startRubricAnalysis() {
-        let rubricSnapshot = self.rubricSnapshot!
-
         rubricAnalysisTask = Task { [weak self] in
             guard let self else { return }
 
@@ -335,30 +591,49 @@ final class InterviewRecordingViewModel {
                 return
             }
 
-            let meetingID = await MainActor.run { self.recordingViewModel.currentMeeting?.id }
-            let traits = await MainActor.run { self.impressionTraitSnapshots }
-            let service = InterviewIntelligenceService(
-                client: client,
-                rubricContext: rubricSnapshot,
-                impressionTraits: traits,
-                meetingID: meetingID
-            )
-
             // Wait 50s before first rubric analysis (offset from standard 30s)
             await self.waitSeconds(50)
 
             while !Task.isCancelled {
+                // Per-cycle: read which phase is active and what its rubric
+                // is. If no scored phase is active (intro/conclusion/freeform
+                // or no interview), skip this cycle and try again later.
+                let cycle: PhaseCycle? = await MainActor.run { self.makePhaseCycle() }
+
+                guard let cycle else {
+                    await MainActor.run {
+                        self.rubricAnalysisState = .idle
+                    }
+                    await self.waitSeconds(45)
+                    continue
+                }
+
                 await MainActor.run {
                     self.rubricAnalysisState = .analyzing
                 }
 
-                let snapshots = await MainActor.run { self.recordingViewModel.snapshotSegments() }
-                let currentSectionID: UUID? = await MainActor.run { self.activeSectionID }
+                let service = InterviewIntelligenceService(
+                    client: client,
+                    rubricContext: cycle.rubricSnapshot,
+                    impressionTraits: cycle.traits,
+                    meetingID: cycle.meetingID
+                )
+                let allSnapshots = await MainActor.run { self.recordingViewModel.snapshotSegments() }
+                let phaseSegments = await MainActor.run {
+                    self.filterSegments(allSnapshots, between: cycle.startedAt, and: cycle.endedAt)
+                }
 
                 do {
-                    if let result = try await service.analyzeAgainstRubric(segments: snapshots, activeSectionID: currentSectionID) {
+                    if let result = try await service.analyzeAgainstRubric(
+                        segments: phaseSegments,
+                        activeSectionID: cycle.activeSectionID
+                    ) {
                         await MainActor.run {
-                            self.applyAnalysisResult(result)
+                            // Only apply if we're still on the same phase —
+                            // a transition mid-cycle invalidates the result.
+                            if self.interview?.activePhase?.id == cycle.phaseID {
+                                self.applyAnalysisResult(result, toPhaseID: cycle.phaseID)
+                            }
                         }
                     }
                 } catch {
@@ -373,6 +648,34 @@ final class InterviewRecordingViewModel {
         }
     }
 
+    /// Per-cycle inputs for the rubric analyzer, captured atomically on the
+    /// MainActor so the background task doesn't observe a torn read across
+    /// phase transitions.
+    private struct PhaseCycle {
+        let phaseID: UUID
+        let rubricSnapshot: RubricSnapshot
+        let traits: [ImpressionTraitSnapshot]
+        let meetingID: UUID?
+        let startedAt: Date?
+        let endedAt: Date?
+        let activeSectionID: UUID?
+    }
+
+    private func makePhaseCycle() -> PhaseCycle? {
+        guard let interview, let phase = interview.activePhase, phase.rubric != nil else {
+            return nil
+        }
+        return PhaseCycle(
+            phaseID: phase.id,
+            rubricSnapshot: phase.rubric!.toSnapshot(),
+            traits: impressionTraitSnapshots,
+            meetingID: recordingViewModel.currentMeeting?.id,
+            startedAt: phase.startedAt,
+            endedAt: phase.endedAt,
+            activeSectionID: activeSectionID
+        )
+    }
+
     private func waitSeconds(_ seconds: Int) async {
         for i in (0..<seconds).reversed() {
             guard !Task.isCancelled else { return }
@@ -383,36 +686,43 @@ final class InterviewRecordingViewModel {
         }
     }
 
-    private func applyAnalysisResult(_ result: InterviewAnalysisResult) {
+    /// Apply an analysis result to a specific phase's section scores. The
+    /// phase ID disambiguates which phase's scores to update — important
+    /// when multiple phases score against the same rubric (e.g., two
+    /// coding rounds), or when a phase transition fires between the
+    /// analysis call and its result arriving.
+    private func applyAnalysisResult(_ result: InterviewAnalysisResult, toPhaseID phaseID: UUID) {
+        guard let interview,
+              let phase = interview.phases.first(where: { $0.id == phaseID }) else { return }
+        let phaseScores = phase.sectionScores
+
         for aiScore in result.sectionScores {
-            if let idx = sectionScores.firstIndex(where: { $0.rubricSectionID == aiScore.sectionID }) {
-                if let gradeStr = aiScore.grade {
-                    sectionScores[idx].aiGrade = LetterGrade(rawValue: gradeStr)
-                }
-                sectionScores[idx].aiConfidence = aiScore.confidence
-                sectionScores[idx].aiRationale = aiScore.rationale
+            guard let target = phaseScores.first(where: { $0.rubricSectionID == aiScore.sectionID }) else { continue }
+            if let gradeStr = aiScore.grade {
+                target.aiGrade = LetterGrade(rawValue: gradeStr)
+            }
+            target.aiConfidence = aiScore.confidence
+            target.aiRationale = aiScore.rationale
 
-                // Store legacy JSON evidence for backward compat
-                let quoteStrings = aiScore.evidence.map(\.quote)
-                if let evidenceData = try? JSONSerialization.data(withJSONObject: quoteStrings),
-                   let evidenceStr = String(data: evidenceData, encoding: .utf8) {
-                    sectionScores[idx].aiEvidence = evidenceStr
-                }
+            // Store legacy JSON evidence for backward compat
+            let quoteStrings = aiScore.evidence.map(\.quote)
+            if let evidenceData = try? JSONSerialization.data(withJSONObject: quoteStrings),
+               let evidenceStr = String(data: evidenceData, encoding: .utf8) {
+                target.aiEvidence = evidenceStr
+            }
 
-                // Create structured evidence items with provenance
-                // Replace existing evidence (AI updates cumulatively)
-                sectionScores[idx].evidenceItems.removeAll()
-                for ev in aiScore.evidence {
-                    let strength = EvidenceStrength(rawValue: ev.strength) ?? .moderate
-                    let item = ScoreEvidence(
-                        quote: ev.quote,
-                        timestamp: ev.timestamp,
-                        criterionSignal: ev.criterion,
-                        strength: strength
-                    )
-                    item.sectionScore = sectionScores[idx]
-                    sectionScores[idx].evidenceItems.append(item)
-                }
+            // Replace evidence items (AI updates cumulatively per phase).
+            target.evidenceItems.removeAll()
+            for ev in aiScore.evidence {
+                let strength = EvidenceStrength(rawValue: ev.strength) ?? .moderate
+                let item = ScoreEvidence(
+                    quote: ev.quote,
+                    timestamp: ev.timestamp,
+                    criterionSignal: ev.criterion,
+                    strength: strength
+                )
+                item.sectionScore = target
+                target.evidenceItems.append(item)
             }
         }
 
@@ -420,7 +730,13 @@ final class InterviewRecordingViewModel {
             criterionEvaluations[aiScore.sectionID] = aiScore.criterionEvaluations
         }
 
-        // Apply AI impression ratings
+        // Refresh the VM's mirror array if this is the active phase so UI
+        // bindings re-render with new grades/evidence.
+        if interview.activePhase?.id == phaseID {
+            sectionScores = phase.sectionScores.sorted { $0.sortOrder < $1.sortOrder }
+        }
+
+        // Apply AI impression ratings (interview-level, not per-phase).
         for aiImpression in result.impressions {
             if let idx = impressions.firstIndex(where: { $0.traitName == aiImpression.trait }) {
                 impressions[idx].value = aiImpression.value

@@ -1012,10 +1012,16 @@ final class RecordingViewModel {
                 speaker: segment.speaker,
                 text: segment.text,
                 formattedTimestamp: segment.formattedTimestamp,
-                isFinal: segment.isFinal
+                isFinal: segment.isFinal,
+                startTime: segment.startTime
             )
         }
     }
+
+    /// Wall-clock date when the current recording started. Exposed so the
+    /// interview view model can convert phase Date boundaries into segment
+    /// elapsed-second offsets.
+    var currentRecordingStartDate: Date? { recordingStartDate }
 
     // MARK: - Periodic Persistence
 
