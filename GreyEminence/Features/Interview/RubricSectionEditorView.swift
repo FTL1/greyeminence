@@ -27,16 +27,18 @@ struct RubricSectionEditorView: View {
                 .lineLimit(2...4)
                 .font(.caption)
 
+            // Weight is set by the rubric-level weight bar at the top of
+            // the editor. We only display the current value here so the
+            // section card still surfaces it for context.
             HStack {
                 Text("Weight")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Slider(value: $section.weight, in: 1...100, step: 1)
-                Text("\(Int(section.weight))")
-                    .font(.caption)
+                Spacer()
+                Text("\(Int(section.weight.rounded()))%")
+                    .font(.caption.weight(.semibold))
                     .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
-                    .frame(width: 30, alignment: .trailing)
             }
 
             // Criteria

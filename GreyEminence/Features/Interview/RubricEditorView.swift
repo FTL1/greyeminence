@@ -26,11 +26,32 @@ struct RubricEditorView: View {
                 }
             }
 
+            if !rubric.sections.isEmpty {
+                Section {
+                    RubricWeightBar(rubric: rubric)
+                        .padding(.vertical, 4)
+                } header: {
+                    Text("Section Weights")
+                } footer: {
+                    Text("Drag the dividers to redistribute weight. The total always sums to 100%.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             // Sections
             ForEach(sortedSections) { section in
                 RubricSectionEditorView(section: section, onDelete: {
+                    let removedWeight = section.weight
                     rubric.sections.removeAll { $0.id == section.id }
                     modelContext.delete(section)
+                    // Redistribute the deleted section's weight evenly
+                    // across the survivors so the bar stays at 100%.
+                    let survivors = rubric.sections
+                    if !survivors.isEmpty && removedWeight > 0 {
+                        let bonus = removedWeight / Double(survivors.count)
+                        for s in survivors { s.weight += bonus }
+                    }
                 })
             }
 
@@ -44,14 +65,31 @@ struct RubricEditorView: View {
             }
         }
         .navigationTitle(rubric.name)
+        .onAppear {
+            RubricWeightBar.normalizeToHundred(rubric)
+        }
     }
 
     private func addSection() {
+        // New section claims a fair share of the existing total. Pull a
+        // proportional slice off each existing section so the bar stays
+        // at 100% and the new section appears with a meaningful weight.
+        let existing = rubric.sections
+        let newCount = existing.count + 1
+        let newShare = 100.0 / Double(newCount)
+        // Shrink existing sections proportionally to their current
+        // weights — keeps relative ordering of weights stable.
+        let remainingTotal = 100.0 - newShare
+        let currentTotal = existing.reduce(0.0) { $0 + max($1.weight, 0) }
+        if currentTotal > 0 {
+            let scale = remainingTotal / currentTotal
+            for s in existing { s.weight = max(s.weight, 0) * scale }
+        }
         let section = RubricSection(
             title: "New Section",
             description: "",
-            sortOrder: rubric.sections.count,
-            weight: 1.0
+            sortOrder: existing.count,
+            weight: newShare
         )
         section.rubric = rubric
         rubric.sections.append(section)

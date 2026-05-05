@@ -135,6 +135,7 @@
 		CAE631B21FD4390A98F4BD5E /* InterviewPromptTemplates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A9A10AF91F15CA169F503A2 /* InterviewPromptTemplates.swift */; };
 		CBDAED661B2F395A01665B98 /* InterviewPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3342DA3D292F447AD03C19D1 /* InterviewPhase.swift */; };
 		CC29BCBB453D0F8515604013 /* SparkleUpdaterDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02203A251A6442629C7C3EA5 /* SparkleUpdaterDelegate.swift */; };
+		CCF5F5B392B9592C340DEE39 /* RubricWeightBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 308B06B13B6F25651CBDC29E /* RubricWeightBar.swift */; };
 		D05877DA620547F1B8059550 /* MeetingDeletion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32E8A78D90F7F6032C45662E /* MeetingDeletion.swift */; };
 		D0D02AD902D348ADFE6F2935 /* InterviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1883C32FA38176C32ED9B57 /* InterviewListView.swift */; };
 		D15B92644A209FBBF7B31D8D /* MeetingPrepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A449FC8E55341990C8A3A7A /* MeetingPrepView.swift */; };
@@ -212,6 +213,7 @@
 		2B931FA0292EE0DF9C7F8A19 /* KnowledgeLinksSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeLinksSection.swift; sourceTree = "<group>"; };
 		300EAE12152D87923A870EA9 /* ReProcessingStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReProcessingStatusBar.swift; sourceTree = "<group>"; };
 		3064E03937611C03B74553CD /* AudioFormatConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFormatConverter.swift; sourceTree = "<group>"; };
+		308B06B13B6F25651CBDC29E /* RubricWeightBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RubricWeightBar.swift; sourceTree = "<group>"; };
 		32E8A78D90F7F6032C45662E /* MeetingDeletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDeletion.swift; sourceTree = "<group>"; };
 		3342DA3D292F447AD03C19D1 /* InterviewPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewPhase.swift; sourceTree = "<group>"; };
 		355D52E442FFB5C7B6F89C4F /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
@@ -778,6 +780,7 @@
 				FD672DF259613086F9FC8826 /* RubricEditorView.swift */,
 				A47BC52049DFA6A2808B1FC6 /* RubricListView.swift */,
 				22EBC71AC684DEC93517AF36 /* RubricSectionEditorView.swift */,
+				308B06B13B6F25651CBDC29E /* RubricWeightBar.swift */,
 				4EBBBD940532534CC8B5F6BD /* SectionMarkerView.swift */,
 				9777ACE77F882D5DF615E010 /* TranscriptTestView.swift */,
 			);
@@ -1049,6 +1052,7 @@
 				3AA83AF5E55969C40719957C /* RubricListView.swift in Sources */,
 				8C6B05D3E05E3B1B03E2C29A /* RubricSection.swift in Sources */,
 				8C25916DB63984A44D34D1E1 /* RubricSectionEditorView.swift in Sources */,
+				CCF5F5B392B9592C340DEE39 /* RubricWeightBar.swift in Sources */,
 				BFECEA4333EBD37114C21E0E /* SchemaVersions.swift in Sources */,
 				32F2D5A931A3AA1356F022D8 /* ScoreEvidence.swift in Sources */,
 				F9E5B7B92D5523164E3619A8 /* SectionMarkerView.swift in Sources */,
