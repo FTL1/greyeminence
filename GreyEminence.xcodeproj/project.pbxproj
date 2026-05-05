@@ -113,6 +113,7 @@
 		A6084800D0732B67F76DA306 /* StorageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0AF2329398C06BB75B022FF /* StorageManager.swift */; };
 		A8740BAFD283BC00E8F1C08E /* Candidate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B86BEE74BFC9E0E417DCF5A /* Candidate.swift */; };
 		A882ABE35BA77B48EF727F8F /* MeetingPrepService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B844FF1A1E3ECA5753702A38 /* MeetingPrepService.swift */; };
+		AA576ED631E47C9439A92F1A /* PDFPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E1C9C53FD728F572A404D5E /* PDFPreviewView.swift */; };
 		AE6BC1D9261C14A0BD786430 /* EmbeddingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA6B494CC588C6C3F58E4F1 /* EmbeddingProvider.swift */; };
 		AEEA47611AA685CA2A8597C6 /* SemanticSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 666C86B231ACF32FA58796CE /* SemanticSearchService.swift */; };
 		B0B93EBDC1B05304CFC289ED /* MeetingRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B86DBE859B4EF56428216AA /* MeetingRowView.swift */; };
@@ -257,6 +258,7 @@
 		6A9A10AF91F15CA169F503A2 /* InterviewPromptTemplates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewPromptTemplates.swift; sourceTree = "<group>"; };
 		6CA97EAE00616CBA74905937 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		6D71B4ACDF2860C265D2E456 /* ContactDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactDetailView.swift; sourceTree = "<group>"; };
+		6E1C9C53FD728F572A404D5E /* PDFPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFPreviewView.swift; sourceTree = "<group>"; };
 		6EAE39B31598DBAB6A3CFFFB /* SpeakerDiarizationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerDiarizationService.swift; sourceTree = "<group>"; };
 		6EAF64989E2FFD056A8A757A /* AskView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskView.swift; sourceTree = "<group>"; };
 		72F471A4457C433C3E6F503D /* HighQualityTranscriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighQualityTranscriber.swift; sourceTree = "<group>"; };
@@ -783,6 +785,7 @@
 				F75935675593F5D61DBF1542 /* InterviewSetupView.swift */,
 				52BA4CA49EBD1B2A041D5E84 /* LiveInterviewIntelligenceView.swift */,
 				85571895F31B17D9B41094BB /* LiveInterviewView.swift */,
+				6E1C9C53FD728F572A404D5E /* PDFPreviewView.swift */,
 				FD672DF259613086F9FC8826 /* RubricEditorView.swift */,
 				A47BC52049DFA6A2808B1FC6 /* RubricListView.swift */,
 				22EBC71AC684DEC93517AF36 /* RubricSectionEditorView.swift */,
@@ -1041,6 +1044,7 @@
 				24283F84D0FD2716A6806F48 /* ObsidianExportService.swift in Sources */,
 				DBDF5229655F6F36425F0F6F /* ObsidianSettingsView.swift in Sources */,
 				87041339499E41CA9C187A95 /* OrganizationSettingsView.swift in Sources */,
+				AA576ED631E47C9439A92F1A /* PDFPreviewView.swift in Sources */,
 				A173DAAD896AF99772AC00EA /* PeopleView.swift in Sources */,
 				FC91687C779A58699CF98D54 /* PersistenceGate.swift in Sources */,
 				D1BCC317E4B910D757CB9FC6 /* PromptStore.swift in Sources */,

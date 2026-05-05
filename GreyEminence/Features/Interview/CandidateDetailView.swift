@@ -8,6 +8,7 @@ struct CandidateDetailView: View {
     @Query(sort: \InterviewRole.createdAt) private var roles: [InterviewRole]
     @State private var showResumeImporter = false
     @State private var resumeError: String?
+    @State private var isResumeExpanded = false
 
     /// File types accepted as resumes. PDF is the common case; doc/docx
     /// covered for users still on Word; plain text and markdown for the
@@ -54,6 +55,18 @@ struct CandidateDetailView: View {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
+                }
+                if isResumeExpanded,
+                   let url = candidate.resumeURL,
+                   FileManager.default.fileExists(atPath: url.path),
+                   isPDF(url) {
+                    PDFPreviewView(url: url)
+                        .frame(minHeight: 360, idealHeight: 480)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.secondary.opacity(0.2), lineWidth: 0.5)
+                        )
                 }
             }
 
@@ -139,6 +152,19 @@ struct CandidateDetailView: View {
                     }
                 }
                 Spacer()
+                if isPDF(url) {
+                    Button {
+                        isResumeExpanded.toggle()
+                    } label: {
+                        Label(
+                            isResumeExpanded ? "Hide" : "Preview",
+                            systemImage: isResumeExpanded ? "chevron.up" : "eye"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!FileManager.default.fileExists(atPath: url.path))
+                }
                 Button {
                     NSWorkspace.shared.open(url)
                 } label: {
@@ -207,6 +233,10 @@ struct CandidateDetailView: View {
         candidate.resumeFilename = nil
         candidate.resumeAddedAt = nil
         resumeError = nil
+    }
+
+    private func isPDF(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "pdf"
     }
 
     private func iconName(for filename: String) -> String {
