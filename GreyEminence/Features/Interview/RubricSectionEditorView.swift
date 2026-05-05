@@ -41,7 +41,7 @@ struct RubricSectionEditorView: View {
                                 set: { criterion.signal = $0 }
                             ))
                             .font(.body)
-                            TextField("Evaluation notes (optional)", text: Binding(
+                            TextField("What to look for (optional, for interviewer reference)", text: Binding(
                                 get: { criterion.evaluationNotes ?? "" },
                                 set: { criterion.evaluationNotes = $0.isEmpty ? nil : $0 }
                             ))
