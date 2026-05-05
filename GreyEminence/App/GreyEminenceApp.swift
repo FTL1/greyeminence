@@ -139,6 +139,8 @@ struct GreyEminenceApp: App {
 }
 
 private func seedInterviewDefaults(in context: ModelContext) {
+    seedAIAssistedEngineeringRubricIfMissing(in: context)
+
     let seedVersion = UserDefaults.standard.integer(forKey: "interviewSeedVersion")
     guard seedVersion < 4 else { return }
 
@@ -274,6 +276,128 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
     seedDataTeamRubric(dataRubric, in: context)
 
     PersistenceGate.save(context, site: "seedOrganizationAndRubrics/final")
+}
+
+// MARK: - AI-Assisted Engineering Rubric (idempotent)
+
+/// Adds the "AI-Assisted Engineering" rubric if it doesn't already exist.
+/// Runs every launch as a no-op when the rubric is present, so users on
+/// older builds get it on next start without losing any other interview
+/// data. Unattached to a specific role — the phase planner shows it
+/// alongside role-scoped rubrics so users can compose it with System
+/// Design, Coding, etc. for any role.
+private func seedAIAssistedEngineeringRubricIfMissing(in context: ModelContext) {
+    let rubricName = "AI-Assisted Engineering"
+    let existing = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
+    if existing.contains(where: { $0.name == rubricName }) { return }
+
+    let rubric = Rubric(name: rubricName)
+    context.insert(rubric)
+    seedAIAssistedEngineeringRubric(rubric, in: context)
+    PersistenceGate.save(context, site: "seedAIAssistedEngineeringRubricIfMissing")
+}
+
+private func seedAIAssistedEngineeringRubric(_ rubric: Rubric, in context: ModelContext) {
+    // Section 1: Tool Fluency — does the candidate use AI tools as a
+    // multiplier or as a crutch?
+    let fluency = RubricSection(
+        title: "Tool Fluency",
+        description: "How effectively the candidate wields AI assistance: knowing when to invoke it, when not to, and how to prompt iteratively.",
+        sortOrder: 0,
+        weight: 25
+    )
+    fluency.rubric = rubric
+    context.insert(fluency)
+    for (i, signal) in [
+        "Reaches for AI on the right kinds of tasks (scaffolding, search, refactor) and avoids it on tasks where deep understanding matters",
+        "Iterates on prompts rather than one-shotting; refines context instead of accepting a confident-but-wrong first reply",
+        "Uses AI to expand their reach (unfamiliar APIs, boilerplate) without using it to skip thinking",
+        "Articulates clearly *why* they reached for AI for this particular task",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = fluency
+    }
+    for (i, (label, expected, value)) in [
+        ("Asked AI for the part they understood least", "yes", 1),
+        ("Pasted code without reading it", "yes", -2),
+        ("Started by writing the prompt before opening the editor", "yes", -1),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = fluency
+    }
+
+    // Section 2: Critical Review of AI Output
+    let review = RubricSection(
+        title: "Code Review of AI Output",
+        description: "Whether the candidate treats AI output as a draft to review or as a final answer to accept.",
+        sortOrder: 1,
+        weight: 30
+    )
+    review.rubric = rubric
+    context.insert(review)
+    for (i, signal) in [
+        "Catches hallucinated APIs, wrong type signatures, or fabricated docs in AI output",
+        "Pushes back on confident-but-wrong code rather than deferring to it",
+        "Spots subtle bugs (off-by-one, edge cases, error handling) the AI missed",
+        "Recognizes when the AI took a fundamentally wrong approach and abandons that path",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = review
+    }
+    for (i, (label, expected, value)) in [
+        ("Caught a hallucinated API in the AI's output", "yes", 2),
+        ("Accepted obviously wrong code without comment", "yes", -2),
+        ("Re-prompted instead of accepting a flawed answer", "yes", 1),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = review
+    }
+
+    // Section 3: Decomposition for AI
+    let decomp = RubricSection(
+        title: "Decomposition for AI",
+        description: "Whether the candidate breaks problems into AI-tractable pieces and provides the context the AI needs.",
+        sortOrder: 2,
+        weight: 20
+    )
+    decomp.rubric = rubric
+    context.insert(decomp)
+    for (i, signal) in [
+        "Breaks large tasks into chunks the AI can solve well, rather than asking it to do too much at once",
+        "Provides the right context (relevant files, constraints, examples) instead of expecting the AI to guess",
+        "Knows the limits of context windows and works around them",
+        "Recognizes when a task is too vague for AI and refines the spec first",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = decomp
+    }
+
+    // Section 4: Verification Discipline
+    let verify = RubricSection(
+        title: "Verification Discipline",
+        description: "Whether the candidate verifies AI output before claiming the task is done.",
+        sortOrder: 3,
+        weight: 25
+    )
+    verify.rubric = rubric
+    context.insert(verify)
+    for (i, signal) in [
+        "Runs and tests AI output before declaring the task complete",
+        "Doesn't let \"looks right\" stand in for \"is right\" — actively probes for failure modes",
+        "Writes a test or asserts behavior on the boundary, especially for AI-generated logic",
+        "Owns AI mistakes when they ship — doesn't blame the tool",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = verify
+    }
+    for (i, (label, expected, value)) in [
+        ("Wrote a test before accepting the AI's fix", "yes", 2),
+        ("Ran the code immediately after AI generated it", "yes", 1),
+        ("Said \"looks good\" without running it", "yes", -2),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = verify
+    }
 }
 
 // MARK: - General Engineering Rubric (System Design + Coding Exercise)
