@@ -27,20 +27,6 @@ struct RubricSectionEditorView: View {
                 .lineLimit(2...4)
                 .font(.caption)
 
-            // Weight is set by the rubric-level weight bar at the top of
-            // the editor. We only display the current value here so the
-            // section card still surfaces it for context.
-            HStack {
-                Text("Weight")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(Int(section.weight.rounded()))%")
-                    .font(.caption.weight(.semibold))
-                    .fontDesign(.monospaced)
-                    .foregroundStyle(.secondary)
-            }
-
             // Criteria
             if !sortedCriteria.isEmpty {
                 ForEach(sortedCriteria) { criterion in
@@ -153,9 +139,14 @@ struct RubricSectionEditorView: View {
                     .disabled(newBonusLabel.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         } header: {
-            HStack {
+            HStack(spacing: 6) {
                 TextField("Section title", text: $section.title)
                     .font(.subheadline.weight(.semibold))
+                    .textCase(nil)
+                    .fixedSize()
+                Text("(\(Int(section.weight.rounded()))%)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
                     .textCase(nil)
                 Spacer()
                 Button(role: .destructive) {
