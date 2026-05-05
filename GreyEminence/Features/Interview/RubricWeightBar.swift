@@ -12,14 +12,34 @@ import SwiftUI
 /// arbitrary denominator that the user couldn't see, and re-balancing
 /// required updating every section by hand. With one bar the invariant
 /// "weights sum to 100" is enforced by construction.
+///
+/// Implementation note: the draggable handles are overlaid at absolute
+/// x-offsets rather than placed inside the segment HStack. This keeps
+/// drag translation stable in the bar's named coordinate space — if the
+/// handles lived inside the resizing HStack, their local coordinates
+/// would shift mid-drag and the gesture would jerk.
 struct RubricWeightBar: View {
     @Bindable var rubric: Rubric
 
-    /// Minimum weight for any single section. Keeps the divider reachable
-    /// — a 0-width segment would have no draggable surface.
+    /// Minimum weight for any single section. Keeps each segment wide
+    /// enough that the divider hit area stays reachable.
     private static let minWeight: Double = 5
     private static let barHeight: CGFloat = 28
-    private static let dividerWidth: CGFloat = 8
+    private static let handleHitWidth: CGFloat = 16
+    private static let coordSpaceName = "rubricWeightBar"
+
+    /// Baseline weights captured at the start of a divider drag. Cleared
+    /// on `onEnded` so the next drag re-captures from the new state.
+    @State private var dragBaseline: DragBaseline?
+
+    private struct DragBaseline {
+        let leftID: UUID
+        let rightID: UUID
+        let leftWeight: Double
+        let rightWeight: Double
+        /// X-offset of the divider at drag start, in the bar's coord space.
+        let startOffset: CGFloat
+    }
 
     private var sortedSections: [RubricSection] {
         rubric.sections.sorted { $0.sortOrder < $1.sortOrder }
@@ -31,13 +51,14 @@ struct RubricWeightBar: View {
 
     var body: some View {
         let sections = sortedSections
-        if sections.isEmpty {
-            EmptyView()
-        } else if sections.count == 1 {
-            // Single section gets the whole bar — no handles to drag.
-            singleSegmentBar(sections[0])
-        } else {
-            multiSegmentBar(sections)
+        Group {
+            if sections.isEmpty {
+                EmptyView()
+            } else if sections.count == 1 {
+                singleSegmentBar(sections[0])
+            } else {
+                multiSegmentBar(sections)
+            }
         }
     }
 
@@ -58,134 +79,171 @@ struct RubricWeightBar: View {
         }
     }
 
-    // MARK: - Multi-section bar with draggable dividers
+    // MARK: - Multi-section bar
 
     private func multiSegmentBar(_ sections: [RubricSection]) -> some View {
         GeometryReader { geo in
             let total = max(totalWeight, 1)
-            // Compute each segment's pixel width based on its proportion of
-            // the total. Subtract divider widths from the available area so
-            // segments and dividers tile exactly to the bar's width.
-            let dividerCount = sections.count - 1
-            let availableWidth = max(geo.size.width - CGFloat(dividerCount) * Self.dividerWidth, 0)
+            let barWidth = geo.size.width
+            // Cumulative weight before each section, used to compute each
+            // segment's leading edge in pixels.
+            let cumulativeOffsets = cumulativeWeightOffsets(for: sections)
 
-            HStack(spacing: 0) {
-                ForEach(Array(sections.enumerated()), id: \.element.id) { idx, section in
-                    let fraction = max(section.weight, 0) / total
-                    let width = availableWidth * fraction
-                    segmentView(section: section, index: idx, width: width)
-                    if idx < sections.count - 1 {
-                        dividerHandle(
-                            left: section,
-                            right: sections[idx + 1],
-                            barWidth: geo.size.width,
-                            total: total
-                        )
+            ZStack(alignment: .leading) {
+                // Background segments — colored bands, no gestures.
+                HStack(spacing: 0) {
+                    ForEach(Array(sections.enumerated()), id: \.element.id) { idx, section in
+                        let fraction = max(section.weight, 0) / total
+                        Rectangle()
+                            .fill(color(for: idx).gradient)
+                            .frame(width: max(barWidth * fraction, 0))
+                            .overlay(segmentLabel(section: section))
                     }
                 }
+                .frame(height: Self.barHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                // Disable any implicit animation on segment width — we
+                // want widths to track the drag in real time, not animate
+                // toward each updated value.
+                .animation(nil, value: totalWeight)
+
+                // Draggable handles overlaid at absolute positions. Each
+                // handle's gesture is anchored to the bar's named coord
+                // space so translation stays stable as the segments
+                // around it resize.
+                ForEach(Array(sections.dropLast().enumerated()), id: \.element.id) { idx, leftSection in
+                    let rightSection = sections[idx + 1]
+                    let dividerWeightOffset = cumulativeOffsets[idx + 1]
+                    let dividerX = barWidth * CGFloat(dividerWeightOffset / total)
+                    handleView(
+                        leftSection: leftSection,
+                        rightSection: rightSection,
+                        dividerX: dividerX,
+                        barWidth: barWidth,
+                        total: total
+                    )
+                }
             }
-            .frame(height: Self.barHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .coordinateSpace(name: Self.coordSpaceName)
         }
         .frame(height: Self.barHeight)
     }
 
-    private func segmentView(section: RubricSection, index: Int, width: CGFloat) -> some View {
-        let percent = Int((section.weight / max(totalWeight, 1) * 100).rounded())
-        return Rectangle()
-            .fill(color(for: index).gradient)
-            .frame(width: max(width, 0))
-            .overlay(
-                HStack(spacing: 4) {
-                    Text(section.title)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text("\(percent)%")
-                        .fontDesign(.monospaced)
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-            )
-            .help("\(section.title): \(percent)%")
+    private func cumulativeWeightOffsets(for sections: [RubricSection]) -> [Double] {
+        var offsets: [Double] = [0]
+        var running: Double = 0
+        for section in sections {
+            running += max(section.weight, 0)
+            offsets.append(running)
+        }
+        return offsets
     }
 
-    private func dividerHandle(
-        left: RubricSection,
-        right: RubricSection,
+    private func segmentLabel(section: RubricSection) -> some View {
+        let percent = Int((section.weight / max(totalWeight, 1) * 100).rounded())
+        return HStack(spacing: 4) {
+            Text(section.title)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text("\(percent)%")
+                .fontDesign(.monospaced)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .help("\(section.title): \(percent)%")
+    }
+
+    private func handleView(
+        leftSection: RubricSection,
+        rightSection: RubricSection,
+        dividerX: CGFloat,
         barWidth: CGFloat,
         total: Double
     ) -> some View {
-        Rectangle()
-            .fill(Color.black.opacity(0.001)) // hit area; visible chevron drawn on top
-            .frame(width: Self.dividerWidth)
-            .overlay(
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .rotationEffect(.degrees(90))
-            )
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        // Convert the drag's pixel translation to a weight
-                        // delta. `barWidth` corresponds to `total` weight.
-                        let pixelsPerWeight = barWidth / CGFloat(total)
-                        guard pixelsPerWeight > 0 else { return }
-                        let deltaWeight = Double(value.translation.width / pixelsPerWeight)
-                        applyDelta(deltaWeight, fromLeftBaseline: leftBaseline(for: left), toRightBaseline: rightBaseline(for: right), left: left, right: right)
-                    }
-                    .onEnded { _ in
-                        // Reset the baseline so the next drag starts from
-                        // the post-drag weight.
-                        baselineLeft = nil
-                        baselineRight = nil
-                    }
-            )
+        // The handle is a thin vertical bar centered on the divider X
+        // position, with a wider invisible hit area for easy grabbing.
+        ZStack {
+            // Visible chevron centered on the divider
+            Rectangle()
+                .fill(.white.opacity(0.6))
+                .frame(width: 2, height: Self.barHeight - 8)
+            // Invisible hit area
+            Color.clear
+                .frame(width: Self.handleHitWidth, height: Self.barHeight)
+                .contentShape(Rectangle())
+        }
+        .position(x: dividerX, y: Self.barHeight / 2)
+        .onHover { hovering in
+            if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordSpaceName))
+                .onChanged { value in
+                    handleDrag(
+                        location: value.location,
+                        leftSection: leftSection,
+                        rightSection: rightSection,
+                        dividerX: dividerX,
+                        barWidth: barWidth,
+                        total: total
+                    )
+                }
+                .onEnded { _ in
+                    dragBaseline = nil
+                }
+        )
     }
 
-    // Track baseline weights at drag start so we apply the cumulative
-    // translation rather than a per-frame delta — keeps the segment exactly
-    // under the cursor instead of drifting with rounding error.
-    @State private var baselineLeft: (id: UUID, weight: Double)?
-    @State private var baselineRight: (id: UUID, weight: Double)?
-
-    private func leftBaseline(for section: RubricSection) -> Double {
-        if let baseline = baselineLeft, baseline.id == section.id { return baseline.weight }
-        baselineLeft = (section.id, section.weight)
-        return section.weight
-    }
-
-    private func rightBaseline(for section: RubricSection) -> Double {
-        if let baseline = baselineRight, baseline.id == section.id { return baseline.weight }
-        baselineRight = (section.id, section.weight)
-        return section.weight
-    }
-
-    private func applyDelta(
-        _ delta: Double,
-        fromLeftBaseline leftBaseline: Double,
-        toRightBaseline rightBaseline: Double,
-        left: RubricSection,
-        right: RubricSection
+    /// Called on every drag-change event. Captures the baseline once at
+    /// gesture start, then computes the new weights from the cursor's
+    /// absolute x-position in the bar's coord space — not from the
+    /// view-relative translation that would drift as the handle moves.
+    private func handleDrag(
+        location: CGPoint,
+        leftSection: RubricSection,
+        rightSection: RubricSection,
+        dividerX: CGFloat,
+        barWidth: CGFloat,
+        total: Double
     ) {
-        // Clamp so neither side falls below the minimum.
-        let combined = leftBaseline + rightBaseline
-        let proposedLeft = leftBaseline + delta
+        guard barWidth > 0, total > 0 else { return }
+
+        // Capture baseline on first event of this drag.
+        if dragBaseline == nil
+            || dragBaseline?.leftID != leftSection.id
+            || dragBaseline?.rightID != rightSection.id {
+            dragBaseline = DragBaseline(
+                leftID: leftSection.id,
+                rightID: rightSection.id,
+                leftWeight: leftSection.weight,
+                rightWeight: rightSection.weight,
+                startOffset: dividerX
+            )
+        }
+        guard let baseline = dragBaseline else { return }
+
+        // Cursor position translates directly to a divider position in
+        // weight space. Cumulative weight before the left section stays
+        // fixed at baseline; any pixels left of that are off-limits.
+        let combined = baseline.leftWeight + baseline.rightWeight
+        // Pixels before the left section's leading edge (locked).
+        let leftAnchorX = baseline.startOffset - CGFloat(baseline.leftWeight / total) * barWidth
+        // Cursor's offset from the left section's leading edge, in pixels.
+        let cursorOffsetFromAnchor = location.x - leftAnchorX
+        // Convert to weight units. Total weight maps to barWidth pixels.
+        let proposedLeft = Double(cursorOffsetFromAnchor / barWidth) * total
         let clampedLeft = min(max(proposedLeft, Self.minWeight), combined - Self.minWeight)
         let clampedRight = combined - clampedLeft
-        left.weight = clampedLeft
-        right.weight = clampedRight
+
+        leftSection.weight = clampedLeft
+        rightSection.weight = clampedRight
     }
 
     // MARK: - Colors
 
     /// Distinct hues per section index; cycles past the palette length.
-    /// Chosen for readability on white text labels.
+    /// Chosen for readability with white text labels on top.
     private static let palette: [Color] = [
         .indigo, .teal, .orange, .purple, .blue, .pink, .green, .red,
     ]
@@ -206,13 +264,10 @@ extension RubricWeightBar {
         guard !sections.isEmpty else { return }
         let total = sections.reduce(0.0) { $0 + max($1.weight, 0) }
         guard total > 0 else {
-            // Pathological all-zeros: distribute evenly.
             let even = 100.0 / Double(sections.count)
             for section in sections { section.weight = even }
             return
         }
-        // Skip if already within tolerance of 100 — avoids floating-point
-        // drift on every open.
         if abs(total - 100) < 0.01 { return }
         let scale = 100.0 / total
         for section in sections {
