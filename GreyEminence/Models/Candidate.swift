@@ -11,6 +11,17 @@ final class Candidate {
     var isArchived: Bool
     var createdAt: Date
 
+    /// Filename of the resume copied into the candidate's directory under
+    /// AppSupport. Resolved to a URL via `StorageManager.candidateResumeURL`.
+    /// Nil when no resume is attached. We copy the file into our container
+    /// at attach time so we don't depend on the original security-scoped
+    /// URL surviving across launches.
+    var resumeFilename: String?
+
+    /// When the resume was attached (or last replaced). Used in the UI to
+    /// give the reader a sense of how stale it might be.
+    var resumeAddedAt: Date?
+
     var role: InterviewRole?
 
     @Relationship(deleteRule: .nullify, inverse: \Interview.candidate)
@@ -23,6 +34,11 @@ final class Candidate {
         self.isArchived = false
         self.createdAt = .now
         self.interviews = []
+    }
+
+    /// Resolved on-disk URL for the attached resume, or nil if none.
+    var resumeURL: URL? {
+        resumeFilename.map { StorageManager.shared.candidateResumeURL(for: id, filename: $0) }
     }
 
     var initials: String {

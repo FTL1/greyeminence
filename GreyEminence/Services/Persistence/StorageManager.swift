@@ -7,6 +7,7 @@ final class StorageManager: Sendable {
     let appSupportURL: URL
     let recordingsURL: URL
     let modelsURL: URL
+    let candidatesURL: URL
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -14,8 +15,9 @@ final class StorageManager: Sendable {
         self.appSupportURL = base
         self.recordingsURL = base.appendingPathComponent("Recordings", isDirectory: true)
         self.modelsURL = base.appendingPathComponent("Models", isDirectory: true)
+        self.candidatesURL = base.appendingPathComponent("Candidates", isDirectory: true)
 
-        for url in [base, recordingsURL, modelsURL] {
+        for url in [base, recordingsURL, modelsURL, candidatesURL] {
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
@@ -81,6 +83,62 @@ final class StorageManager: Sendable {
             }
         }
         return (count, bytes)
+    }
+
+    // MARK: - Candidate Resumes
+
+    /// Per-candidate directory for attached files (currently just resumes).
+    /// Created lazily on first access.
+    func candidateDirectory(for candidateID: UUID) -> URL {
+        let dir = candidatesURL.appendingPathComponent(candidateID.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Resolved on-disk URL for a candidate's resume, given the stored
+    /// filename. Doesn't check existence — callers should verify with
+    /// `FileManager.default.fileExists(atPath:)` before using.
+    func candidateResumeURL(for candidateID: UUID, filename: String) -> URL {
+        candidateDirectory(for: candidateID).appendingPathComponent(filename)
+    }
+
+    /// Copy a user-picked file into the candidate's directory and return
+    /// the destination filename. Replaces any prior resume to avoid orphan
+    /// files. The source URL must already have its security scope started
+    /// by the caller; we just read from it during the copy.
+    @discardableResult
+    func attachResume(sourceURL: URL, candidateID: UUID, replacingFilename: String?) throws -> String {
+        let dir = candidateDirectory(for: candidateID)
+        // Drop any pre-existing resume for this candidate so we don't leak
+        // disk on replacement. Cheap enough — typical candidate has 0 or 1.
+        if let prior = replacingFilename {
+            let priorURL = dir.appendingPathComponent(prior)
+            try? FileManager.default.removeItem(at: priorURL)
+        }
+        // Sanitize filename: strip path separators (defensive — shouldn't
+        // happen via NSOpenPanel but a malformed bookmark could).
+        let baseName = sourceURL.lastPathComponent
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+        let destURL = dir.appendingPathComponent(baseName)
+        // If a file of the same name already exists from a half-broken
+        // earlier attach, remove it before copying so the copy doesn't fail.
+        try? FileManager.default.removeItem(at: destURL)
+        try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        return baseName
+    }
+
+    /// Remove a candidate's resume file and clean up the candidate
+    /// directory if it's now empty.
+    @discardableResult
+    func removeResume(candidateID: UUID, filename: String) -> Bool {
+        let dir = candidateDirectory(for: candidateID)
+        let url = dir.appendingPathComponent(filename)
+        let removed = (try? FileManager.default.removeItem(at: url)) != nil
+        if let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path), entries.isEmpty {
+            try? FileManager.default.removeItem(at: dir)
+        }
+        return removed
     }
 
     private func directorySize(at url: URL) -> Int64 {
