@@ -36,10 +36,18 @@ struct GreyEminenceApp: App {
     }
 
     var sharedModelContainer: ModelContainer? = {
-        // Versioned schema + migration plan — see SchemaVersions.swift.
-        // Every model change should bump to a new SchemaV* and register a
-        // migration stage so existing user stores evolve safely instead of
-        // breaking silently.
+        // Versioned schema — see SchemaVersions.swift. We deliberately omit
+        // an explicit migration plan because SwiftData on macOS 26 throws
+        // an Objective-C exception from `NSLightweightMigrationStage.init`
+        // when the V1→V2 stage is provided directly (rdar-style toolchain
+        // bug — the exception bypasses Swift's `try?` and crashes the app
+        // before the DatabaseErrorView recovery UI can render).
+        //
+        // Without an explicit plan, SwiftData auto-migrates additive
+        // changes (new entities, new optional relationships) — which is
+        // exactly what V1→V2 is. Migration stages still exist in the plan
+        // type for documentation and for future non-additive changes that
+        // genuinely need custom handlers.
         let schema = Schema(versionedSchema: SchemaV2.self)
         let config = ModelConfiguration(
             "GreyEminence",
@@ -48,7 +56,6 @@ struct GreyEminenceApp: App {
         )
         return try? ModelContainer(
             for: schema,
-            migrationPlan: GreyEminenceMigrationPlan.self,
             configurations: [config]
         )
     }()

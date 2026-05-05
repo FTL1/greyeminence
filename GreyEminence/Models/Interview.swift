@@ -80,9 +80,11 @@ final class Interview {
     /// rubric (or none, for intro/conclusion) and its own scoring window.
     /// Empty for legacy interviews created before phase support; the
     /// startup backfill in MaintenanceService converts those to a single
-    /// phase containing the legacy `rubric`.
+    /// phase containing the legacy `rubric`. No `= []` default — SwiftData
+    /// migration on macOS 26 chokes on default literals for new
+    /// relationships.
     @Relationship(deleteRule: .cascade, inverse: \InterviewPhase.interview)
-    var phases: [InterviewPhase] = []
+    var phases: [InterviewPhase]
 
     @Relationship(deleteRule: .cascade, inverse: \InterviewImpression.interview)
     var impressions: [InterviewImpression]
