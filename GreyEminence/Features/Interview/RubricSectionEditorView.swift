@@ -66,7 +66,7 @@ struct RubricSectionEditorView: View {
                             get: { signal.label },
                             set: { signal.label = $0 }
                         ))
-                        .frame(maxWidth: 200)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         Text("expect:")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -102,7 +102,7 @@ struct RubricSectionEditorView: View {
             HStack(spacing: 6) {
                 TextField("Add bonus signal...", text: $newBonusLabel)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 200)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .onSubmit { addBonusSignal() }
                 TextField("expect", text: $newBonusExpected)
                     .textFieldStyle(.roundedBorder)
