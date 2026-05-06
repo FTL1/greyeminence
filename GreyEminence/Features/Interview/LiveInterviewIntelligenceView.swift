@@ -169,38 +169,62 @@ struct LiveInterviewIntelligenceView: View {
         HStack(spacing: 4) {
             ForEach(traits) { trait in
                 if let impression = interviewViewModel.impressions.first(where: { $0.traitName == trait.name }) {
-                    let activeColor = Self.dotColors[min(impression.value - 1, 4)]
+                    let humanColor = Self.dotColors[min(impression.value - 1, 4)]
                     let icon = Self.impressionIcons[trait.name] ?? "circle"
 
                     VStack(spacing: 1) {
                         HStack(spacing: 3) {
-                            // Icon (same size as phase icons)
+                            // Icon
                             Image(systemName: icon)
                                 .font(.system(size: 12))
-                                .foregroundStyle(activeColor)
+                                .foregroundStyle(humanColor)
                                 .frame(width: 28, height: 28)
-                                .background(activeColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                                .background(humanColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
                                 .help(trait.name)
 
-                            // Big dots to the right
-                            HStack(spacing: 3) {
-                                ForEach(1...5, id: \.self) { val in
-                                    Circle()
-                                        .fill(val <= impression.value ? activeColor : Color.secondary.opacity(0.15))
-                                        .frame(width: 10, height: 10)
-                                        .contentShape(Rectangle().size(width: 16, height: 16))
-                                        .onTapGesture {
-                                            interviewViewModel.updateImpression(traitName: trait.name, value: val)
+                            VStack(alignment: .leading, spacing: 1) {
+                                // AI dot row (read-only) — only when the AI
+                                // has produced a value.
+                                if let aiValue = impression.aiValue {
+                                    let aiColor = Self.dotColors[min(aiValue - 1, 4)]
+                                    HStack(spacing: 3) {
+                                        Text("AI")
+                                            .font(.system(size: 6, weight: .bold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 10, alignment: .leading)
+                                        ForEach(1...5, id: \.self) { val in
+                                            Circle()
+                                                .stroke(val <= aiValue ? aiColor : Color.secondary.opacity(0.25), lineWidth: 1.5)
+                                                .frame(width: 7, height: 7)
+                                                .help(trait.label(for: val))
                                         }
-                                        .help(trait.label(for: val))
+                                    }
+                                }
+
+                                // Interviewer dot row (tappable)
+                                HStack(spacing: 3) {
+                                    Text("You")
+                                        .font(.system(size: 6, weight: .bold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 10, alignment: .leading)
+                                    ForEach(1...5, id: \.self) { val in
+                                        Circle()
+                                            .fill(val <= impression.value ? humanColor : Color.secondary.opacity(0.15))
+                                            .frame(width: 10, height: 10)
+                                            .contentShape(Rectangle().size(width: 16, height: 16))
+                                            .onTapGesture {
+                                                interviewViewModel.updateImpression(traitName: trait.name, value: val)
+                                            }
+                                            .help(trait.label(for: val))
+                                    }
                                 }
                             }
                         }
 
-                        // Value label underneath
+                        // Value label underneath (interviewer's read)
                         Text(trait.label(for: impression.value))
                             .font(.system(size: 7))
-                            .foregroundStyle(activeColor)
+                            .foregroundStyle(humanColor)
                             .lineLimit(1)
                     }
                 }
@@ -496,18 +520,59 @@ struct InterviewNotesTable: View {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// Notes grouped by phase, in `plannedOrder`. Unphased notes (legacy
+    /// or captured outside any active phase) bucket into a final
+    /// "Unphased" group.
+    private struct NoteGroup: Identifiable {
+        let id: String
+        let title: String
+        let phaseID: UUID?
+        let isActive: Bool
+        let notes: [InterviewNote]
+    }
+
+    private var noteGroups: [NoteGroup] {
+        let phases = interviewViewModel.interview?.orderedPhases ?? []
+        let activeID = interviewViewModel.interview?.activePhase?.id
+        let byPhaseID = Dictionary(grouping: topLevelNotes, by: { $0.phase?.id })
+        var groups: [NoteGroup] = phases.map { phase in
+            NoteGroup(
+                id: phase.id.uuidString,
+                title: phase.title,
+                phaseID: phase.id,
+                isActive: phase.id == activeID,
+                notes: (byPhaseID[phase.id] ?? []).sorted { $0.sortOrder < $1.sortOrder }
+            )
+        }
+        if let unphased = byPhaseID[nil], !unphased.isEmpty {
+            groups.append(NoteGroup(
+                id: "unphased",
+                title: "Unphased",
+                phaseID: nil,
+                isActive: false,
+                notes: unphased.sorted { $0.sortOrder < $1.sortOrder }
+            ))
+        }
+        return groups
+    }
+
+    /// Active phase title for the inline composer placeholder.
+    private var activePhaseTitle: String? {
+        interviewViewModel.interview?.activePhase?.title
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Notes")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            ForEach(topLevelNotes) { note in
-                NoteRow(note: note, interviewViewModel: interviewViewModel, depth: 0)
+            ForEach(noteGroups) { group in
+                phaseGroupView(group)
             }
 
+            // Composer — always pins to the active phase via addNote().
             HStack(spacing: 4) {
-                // Indent toggle button
                 Button { indentNewNote.toggle() } label: {
                     Image(systemName: indentNewNote ? "arrow.left.to.line" : "arrow.right.to.line")
                         .font(.system(size: 9))
@@ -524,14 +589,17 @@ struct InterviewNotesTable: View {
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                     .frame(width: 14)
-                TextField(indentNewNote ? "Sub-note..." : "Add a note...", text: $newNoteText)
+                TextField(composerPlaceholder, text: $newNoteText)
                     .font(.system(size: 11))
                     .textFieldStyle(.plain)
                     .focused($isNewNoteFocused)
                     .onSubmit {
                         let text = newNoteText.trimmingCharacters(in: .whitespaces)
                         guard !text.isEmpty else { return }
-                        if indentNewNote, let lastTop = topLevelNotes.last {
+                        // Indent attaches to the most recent note in the
+                        // active phase (or any phase, falling back).
+                        let activeGroupNotes = noteGroups.first(where: { $0.isActive })?.notes ?? topLevelNotes
+                        if indentNewNote, let lastTop = activeGroupNotes.last {
                             interviewViewModel.addNote(text: text, parent: lastTop)
                         } else {
                             interviewViewModel.addNote(text: text)
@@ -545,6 +613,50 @@ struct InterviewNotesTable: View {
         }
         .padding(8)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var composerPlaceholder: String {
+        if indentNewNote { return "Sub-note..." }
+        if let title = activePhaseTitle {
+            return "Note for \(title)..."
+        }
+        return "Add a note..."
+    }
+
+    @ViewBuilder
+    private func phaseGroupView(_ group: NoteGroup) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                if group.isActive {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 5, height: 5)
+                }
+                Text(group.title.uppercased())
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(group.isActive ? .red : .secondary)
+                Text("\(group.notes.count)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+
+            if group.notes.isEmpty {
+                Text("No notes yet")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+            } else {
+                ForEach(group.notes) { note in
+                    NoteRow(note: note, interviewViewModel: interviewViewModel, depth: 0)
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 2)
+        }
     }
 }
 

@@ -38,6 +38,12 @@ final class InterviewPhase {
     @Relationship(deleteRule: .cascade, inverse: \InterviewSectionScore.phase)
     var sectionScores: [InterviewSectionScore]
 
+    /// Notes captured while this phase was active. Phase deletion nullifies
+    /// the back-reference rather than cascading — notes live independently
+    /// on the interview and outlive the phase.
+    @Relationship(deleteRule: .nullify, inverse: \InterviewNote.phase)
+    var notes: [InterviewNote]
+
     var status: InterviewPhaseStatus {
         get { InterviewPhaseStatus(rawValue: statusRawValue) ?? .planned }
         set { statusRawValue = newValue.rawValue }
@@ -56,6 +62,7 @@ final class InterviewPhase {
         self.statusRawValue = status.rawValue
         self.createdAt = .now
         self.sectionScores = []
+        self.notes = []
     }
 
     /// True when this phase has a rubric and is therefore eligible for AI

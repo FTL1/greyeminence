@@ -130,9 +130,21 @@ enum SchemaV6: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV5.models }
 }
 
+/// SchemaV7 adds:
+/// - `InterviewImpression.aiValue` — AI's independent trait read so it
+///   doesn't clobber the interviewer's manual rating.
+/// - `InterviewNote.phase` — phase the note was captured under, plus
+///   the inverse `InterviewPhase.notes` collection. Lets the live notes
+///   panel group by phase.
+/// Purely additive — auto-migration handles it.
+enum SchemaV7: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(7, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV6.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self]
     }
 
     static var stages: [MigrationStage] {
@@ -141,7 +153,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self),
             .lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self),
             .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self),
-            .lightweight(fromVersion: SchemaV5.self, toVersion: SchemaV6.self)
+            .lightweight(fromVersion: SchemaV5.self, toVersion: SchemaV6.self),
+            .lightweight(fromVersion: SchemaV6.self, toVersion: SchemaV7.self)
         ]
     }
 }

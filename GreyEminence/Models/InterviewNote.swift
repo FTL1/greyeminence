@@ -24,6 +24,10 @@ final class InterviewNote {
 
     var interview: Interview?
     var parentNote: InterviewNote?
+    /// Phase this note was captured during. Nil for legacy notes (pre-V7)
+    /// and notes added outside any active phase. The live notes panel
+    /// groups by this so the interviewer can see notes per phase.
+    var phase: InterviewPhase?
 
     @Relationship(deleteRule: .cascade, inverse: \InterviewNote.parentNote)
     var subNotes: [InterviewNote]

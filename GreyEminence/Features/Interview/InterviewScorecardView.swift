@@ -64,6 +64,110 @@ struct InterviewScorecardView: View {
             .sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    /// Phase groups for the scorecard. One entry per phase that has at
+    /// least one section score, ordered by `plannedOrder`. Skips intro /
+    /// conclusion phases (rubric == nil, so no scores).
+    private struct PhaseGroup: Identifiable {
+        let phaseID: UUID
+        let title: String
+        let plannedOrder: Int
+        let scores: [InterviewSectionScore]
+        let composite: Double?
+        var id: UUID { phaseID }
+    }
+
+    private var phaseGroups: [PhaseGroup] {
+        var scoresByPhase: [UUID: [InterviewSectionScore]] = [:]
+        for score in sortedScores {
+            guard let phaseID = score.phase?.id else { continue }
+            scoresByPhase[phaseID, default: []].append(score)
+        }
+        return interview.orderedPhases.compactMap { phase -> PhaseGroup? in
+            let raw = scoresByPhase[phase.id] ?? []
+            let scores: [InterviewSectionScore] = raw.sorted { (a, b) in
+                a.sortOrder < b.sortOrder
+            }
+            guard !scores.isEmpty else { return nil }
+            let weighted: [(Double, Double)] = scores.compactMap { s in
+                guard let gp = s.effectiveGradePoints else { return nil }
+                return (gp, s.weight)
+            }
+            let totalWeight = weighted.reduce(0.0) { $0 + $1.1 }
+            let composite: Double? = (totalWeight > 0)
+                ? weighted.reduce(0.0) { $0 + $1.0 * $1.1 } / totalWeight
+                : nil
+            return PhaseGroup(
+                phaseID: phase.id,
+                title: phase.title,
+                plannedOrder: phase.plannedOrder,
+                scores: scores,
+                composite: composite
+            )
+        }
+    }
+
+    /// Section scores not linked to any phase (legacy / pre-multi-phase
+    /// records). Surfaced under a fallback "Ungrouped" header so they
+    /// don't silently vanish.
+    private var orphanScores: [InterviewSectionScore] {
+        sortedScores.filter { $0.phase == nil }
+    }
+
+    @ViewBuilder
+    private func phaseGroupView(_ group: PhaseGroup) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(group.title)
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if let composite = group.composite {
+                    let grade = LetterGrade.from(gradePoints: composite)
+                    Text(grade.label)
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(grade.color.opacity(0.2), in: Capsule())
+                        .foregroundStyle(grade.color)
+                } else {
+                    Text("—")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            ForEach(group.scores) { score in
+                scoreCardWithStatus(score)
+            }
+        }
+        .padding(10)
+        .background(.bar.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func scoreCardWithStatus(_ score: InterviewSectionScore) -> some View {
+        HStack(spacing: 6) {
+            InterviewSectionScoreCard(score: score)
+            if let status = sectionScoringStatus[score.rubricSectionID] {
+                switch status {
+                case .pending:
+                    Image(systemName: "circle.dotted")
+                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                case .scoring:
+                    ProgressView()
+                        .controlSize(.mini)
+                case .done:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption2)
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption2)
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header bar
@@ -146,29 +250,26 @@ struct InterviewScorecardView: View {
                 impressionSection
                     .padding(.horizontal)
 
-                // Section scorecards
-                ForEach(sortedScores) { score in
-                    HStack(spacing: 6) {
-                        InterviewSectionScoreCard(score: score)
-                        // Scoring status indicator
-                        if let status = sectionScoringStatus[score.rubricSectionID] {
-                            switch status {
-                            case .pending:
-                                Image(systemName: "circle.dotted")
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption2)
-                            case .scoring:
-                                ProgressView()
-                                    .controlSize(.mini)
-                            case .done:
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                    .font(.caption2)
-                            case .failed:
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
-                                    .font(.caption2)
-                            }
+                // Section scorecards — grouped by phase. Each scored phase
+                // (intro/conclusion are skipped; they have no rubric and
+                // no sections) gets a header with its composite grade,
+                // then its sections.
+                ForEach(phaseGroups, id: \.phaseID) { group in
+                    phaseGroupView(group)
+                        .padding(.horizontal)
+                }
+
+                // Orphans: any scores not linked to a phase (legacy data
+                // from before the multi-phase migration). Render flat
+                // under a fallback header so they're still visible.
+                let orphans = orphanScores
+                if !orphans.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Ungrouped")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(orphans) { score in
+                            scoreCardWithStatus(score)
                         }
                     }
                     .padding(.horizontal)
@@ -324,14 +425,14 @@ struct InterviewScorecardView: View {
 
             Spacer()
 
-            // Score breakdown
+            // Score breakdown — phase composites first, sections nested.
             VStack(alignment: .trailing, spacing: 4) {
-                ForEach(sortedScores) { score in
-                    HStack(spacing: 4) {
-                        Text(score.rubricSectionTitle)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if let grade = score.effectiveLetterGrade {
+                ForEach(phaseGroups, id: \.phaseID) { group in
+                    HStack(spacing: 6) {
+                        Text(group.title)
+                            .font(.caption2.weight(.semibold))
+                        if let composite = group.composite {
+                            let grade = LetterGrade.from(gradePoints: composite)
                             Text(grade.label)
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(grade.color)
@@ -384,30 +485,70 @@ struct InterviewScorecardView: View {
 
     private var impressionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Impressions")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Impressions")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                HStack(spacing: 8) {
+                    Label("You", systemImage: "person.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                    Label("AI", systemImage: "sparkle")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             ForEach(interview.impressions.sorted(by: { $0.traitName < $1.traitName })) { impression in
                 if let trait = traits.first(where: { $0.name == impression.traitName }) {
-                    HStack {
-                        Text(trait.name)
-                            .font(.caption)
-                            .frame(width: 100, alignment: .leading)
-                        ForEach(1...5, id: \.self) { value in
-                            Circle()
-                                .fill(impression.value == value ? dotColor(value) : .secondary.opacity(0.2))
-                                .frame(width: 10, height: 10)
-                        }
-                        Text(trait.label(for: impression.value))
-                            .font(.caption2)
-                            .foregroundStyle(dotColor(impression.value))
-                    }
+                    impressionRow(trait: trait, impression: impression)
                 }
             }
         }
         .padding(10)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func impressionRow(trait: InterviewImpressionTrait, impression: InterviewImpression) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(trait.name)
+                .font(.caption.weight(.semibold))
+
+            // Interviewer row
+            HStack(spacing: 6) {
+                Text("You")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, alignment: .leading)
+                ForEach(1...5, id: \.self) { value in
+                    Circle()
+                        .fill(value <= impression.value ? dotColor(impression.value) : .secondary.opacity(0.2))
+                        .frame(width: 10, height: 10)
+                }
+                Text(trait.label(for: impression.value))
+                    .font(.caption2)
+                    .foregroundStyle(dotColor(impression.value))
+            }
+
+            // AI row — hollow dots, only when AI has scored.
+            if let aiValue = impression.aiValue {
+                HStack(spacing: 6) {
+                    Text("AI")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, alignment: .leading)
+                    ForEach(1...5, id: \.self) { value in
+                        Circle()
+                            .stroke(value <= aiValue ? dotColor(aiValue) : .secondary.opacity(0.3), lineWidth: 1.5)
+                            .frame(width: 10, height: 10)
+                    }
+                    Text(trait.label(for: aiValue))
+                        .font(.caption2)
+                        .foregroundStyle(dotColor(aiValue))
+                }
+            }
+        }
     }
 
     private func signalSection(_ title: String, items: [String], icon: String, color: Color) -> some View {

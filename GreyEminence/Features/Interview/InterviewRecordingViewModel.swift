@@ -523,6 +523,11 @@ final class InterviewRecordingViewModel {
         let note = InterviewNote(text: text, category: category, sortOrder: notes.count)
         note.interview = interview
         note.parentNote = parent
+        // Inherit parent's phase when nesting; otherwise tag with the
+        // currently active phase. Notes captured outside any active phase
+        // (intro warmup before activation, post-conclusion wrap-up) stay
+        // unphased and appear in the "Unphased" group.
+        note.phase = parent?.phase ?? interview?.activePhase
         if let parent {
             parent.subNotes.append(note)
         }
@@ -788,9 +793,11 @@ final class InterviewRecordingViewModel {
         }
 
         // Apply AI impression ratings (interview-level, not per-phase).
+        // These go into `aiValue`, leaving the interviewer's `value`
+        // untouched — both are surfaced in the UI side-by-side.
         for aiImpression in result.impressions {
             if let idx = impressions.firstIndex(where: { $0.traitName == aiImpression.trait }) {
-                impressions[idx].value = aiImpression.value
+                impressions[idx].aiValue = aiImpression.value
             }
         }
 
