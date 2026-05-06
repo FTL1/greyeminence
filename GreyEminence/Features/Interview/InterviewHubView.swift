@@ -16,6 +16,7 @@ struct InterviewHubView: View {
         case setup = "New Interview"
         case interviews = "Interviews"
         case rubrics = "Rubrics"
+        case templates = "Templates"
         case test = "Test"
     }
 
@@ -55,6 +56,8 @@ struct InterviewHubView: View {
                         CandidateListView()
                     case .rubrics:
                         RubricListView()
+                    case .templates:
+                        TemplateLibraryView()
                     case .test:
                         TranscriptTestView()
                     }
