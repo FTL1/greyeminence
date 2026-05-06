@@ -72,6 +72,7 @@ enum ResumeAnalyzer {
         - One sentence each (≤200 chars). Cite specific resume evidence: "10y at Stripe scaling payments", "ICs only, never managed", "wrote three blog posts on TLA+", etc.
         - When the resume is silent on an attribute and you defaulted to 10, say so explicitly: e.g., "No resume signal on this dimension — defaulted to median."
         - Don't restate the descriptor or use generic praise. The reasoning explains why THIS candidate got THIS value, not what the attribute means in general.
+        - Plain prose only. NO markdown formatting (no **bold**, *italic*, `code`, lists, headings) in any field. The UI will style the text itself.
 
         Calibration rules:
         - Default attributes to 10 (median) when the resume doesn't speak to that dimension. Don't inflate.

@@ -87,12 +87,23 @@ struct CharacterSheetView: View {
                 .font(.system(size: 9))
                 .foregroundStyle(Self.darkBrown.opacity(0.6))
                 .padding(.top, 2)
-            Text(text)
+            reasoningText(text)
                 .font(.caption)
                 .foregroundStyle(.primary.opacity(0.75))
                 .italic()
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Render reasoning text as parsed markdown when possible — strips
+    /// stray `**` / `*` / backtick markers the AI sometimes adds despite
+    /// the prompt asking for plain prose. Falls back to plain text if
+    /// AttributedString's markdown parser rejects the input.
+    private func reasoningText(_ text: String) -> Text {
+        if let attributed = try? AttributedString(markdown: text) {
+            return Text(attributed)
+        }
+        return Text(text)
     }
 
     // MARK: - Attributes
@@ -132,7 +143,7 @@ struct CharacterSheetView: View {
             .help(attributeTooltip(attribute))
 
             if showReasoning, let reasoning = attribute.reasoning, !reasoning.isEmpty {
-                Text(reasoning)
+                reasoningText(reasoning)
                     .font(.system(size: 9))
                     .foregroundStyle(.primary.opacity(0.75))
                     .italic()
