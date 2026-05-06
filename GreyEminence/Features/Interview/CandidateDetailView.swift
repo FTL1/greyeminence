@@ -9,6 +9,7 @@ struct CandidateDetailView: View {
     @State private var showResumeImporter = false
     @State private var resumeError: String?
     @State private var isResumeExpanded = false
+    @State private var isAnalyzingResume = false
 
     /// File types accepted as resumes. PDF is the common case; doc/docx
     /// covered for users still on Word; plain text and markdown for the
@@ -67,6 +68,60 @@ struct CandidateDetailView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(.secondary.opacity(0.2), lineWidth: 0.5)
                         )
+                }
+            }
+
+            if let sheet = candidate.characterSheet {
+                Section {
+                    CharacterSheetView(sheet: sheet)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                } header: {
+                    HStack {
+                        Text("Character Sheet")
+                        Spacer()
+                        if let analyzedAt = candidate.resumeAnalyzedAt {
+                            Text("Generated \(analyzedAt.formatted(.relative(presentation: .named)))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Button {
+                            Task { await reanalyzeResume() }
+                        } label: {
+                            if isAnalyzingResume {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Re-roll", systemImage: "dice")
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isAnalyzingResume || candidate.resumeURL == nil)
+                        .help("Re-run resume analysis")
+                    }
+                }
+            } else if candidate.resumeFilename != nil {
+                Section("Character Sheet") {
+                    HStack {
+                        if isAnalyzingResume {
+                            ProgressView().controlSize(.small)
+                            Text("Analyzing resume…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "dice")
+                                .foregroundStyle(.secondary)
+                            Text("Not yet generated")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Generate") {
+                                Task { await reanalyzeResume() }
+                            }
+                            .controlSize(.small)
+                            .disabled(candidate.resumeURL == nil)
+                        }
+                    }
                 }
             }
 
@@ -218,6 +273,12 @@ struct CandidateDetailView: View {
                 )
                 candidate.resumeFilename = filename
                 candidate.resumeAddedAt = .now
+                // Replace clears any prior analysis — the new resume's
+                // content may be entirely different.
+                candidate.resumeSummary = nil
+                candidate.characterSheetJSON = nil
+                candidate.resumeAnalyzedAt = nil
+                Task { await reanalyzeResume() }
             } catch {
                 resumeError = "Failed to attach resume: \(error.localizedDescription)"
             }
@@ -232,7 +293,40 @@ struct CandidateDetailView: View {
         }
         candidate.resumeFilename = nil
         candidate.resumeAddedAt = nil
+        candidate.resumeSummary = nil
+        candidate.characterSheetJSON = nil
+        candidate.resumeAnalyzedAt = nil
         resumeError = nil
+    }
+
+    /// Run the AI analyzer on the attached resume. Surfaces a footer
+    /// indicator via the transient activity coordinator and writes
+    /// `resumeSummary` + `characterSheetJSON` on completion.
+    private func reanalyzeResume() async {
+        guard let url = candidate.resumeURL,
+              let text = ResumeTextExtractor.extractText(from: url) else { return }
+        isAnalyzingResume = true
+        defer { isAnalyzingResume = false }
+
+        let analysis: ResumeAnalysis?
+        do {
+            analysis = try await TransientActivityCoordinator.shared.runAsync(
+                "Analyzing \(candidate.name)'s resume…"
+            ) {
+                try await ResumeAnalyzer.analyze(resumeText: text, candidateName: candidate.name)
+            }
+        } catch {
+            resumeError = "Resume analysis failed: \(error.localizedDescription)"
+            return
+        }
+
+        guard let analysis else {
+            resumeError = "Resume analysis returned no result. AI may not be configured."
+            return
+        }
+        candidate.resumeSummary = analysis.summary
+        candidate.characterSheetJSON = analysis.characterSheet.toJSON()
+        candidate.resumeAnalyzedAt = .now
     }
 
     private func isPDF(_ url: URL) -> Bool {

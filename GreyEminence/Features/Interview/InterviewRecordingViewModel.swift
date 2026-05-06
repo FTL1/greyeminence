@@ -680,7 +680,14 @@ final class InterviewRecordingViewModel {
             candidateContextSnapshot = nil
             return
         }
+        // Prefer the AI-generated summary (typically 200-500 chars) over
+        // the raw 8K-char resume text — same context with ~16x fewer
+        // tokens per cycle. Fall back to the truncated raw text if no
+        // summary's been generated yet.
         let resumeText: String? = {
+            if let summary = candidate.resumeSummary, !summary.isEmpty {
+                return summary
+            }
             guard let url = candidate.resumeURL else { return nil }
             return ResumeTextExtractor.extractText(from: url)
         }()
@@ -690,7 +697,8 @@ final class InterviewRecordingViewModel {
             resumeText: resumeText
         )
         if let count = resumeText?.count, count > 0 {
-            LogManager.shared.log("Resume context loaded for AI prompt (\(count) chars)", category: .ai)
+            let kind = candidate.resumeSummary != nil ? "summary" : "raw text"
+            LogManager.shared.log("Resume context loaded for AI prompt (\(count) chars, \(kind))", category: .ai)
         }
     }
 

@@ -16,6 +16,23 @@ final class Candidate {
     var resumeFilename: String?
     var resumeAddedAt: Date?
 
+    /// AI-generated summary of the resume, used as the candidate-context
+    /// prelude in the live interview AI prompt instead of the raw 8K-char
+    /// dump. Generated once at attach time; nil while the analysis hasn't
+    /// completed (or failed). Caller falls back to truncated raw text.
+    var resumeSummary: String?
+
+    /// JSON-encoded `CharacterSheet` generated alongside the summary.
+    /// Decoded via `CharacterSheet.fromJSON`. Stored as JSON because the
+    /// shape evolves with prompt iteration; we don't want to migrate the
+    /// schema every time a field changes.
+    var characterSheetJSON: String?
+
+    /// Timestamp of the most recent successful resume analysis. Used in
+    /// the UI to show staleness, and to decide whether re-attaching a
+    /// resume should re-trigger analysis.
+    var resumeAnalyzedAt: Date?
+
     var role: InterviewRole?
 
     @Relationship(deleteRule: .nullify, inverse: \Interview.candidate)
@@ -33,6 +50,11 @@ final class Candidate {
     /// Resolved on-disk URL for the attached resume, or nil if none.
     var resumeURL: URL? {
         resumeFilename.map { StorageManager.shared.candidateResumeURL(for: id, filename: $0) }
+    }
+
+    /// Decoded character sheet, if one's been generated.
+    var characterSheet: CharacterSheet? {
+        CharacterSheet.fromJSON(characterSheetJSON)
     }
 
     var initials: String {

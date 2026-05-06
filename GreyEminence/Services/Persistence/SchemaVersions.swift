@@ -91,24 +91,31 @@ enum SchemaV2: VersionedSchema {
     }
 }
 
+/// SchemaV3 adds optional resume-analysis fields to `Candidate`
+/// (`resumeSummary`, `characterSheetJSON`, `resumeAnalyzedAt`). Purely
+/// additive — auto-migration handles it.
+enum SchemaV3: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV2.models }
+}
+
 /// Migration plan for the SwiftData store. Each new `SchemaV*` version is
 /// appended to `schemas` along with a corresponding `MigrationStage` in
 /// `stages`. Lightweight migration (adding optional fields, new models)
 /// works automatically and doesn't need property-level transforms.
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self]
     }
 
     static var stages: [MigrationStage] {
         [
             // V1 → V2: adds InterviewPhase and the optional relationships
-            // linking it to Interview and InterviewSectionScore. Lightweight
-            // because the change is additive — existing rows materialize
-            // with empty `phases` arrays and `phase: nil` on scores. The
-            // runtime backfill in MaintenanceService converts those legacy
-            // shapes to the new tree on first launch after upgrade.
-            .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self)
+            // linking it to Interview and InterviewSectionScore.
+            .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self),
+            // V2 → V3: adds Candidate.resumeSummary / characterSheetJSON /
+            // resumeAnalyzedAt for AI-generated resume analysis.
+            .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self)
         ]
     }
 }
