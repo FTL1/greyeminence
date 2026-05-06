@@ -10,12 +10,18 @@ struct PlannedPhase: Identifiable {
     var title: String
     var rubric: Rubric?
     var iconName: String?
+    /// When this planned phase was sourced from an `InterviewTemplatePhase`,
+    /// the original template phase ID. Drives the "Template" badge in the
+    /// creation modal so the user can tell template-derived phases apart
+    /// from ones they added themselves.
+    var sourceTemplatePhaseID: UUID?
 
     init(id: UUID = UUID(), title: String, rubric: Rubric? = nil, iconName: String? = nil) {
         self.id = id
         self.title = title
         self.rubric = rubric
         self.iconName = iconName
+        self.sourceTemplatePhaseID = nil
     }
 
     static func intro() -> PlannedPhase {

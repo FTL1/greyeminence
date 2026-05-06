@@ -9,6 +9,7 @@ struct InterviewListView: View {
     @Binding var showInspector: Bool
     @Binding var inspectorWidth: CGFloat?
     @State private var searchText = ""
+    @State private var showCreationSheet = false
 
     private var filteredInterviews: [Interview] {
         let active = interviews.filter { $0.status != .archived }
@@ -41,16 +42,43 @@ struct InterviewListView: View {
             .searchable(text: $searchText, placement: .sidebar, prompt: "Search interviews")
             .navigationTitle("Interviews")
             .navigationSplitViewColumnWidth(min: 280, ideal: 300)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showCreationSheet = true
+                    } label: {
+                        Label("New Interview", systemImage: "plus")
+                    }
+                    .disabled(interviewViewModel.isInterviewActive)
+                    .help(interviewViewModel.isInterviewActive
+                          ? "Finish the current interview before scheduling another"
+                          : "Schedule a new interview")
+                    .keyboardShortcut("n", modifiers: .command)
+                }
+            }
             .overlay {
                 if interviews.isEmpty {
-                    ContentUnavailableView(
-                        "No Interviews",
-                        systemImage: "person.badge.shield.checkmark",
-                        description: Text("Start an interview from the setup view")
-                    )
+                    ContentUnavailableView {
+                        Label("No Interviews", systemImage: "person.badge.shield.checkmark")
+                    } description: {
+                        Text("Click + to schedule an interview")
+                    } actions: {
+                        Button("Schedule Interview") { showCreationSheet = true }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.cyan)
+                            .disabled(interviewViewModel.isInterviewActive)
+                    }
                 } else if filteredInterviews.isEmpty {
                     ContentUnavailableView.search(text: searchText)
                 }
+            }
+            .sheet(isPresented: $showCreationSheet) {
+                InterviewCreationSheet(
+                    interviewViewModel: interviewViewModel,
+                    onScheduled: { interview in
+                        selectedInterview = interview
+                    }
+                )
             }
         } detail: {
             if let interview = selectedInterview {
