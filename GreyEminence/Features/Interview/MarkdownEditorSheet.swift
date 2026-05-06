@@ -104,17 +104,8 @@ struct MarkdownEditorSheet: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .italic()
-        } else if let attributed = try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .full)
-        ) {
-            Text(attributed)
-                .font(.body)
-                .multilineTextAlignment(.leading)
         } else {
-            Text(text)
-                .font(.body)
-                .multilineTextAlignment(.leading)
+            MarkdownView(text: text)
         }
     }
 

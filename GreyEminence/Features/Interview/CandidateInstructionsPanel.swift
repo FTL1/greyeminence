@@ -56,20 +56,8 @@ struct CandidateInstructionsPanel: View {
 
     @ViewBuilder
     private var renderedMarkdown: some View {
-        if let attributed = try? AttributedString(
-            markdown: markdown,
-            options: .init(interpretedSyntax: .full)
-        ) {
-            Text(attributed)
-                .font(.caption)
-                .textSelection(.enabled)
-                .multilineTextAlignment(.leading)
-        } else {
-            Text(markdown)
-                .font(.caption)
-                .textSelection(.enabled)
-                .multilineTextAlignment(.leading)
-        }
+        MarkdownView(text: markdown, bodyFont: .caption)
+            .textSelection(.enabled)
     }
 
     private func copy() {
