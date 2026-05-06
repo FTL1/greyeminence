@@ -147,6 +147,7 @@ struct GreyEminenceApp: App {
 
 private func seedInterviewDefaults(in context: ModelContext) {
     seedAIAssistedEngineeringRubricIfMissing(in: context)
+    seedSystemDesignRubricIfMissing(in: context)
 
     let seedVersion = UserDefaults.standard.integer(forKey: "interviewSeedVersion")
     guard seedVersion < 4 else { return }
@@ -283,6 +284,170 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
     seedDataTeamRubric(dataRubric, in: context)
 
     PersistenceGate.save(context, site: "seedOrganizationAndRubrics/final")
+}
+
+// MARK: - System Design Rubric (idempotent)
+
+/// Adds a comprehensive standalone "System Design" rubric. Expanded from
+/// the System Design *section* embedded in the legacy General/Senior
+/// Engineering Interview rubrics — same starting criteria, plus broader
+/// coverage of requirements gathering, data modeling, reliability,
+/// observability, and trade-off articulation. Unattached to a role so
+/// the phase planner can compose it alongside any role's coding /
+/// AI-assisted phases. Idempotent by name.
+private func seedSystemDesignRubricIfMissing(in context: ModelContext) {
+    let rubricName = "System Design"
+    let existing = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
+    if existing.contains(where: { $0.name == rubricName }) { return }
+
+    let rubric = Rubric(name: rubricName)
+    context.insert(rubric)
+    seedSystemDesignRubric(rubric, in: context)
+    PersistenceGate.save(context, site: "seedSystemDesignRubricIfMissing")
+}
+
+private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) {
+    // 1. Requirements & Scoping
+    let requirements = RubricSection(
+        title: "Requirements & Scoping",
+        description: "Whether the candidate clarifies what they're building before they start drawing.",
+        sortOrder: 0,
+        weight: 15
+    )
+    requirements.rubric = rubric
+    context.insert(requirements)
+    for (i, signal) in [
+        "Clarifies functional requirements before designing (who uses this, what do they need)",
+        "Surfaces non-functional requirements (scale, latency, availability, consistency)",
+        "Identifies success metrics — how do we know this design works",
+        "Probes constraints (team size, timeline, existing infrastructure, budget)",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = requirements
+    }
+    for (i, (label, expected, value)) in [
+        ("Asked clarifying questions before drawing anything", "yes", 2),
+        ("Did back-of-envelope capacity math (QPS, storage, bandwidth)", "yes", 1),
+        ("Jumped straight to ERD without discussion", "yes", -2),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = requirements
+    }
+
+    // 2. Architecture
+    let architecture = RubricSection(
+        title: "Architecture",
+        description: "Whether the design is incremental, well-decomposed, and justified at each level.",
+        sortOrder: 1,
+        weight: 25
+    )
+    architecture.rubric = rubric
+    context.insert(architecture)
+    for (i, signal) in [
+        "Started simple, added complexity (incremental design rather than big-bang)",
+        "Component decomposition with clear responsibilities and boundaries",
+        "API contracts between components are sketched — not just boxes-and-arrows",
+        "Async vs synchronous flows justified with reasoning",
+        "User experience considered from the front-end backwards, not just data models",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = architecture
+    }
+    for (i, (label, expected, value)) in [
+        ("Started high-level, then drilled into details", "yes", 1),
+        ("Cargo-culted a buzzword without justifying it (e.g., \"we'll use Kafka\")", "yes", -1),
+        ("Cron job mentioned as the answer to a real-time problem", "yes", -1),
+        ("Surveys and Calls are the Same — collapsed two distinct flows into one when they shouldn't", "yes", 1),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = architecture
+    }
+
+    // 3. Data
+    let data = RubricSection(
+        title: "Data",
+        description: "Whether storage and data flow choices fit the access patterns rather than reaching for the candidate's favorite tool.",
+        sortOrder: 2,
+        weight: 20
+    )
+    data.rubric = rubric
+    context.insert(data)
+    for (i, signal) in [
+        "Data model fits the access patterns described in requirements",
+        "Storage choice (SQL / NoSQL / cache / blob / search) justified, not defaulted",
+        "Indexing or query strategy explained for the hot paths",
+        "Data lifecycle considered (retention, archival, deletion, GDPR/PII handling)",
+        "Generating recommendations / derived data — pipeline and freshness named",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = data
+    }
+    for (i, (label, expected, value)) in [
+        ("Named specific access patterns before picking a database", "yes", 2),
+        ("Defaulted to Postgres / Mongo / Redis without justifying", "yes", -1),
+        ("Glossed over data deletion / privacy", "yes", -1),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = data
+    }
+
+    // 4. Scalability & Reliability
+    let scaling = RubricSection(
+        title: "Scalability & Reliability",
+        description: "Whether the design has a credible scaling story and the candidate can name where it will break first.",
+        sortOrder: 3,
+        weight: 20
+    )
+    scaling.rubric = rubric
+    context.insert(scaling)
+    for (i, signal) in [
+        "Horizontal scaling path identified — not just \"add more servers\"",
+        "Bottleneck analysis — where will this break first as load grows",
+        "Failure modes named with concrete mitigations (retries, circuit breakers, fallbacks)",
+        "Consistency model articulated (strong / eventual / read-your-writes) and justified",
+        "Caching strategy with explicit invalidation story, not just \"add a cache\"",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = scaling
+    }
+    for (i, (label, expected, value)) in [
+        ("Named a specific failure mode and its mitigation", "yes", 2),
+        ("Acknowledged a CAP-style trade-off explicitly", "yes", 1),
+        ("Said \"just add a cache\" without invalidation story", "yes", -1),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = scaling
+    }
+
+    // 5. Operations & Trade-offs
+    let ops = RubricSection(
+        title: "Operations & Trade-offs",
+        description: "Whether the candidate thinks about running the system, not just shipping it, and articulates trade-offs honestly.",
+        sortOrder: 4,
+        weight: 20
+    )
+    ops.rubric = rubric
+    context.insert(ops)
+    for (i, signal) in [
+        "Observability story — logs, metrics, traces, alerts — at least sketched",
+        "Security & privacy considered (authn, authz, data-in-transit, data-at-rest)",
+        "Compliance addressed where relevant (PII, GDPR, HIPAA depending on domain)",
+        "Cost awareness — has a sense of what this design costs to run at the scale they targeted",
+        "Trade-offs articulated with reasoning, not waved away (\"we'd pick X over Y because…\")",
+        "Iterates well on follow-up pressure (\"what if scale doubles\", \"what if a region fails\")",
+    ].enumerated() {
+        let c = RubricCriterion(signal: signal, sortOrder: i)
+        c.section = ops
+    }
+    for (i, (label, expected, value)) in [
+        ("Mentioned monitoring / alerting unprompted", "yes", 1),
+        ("Named a real cost trade-off (\"this is cheaper but less consistent\")", "yes", 2),
+        ("Treated security as an afterthought", "yes", -2),
+        ("Doubled-down on a wrong choice when challenged instead of revisiting", "yes", -1),
+    ].enumerated() {
+        let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
+        b.section = ops
+    }
 }
 
 // MARK: - AI-Assisted Engineering Rubric (idempotent)
