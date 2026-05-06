@@ -57,6 +57,18 @@ struct InterviewScorecardView: View {
         }
     }
 
+    /// Look up the live `RubricSection` for a score by walking the
+    /// interview's phases. Returns nil if the rubric was deleted after
+    /// the score was created.
+    private func rubricSection(for score: InterviewSectionScore) -> RubricSection? {
+        for phase in interview.phases {
+            if let match = phase.rubric?.sections.first(where: { $0.id == score.rubricSectionID }) {
+                return match
+            }
+        }
+        return nil
+    }
+
     private var sortedScores: [InterviewSectionScore] {
         // Filter out any potentially deallocated scores (can happen during parallel scoring)
         interview.sectionScores
@@ -143,7 +155,10 @@ struct InterviewScorecardView: View {
                 // Section scorecards
                 ForEach(sortedScores) { score in
                     HStack(spacing: 6) {
-                        InterviewSectionScoreCard(score: score)
+                        InterviewSectionScoreCard(
+                            score: score,
+                            rubricSection: rubricSection(for: score)
+                        )
                         // Scoring status indicator
                         if let status = sectionScoringStatus[score.rubricSectionID] {
                             switch status {

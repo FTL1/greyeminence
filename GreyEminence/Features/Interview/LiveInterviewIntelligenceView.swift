@@ -284,6 +284,13 @@ private struct ActiveSectionDetail: View {
     @Bindable var score: InterviewSectionScore
     var interviewViewModel: InterviewRecordingViewModel
 
+    /// Live RubricSection for the active score, looked up via the
+    /// active phase. Used to surface candidate-facing instructions.
+    private var rubricSection: RubricSection? {
+        interviewViewModel.interview?.activePhase?.rubric?.sections
+            .first { $0.id == score.rubricSectionID }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -295,6 +302,16 @@ private struct ActiveSectionDetail: View {
                         .font(.title2.weight(.bold))
                         .foregroundStyle(bellCurveColor(for: effective.gradePoints / 4.0))
                 }
+            }
+
+            // Candidate brief — markdown the interviewer pastes into chat
+            // or exports as PDF. Hidden when the section has no brief.
+            if let instructions = rubricSection?.candidateInstructions,
+               !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                CandidateInstructionsPanel(
+                    sectionTitle: score.rubricSectionTitle,
+                    markdown: instructions
+                )
             }
 
             HStack(spacing: 16) {

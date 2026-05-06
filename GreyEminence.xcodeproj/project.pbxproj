@@ -15,6 +15,7 @@
 		0ADAF5362F0166CB7AA9E9C0 /* InterviewHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59A83B6524CF1BD8477EC89 /* InterviewHubView.swift */; };
 		0D999193690073A261246592 /* ResumeAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F296FDF7EC19DD5EE43B83C1 /* ResumeAnalyzer.swift */; };
 		0DA17FC2ACA6257DDF8C6BF5 /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 657275C542280701138F3D42 /* AudioSettingsView.swift */; };
+		123D4745990C59FC22E00449 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE957511562C3879F9C0E27 /* PDFExporter.swift */; };
 		126E753BE35486221B3CC48A /* ResumeTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A04196F7926C630F7DC3BC /* ResumeTextExtractor.swift */; };
 		1511D8ED93545EDCA506CFE1 /* MeetingInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA2B75D0915DCF472081C0F4 /* MeetingInsight.swift */; };
 		15581C8075FE9FB06071E4B0 /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 771A5419E207FBBDED603E7C /* KeychainAccess */; };
@@ -70,6 +71,7 @@
 		6428B269561C1610AE114AB8 /* RecordingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130974A6F8E2B27E4705F6A3 /* RecordingToolbar.swift */; };
 		645FB051CDDEF1925D77944A /* BedrockAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A4997345983696DC9017FF /* BedrockAPIClient.swift */; };
 		6632545DC3BCE1347E7D2AAF /* VocabularyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A49043AC4DC48EF88C729BE /* VocabularyManager.swift */; };
+		667D97DDA1468BFACB4D37C7 /* CandidateInstructionsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B42DDA6EE672DE406DD148 /* CandidateInstructionsPanel.swift */; };
 		6B3B7042DBD6D529106704B5 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F441D2EB2BBE4A6F48F3B85C /* DashboardView.swift */; };
 		6D2EF28FFD7F6D01EB1A27B9 /* CopyButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C0C8639599BB7A2E459430 /* CopyButton.swift */; };
 		6E45CEDA458C896848FE2178 /* AIRetryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3946643E25AD52CD5C5B4307 /* AIRetryTests.swift */; };
@@ -227,6 +229,7 @@
 		300EAE12152D87923A870EA9 /* ReProcessingStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReProcessingStatusBar.swift; sourceTree = "<group>"; };
 		3064E03937611C03B74553CD /* AudioFormatConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioFormatConverter.swift; sourceTree = "<group>"; };
 		308B06B13B6F25651CBDC29E /* RubricWeightBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RubricWeightBar.swift; sourceTree = "<group>"; };
+		31B42DDA6EE672DE406DD148 /* CandidateInstructionsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateInstructionsPanel.swift; sourceTree = "<group>"; };
 		32E8A78D90F7F6032C45662E /* MeetingDeletion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingDeletion.swift; sourceTree = "<group>"; };
 		3342DA3D292F447AD03C19D1 /* InterviewPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewPhase.swift; sourceTree = "<group>"; };
 		355D52E442FFB5C7B6F89C4F /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
@@ -346,6 +349,7 @@
 		DBAB1E4C042E177AB57AA5C0 /* RecordingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingView.swift; sourceTree = "<group>"; };
 		DDA08488A6C4DDF53905B1B6 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
 		DDCF1A81A140D771C4779D0E /* SchemaVersions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaVersions.swift; sourceTree = "<group>"; };
+		DEE957511562C3879F9C0E27 /* PDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExporter.swift; sourceTree = "<group>"; };
 		E016B91CDEA91AF1DF999437 /* RoleLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleLevel.swift; sourceTree = "<group>"; };
 		E1623F804DDEF0B92D3B6A41 /* VocabularySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularySettingsView.swift; sourceTree = "<group>"; };
 		E1894E666B02691D0316570C /* ContactPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactPicker.swift; sourceTree = "<group>"; };
@@ -436,6 +440,7 @@
 				64D737F28276940E71077131 /* Search */,
 				C55C0EF6982FAB185A23C343 /* Transcription */,
 				422794061E0AFB134EF099BC /* Updates */,
+				DEE957511562C3879F9C0E27 /* PDFExporter.swift */,
 				F73D9FABAEDE678B9FA98234 /* TransientActivityCoordinator.swift */,
 			);
 			path = Services;
@@ -796,6 +801,7 @@
 			children = (
 				07C2F2D5D37B973CB7660588 /* AddCandidateSheet.swift */,
 				4C160A2AE8063D161B554AAA /* CandidateDetailView.swift */,
+				31B42DDA6EE672DE406DD148 /* CandidateInstructionsPanel.swift */,
 				7EE35BB1B53FA715D0E3B606 /* CandidateListView.swift */,
 				1E4A14EBE4E82FF3649CD5F5 /* CharacterSheetView.swift */,
 				F59A83B6524CF1BD8477EC89 /* InterviewHubView.swift */,
@@ -991,6 +997,7 @@
 				9612CE638E6815D0234D9A09 /* CalendarService.swift in Sources */,
 				A8740BAFD283BC00E8F1C08E /* Candidate.swift in Sources */,
 				706A3BA40184EBEF4F80EF5D /* CandidateDetailView.swift in Sources */,
+				667D97DDA1468BFACB4D37C7 /* CandidateInstructionsPanel.swift in Sources */,
 				FA8953738B11A84516D35908 /* CandidateListView.swift in Sources */,
 				7CEB0A0F16374551DA00F110 /* CharacterSheet.swift in Sources */,
 				077B50C616B12DC34082F605 /* CharacterSheetView.swift in Sources */,
@@ -1068,6 +1075,7 @@
 				24283F84D0FD2716A6806F48 /* ObsidianExportService.swift in Sources */,
 				DBDF5229655F6F36425F0F6F /* ObsidianSettingsView.swift in Sources */,
 				87041339499E41CA9C187A95 /* OrganizationSettingsView.swift in Sources */,
+				123D4745990C59FC22E00449 /* PDFExporter.swift in Sources */,
 				AA576ED631E47C9439A92F1A /* PDFPreviewView.swift in Sources */,
 				A173DAAD896AF99772AC00EA /* PeopleView.swift in Sources */,
 				FC91687C779A58699CF98D54 /* PersistenceGate.swift in Sources */,

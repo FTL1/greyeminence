@@ -27,6 +27,30 @@ struct RubricSectionEditorView: View {
                 .lineLimit(2...4)
                 .font(.caption)
 
+            // Candidate-facing instructions. Editor accepts plain markdown;
+            // surfaced in the live interview view with copy + PDF affordances.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Candidate Instructions (markdown)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                TextField(
+                    "What you'll paste into the candidate's chat — problem statement, scenario brief, etc. Supports markdown.",
+                    text: Binding(
+                        get: { section.candidateInstructions ?? "" },
+                        set: { section.candidateInstructions = $0.isEmpty ? nil : $0 }
+                    ),
+                    axis: .vertical
+                )
+                .lineLimit(3...12)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+            }
+
             // Criteria
             if !sortedCriteria.isEmpty {
                 ForEach(sortedCriteria) { criterion in

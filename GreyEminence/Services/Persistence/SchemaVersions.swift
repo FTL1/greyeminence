@@ -111,20 +111,25 @@ enum SchemaV4: VersionedSchema {
     }
 }
 
-/// Migration plan for the SwiftData store. Each new `SchemaV*` version is
-/// appended to `schemas` along with a corresponding `MigrationStage` in
-/// `stages`. Lightweight migration (adding optional fields, new models)
-/// works automatically and doesn't need property-level transforms.
+/// SchemaV5 adds `RubricSection.candidateInstructions` (optional markdown
+/// brief shown to the candidate during the live interview). Purely
+/// additive.
+enum SchemaV5: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(5, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV4.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self]
     }
 
     static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self),
             .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self),
-            .lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self)
+            .lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self),
+            .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self)
         ]
     }
 }

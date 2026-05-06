@@ -10,6 +10,14 @@ final class RubricSection {
     var weight: Double
     var createdAt: Date
 
+    /// Markdown instructions the interviewer hands to the candidate for
+    /// this section — typically a problem statement or scenario brief.
+    /// Surfaced in the live interview view with Copy + Export-PDF
+    /// affordances so the interviewer can paste it into chat or share
+    /// it as a file. Optional; sections without instructions just hide
+    /// the panel.
+    var candidateInstructions: String?
+
     var rubric: Rubric?
 
     @Relationship(deleteRule: .cascade, inverse: \RubricCriterion.section)
