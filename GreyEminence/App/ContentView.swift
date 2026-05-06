@@ -95,6 +95,7 @@ struct ContentView: View {
                     }
             }
             ReProcessingStatusBar()
+            TransientActivityStatusBar()
         }
         .toolbar {
             if selectedDestination == .meetings || selectedDestination == .archive || selectedDestination == .recording || selectedDestination == .interviews {
@@ -137,7 +138,12 @@ struct ContentView: View {
                 modelContext
             }
             Task(priority: .background) { @MainActor [modelContext] in
-                MaintenanceService.runStartupMaintenance(modelContext: modelContext)
+                let report = TransientActivityCoordinator.shared.run("Running startup maintenance…") {
+                    MaintenanceService.runStartupMaintenance(modelContext: modelContext)
+                }
+                if !report.skipped {
+                    TransientActivityCoordinator.shared.flash("Maintenance complete")
+                }
             }
         }
         .onChange(of: autoStartRecording) { _, enabled in

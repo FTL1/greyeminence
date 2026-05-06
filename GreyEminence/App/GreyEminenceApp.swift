@@ -145,6 +145,7 @@ struct GreyEminenceApp: App {
     }
 }
 
+@MainActor
 private func seedInterviewDefaults(in context: ModelContext) {
     seedAIAssistedEngineeringRubricIfMissing(in: context)
     seedSystemDesignRubricIfMissing(in: context)
@@ -295,16 +296,19 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
 /// observability, and trade-off articulation. Unattached to a role so
 /// the phase planner can compose it alongside any role's coding /
 /// AI-assisted phases. Idempotent by name.
+@MainActor
 private func seedSystemDesignRubricIfMissing(in context: ModelContext) {
     let rubricName = "System Design"
     let existing = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
     if existing.contains(where: { $0.name == rubricName }) { return }
 
-    let rubric = Rubric(name: rubricName)
-    context.insert(rubric)
-    seedSystemDesignRubric(rubric, in: context)
-    PersistenceGate.save(context, site: "seedSystemDesignRubricIfMissing")
-    LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
+    TransientActivityCoordinator.shared.run("Seeding \"\(rubricName)\" rubric…") {
+        let rubric = Rubric(name: rubricName)
+        context.insert(rubric)
+        seedSystemDesignRubric(rubric, in: context)
+        PersistenceGate.save(context, site: "seedSystemDesignRubricIfMissing")
+        LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
+    }
 }
 
 private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) {
@@ -459,16 +463,19 @@ private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) 
 /// data. Unattached to a specific role — the phase planner shows it
 /// alongside role-scoped rubrics so users can compose it with System
 /// Design, Coding, etc. for any role.
+@MainActor
 private func seedAIAssistedEngineeringRubricIfMissing(in context: ModelContext) {
     let rubricName = "AI-Assisted Engineering"
     let existing = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
     if existing.contains(where: { $0.name == rubricName }) { return }
 
-    let rubric = Rubric(name: rubricName)
-    context.insert(rubric)
-    seedAIAssistedEngineeringRubric(rubric, in: context)
-    PersistenceGate.save(context, site: "seedAIAssistedEngineeringRubricIfMissing")
-    LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
+    TransientActivityCoordinator.shared.run("Seeding \"\(rubricName)\" rubric…") {
+        let rubric = Rubric(name: rubricName)
+        context.insert(rubric)
+        seedAIAssistedEngineeringRubric(rubric, in: context)
+        PersistenceGate.save(context, site: "seedAIAssistedEngineeringRubricIfMissing")
+        LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
+    }
 }
 
 private func seedAIAssistedEngineeringRubric(_ rubric: Rubric, in context: ModelContext) {
