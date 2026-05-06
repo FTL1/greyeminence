@@ -66,7 +66,7 @@ struct RubricEditorView: View {
         }
         .navigationTitle(rubric.name)
         .onAppear {
-            RubricWeightBar.normalizeToHundred(rubric)
+            rubric.normalizeWeightsToHundred()
         }
     }
 

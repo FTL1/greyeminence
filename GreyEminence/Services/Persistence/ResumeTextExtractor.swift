@@ -27,7 +27,6 @@ enum ResumeTextExtractor {
     /// Returns nil when the file can't be read or contains no extractable
     /// text. Truncates with an "…" ellipsis when over `maxCharacters`.
     static func extractText(from url: URL) -> String? {
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         let ext = url.pathExtension.lowercased()
         let raw: String?
         switch ext {
@@ -38,8 +37,6 @@ enum ResumeTextExtractor {
         case "txt", "md", "markdown":
             raw = try? String(contentsOf: url, encoding: .utf8)
         default:
-            // Unknown extension — try plain text as a last resort. NSAttributedString
-            // can handle a few legacy formats too. If both fail, return nil.
             raw = (try? String(contentsOf: url, encoding: .utf8))
                 ?? extractRTF(at: url)
         }

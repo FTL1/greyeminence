@@ -5,19 +5,13 @@ import SwiftData
 final class RubricCriterion {
     var id: UUID
     var signal: String
-    /// Legacy free-text evaluation note. Kept for backward compat; new UI
-    /// reads/writes via `guidance` bullets. The startup maintenance pass
-    /// migrates non-empty values into a single guidance bullet
-    /// (audience: interviewer).
+    /// Legacy free-text note; migrated to a guidance bullet by
+    /// `MaintenanceService.backfillCriterionGuidance`.
     var evaluationNotes: String?
     var sortOrder: Int
 
     var section: RubricSection?
 
-    /// Audience-tagged guidance bullets attached to this criterion. Some
-    /// bullets are for the interviewer's own reference; others are
-    /// appended to the rubric snapshot fed to the AI scoring prompt so
-    /// the model scores against the same interpretation.
     @Relationship(deleteRule: .cascade, inverse: \CriterionGuidance.criterion)
     var guidance: [CriterionGuidance]
 

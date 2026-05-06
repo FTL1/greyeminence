@@ -56,13 +56,6 @@ enum SchemaV1: VersionedSchema {
     }
 }
 
-/// SchemaV2 adds `InterviewPhase` and the relationships that link it to
-/// `Interview` and `InterviewSectionScore`. The change is purely additive
-/// (a new model + optional relationships on existing models), so SwiftData
-/// can migrate from V1 → V2 with a `.lightweight` stage. Existing
-/// interviews keep their `rubric` and `sectionScores`; the runtime
-/// backfill in `MaintenanceService` retroactively wraps them in a single
-/// `.completed` phase so all UI code can read the phase-shaped tree.
 enum SchemaV2: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
 

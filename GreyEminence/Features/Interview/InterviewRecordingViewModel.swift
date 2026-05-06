@@ -160,23 +160,7 @@ final class InterviewRecordingViewModel {
             )
             phase.interview = interview
             interview.phases.append(phase)
-
-            // Pre-create section scores for scored phases so they're visible
-            // in the UI before the AI starts populating them.
-            if let rubric = planned.rubric {
-                for section in rubric.sections.sorted(by: { $0.sortOrder < $1.sortOrder }) {
-                    let score = InterviewSectionScore(
-                        rubricSectionID: section.id,
-                        rubricSectionTitle: section.title,
-                        sortOrder: section.sortOrder,
-                        weight: section.weight
-                    )
-                    score.interview = interview
-                    score.phase = phase
-                    phase.sectionScores.append(score)
-                    interview.sectionScores.append(score)
-                }
-            }
+            populateSectionScores(for: phase, on: interview)
         }
 
         let traitDescriptor = FetchDescriptor<InterviewImpressionTrait>(
@@ -287,7 +271,6 @@ final class InterviewRecordingViewModel {
         let ordered = interview.orderedPhases
         guard let current = interview.activePhase,
               let currentIdx = ordered.firstIndex(where: { $0.id == current.id }) else {
-            // No active phase — activate the first planned one.
             if let first = ordered.first(where: { $0.status == .planned }) {
                 activatePhase(first, in: modelContext)
             }
@@ -297,35 +280,31 @@ final class InterviewRecordingViewModel {
         if let next = remaining.first(where: { $0.status == .planned }) {
             activatePhase(next, in: modelContext)
         } else {
-            // No more planned phases — close current without re-activation.
-            current.status = .completed
-            current.endedAt = .now
-            sectionScores = []
-            rubricSnapshot = nil
-            recordingViewModel.currentSectionTag = nil
-            recordingViewModel.currentSectionTagID = nil
-            PersistenceGate.save(
-                modelContext,
-                site: "InterviewRecordingViewModel.advancePhase/lastClosed",
-                meetingID: recordingViewModel.currentMeeting?.id
-            )
+            closeAndClear(phase: current, in: modelContext, site: "advancePhase/lastClosed")
         }
     }
 
-    /// Mark the active phase `.completed` without auto-advancing. Useful when
-    /// the next phase needs to be picked manually (e.g., the interviewer
-    /// wants to add an ad-hoc phase rather than the next planned one).
+    /// Mark the active phase `.completed` without auto-advancing — useful when
+    /// the next phase needs to be picked manually.
     func endActivePhase(in modelContext: ModelContext) {
         guard let active = interview?.activePhase else { return }
-        active.status = .completed
-        active.endedAt = .now
+        closeAndClear(phase: active, in: modelContext, site: "endActivePhase")
+    }
+
+    private func closeAndClear(
+        phase: InterviewPhase,
+        in modelContext: ModelContext,
+        site: String
+    ) {
+        phase.status = .completed
+        phase.endedAt = .now
         sectionScores = []
         rubricSnapshot = nil
         recordingViewModel.currentSectionTag = nil
         recordingViewModel.currentSectionTagID = nil
         PersistenceGate.save(
             modelContext,
-            site: "InterviewRecordingViewModel.endActivePhase",
+            site: "InterviewRecordingViewModel.\(site)",
             meetingID: recordingViewModel.currentMeeting?.id
         )
     }
@@ -343,10 +322,8 @@ final class InterviewRecordingViewModel {
         )
     }
 
-    /// Append a new phase mid-interview and activate it immediately. This is
-    /// the "pull in a code-review rubric on the fly" affordance — the
-    /// interviewer realized they want to score against an additional rubric
-    /// that wasn't in the original plan.
+    /// Append a new phase mid-interview and activate it immediately — the
+    /// "pull in a code-review rubric on the fly" affordance.
     func addAdHocPhase(title: String, rubric: Rubric?, in modelContext: ModelContext) {
         guard let interview else { return }
         let nextOrder = (interview.phases.map(\.plannedOrder).max() ?? -1) + 1
@@ -358,23 +335,27 @@ final class InterviewRecordingViewModel {
         )
         phase.interview = interview
         interview.phases.append(phase)
-
-        if let rubric {
-            for section in rubric.sections.sorted(by: { $0.sortOrder < $1.sortOrder }) {
-                let score = InterviewSectionScore(
-                    rubricSectionID: section.id,
-                    rubricSectionTitle: section.title,
-                    sortOrder: section.sortOrder,
-                    weight: section.weight
-                )
-                score.interview = interview
-                score.phase = phase
-                phase.sectionScores.append(score)
-                interview.sectionScores.append(score)
-            }
-        }
-
+        populateSectionScores(for: phase, on: interview)
         activatePhase(phase, in: modelContext)
+    }
+
+    /// Pre-create one `InterviewSectionScore` per rubric section on the given
+    /// phase so the scoring UI has empty rows to bind to before the AI
+    /// produces grades. No-op for unscored phases (rubric == nil).
+    private func populateSectionScores(for phase: InterviewPhase, on interview: Interview) {
+        guard let rubric = phase.rubric else { return }
+        for section in rubric.sections.sorted(by: { $0.sortOrder < $1.sortOrder }) {
+            let score = InterviewSectionScore(
+                rubricSectionID: section.id,
+                rubricSectionTitle: section.title,
+                sortOrder: section.sortOrder,
+                weight: section.weight
+            )
+            score.interview = interview
+            score.phase = phase
+            phase.sectionScores.append(score)
+            interview.sectionScores.append(score)
+        }
     }
 
     func stopInterview(in modelContext: ModelContext) {
@@ -402,77 +383,81 @@ final class InterviewRecordingViewModel {
             meetingID: recordingViewModel.currentMeeting?.id
         )
 
-        // Snapshot all scored phases for final analysis. We run one final
-        // pass per phase against its own rubric so each gets a clean
-        // re-score on the full transcript window for that phase.
-        let scoredPhases: [(UUID, RubricSnapshot, Date?, Date?)] = interview?.phases
-            .filter { $0.rubric != nil }
-            .map { ($0.id, $0.rubric!.toSnapshot(), $0.startedAt, $0.endedAt) }
-            ?? []
+        // Capture sendable inputs for each scored phase up-front on the
+        // main actor. Each tuple has everything the network call needs;
+        // SwiftData mutation happens later, back on main, after all the
+        // async work returns.
+        let allSegments = recordingViewModel.snapshotSegments()
+        struct PhaseJob: Sendable {
+            let id: UUID
+            let snapshot: RubricSnapshot
+            let segments: [SegmentSnapshot]
+        }
+        let jobs: [PhaseJob] = interview?.phases.compactMap { phase in
+            guard let rubric = phase.rubric else { return nil }
+            let segments = filterSegments(allSegments, between: phase.startedAt, and: phase.endedAt)
+            guard !segments.isEmpty else { return nil }
+            return PhaseJob(id: phase.id, snapshot: rubric.toSnapshot(), segments: segments)
+        } ?? []
         let meetingID = recordingViewModel.currentMeeting?.id
+        let traits = impressionTraitSnapshots
+        let candidate = candidateContextSnapshot
 
-        // Stop the underlying recording (triggers standard final analysis too)
         recordingViewModel.stopRecording(in: modelContext)
 
-        // Run final rubric analysis per scored phase.
-        if !scoredPhases.isEmpty {
-            rubricAnalysisState = .analyzing
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                for (phaseID, snapshot, startedAt, endedAt) in scoredPhases {
-                    await self.runFinalRubricAnalysis(
-                        phaseID: phaseID,
-                        snapshot: snapshot,
-                        startedAt: startedAt,
-                        endedAt: endedAt,
-                        meetingID: meetingID,
-                        in: modelContext
-                    )
-                }
-                self.rubricAnalysisState = .idle
-            }
-        } else {
+        guard !jobs.isEmpty else {
             rubricAnalysisState = .idle
+            return
         }
-    }
+        rubricAnalysisState = .analyzing
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Network round-trips run in parallel; results applied to
+            // SwiftData on main as they arrive. Total wall-clock =
+            // max(phase) instead of sum(phase).
+            let results: [(UUID, InterviewAnalysisResult)] = await withTaskGroup(
+                of: (UUID, InterviewAnalysisResult?).self
+            ) { group in
+                for job in jobs {
+                    group.addTask {
+                        guard let client = try? await AIClientFactory.makeClient() else {
+                            return (job.id, nil)
+                        }
+                        let service = InterviewIntelligenceService(
+                            client: client,
+                            rubricContext: job.snapshot,
+                            impressionTraits: traits,
+                            candidateContext: candidate,
+                            meetingID: meetingID
+                        )
+                        let result = try? await service.performFinalInterviewAnalysis(segments: job.segments)
+                        return (job.id, result)
+                    }
+                }
+                var collected: [(UUID, InterviewAnalysisResult)] = []
+                for await (phaseID, maybeResult) in group {
+                    if let result = maybeResult {
+                        collected.append((phaseID, result))
+                    } else {
+                        LogManager.shared.log("Final rubric analysis failed for phase \(phaseID)", category: .ai, level: .warning)
+                    }
+                }
+                return collected
+            }
 
-    private func runFinalRubricAnalysis(
-        phaseID: UUID,
-        snapshot: RubricSnapshot,
-        startedAt: Date?,
-        endedAt: Date?,
-        meetingID: UUID?,
-        in modelContext: ModelContext
-    ) async {
-        guard let client = try? await AIClientFactory.makeClient() else { return }
-
-        let service = InterviewIntelligenceService(
-            client: client,
-            rubricContext: snapshot,
-            impressionTraits: self.impressionTraitSnapshots,
-            candidateContext: self.candidateContextSnapshot,
-            meetingID: meetingID
-        )
-
-        // Bound segments to this phase's time window so AI sees only the
-        // conversation that happened during this rubric's coverage.
-        let allSegments = recordingViewModel.snapshotSegments()
-        let phaseSegments = filterSegments(allSegments, between: startedAt, and: endedAt)
-        guard !phaseSegments.isEmpty else { return }
-
-        do {
-            if let result = try await service.performFinalInterviewAnalysis(segments: phaseSegments) {
-                applyAnalysisResult(result, toPhaseID: phaseID)
+            for (phaseID, result) in results {
+                self.applyAnalysisResult(result, toPhaseID: phaseID)
+            }
+            if !results.isEmpty {
                 PersistenceGate.save(
                     modelContext,
-                    site: "InterviewRecordingViewModel.runFinalRubricAnalysis",
+                    site: "InterviewRecordingViewModel.runFinalRubricAnalysis/parallel",
                     critical: true,
                     meetingID: meetingID
                 )
-                LogManager.shared.log("Final rubric analysis complete for phase \(phaseID)", category: .ai)
+                LogManager.shared.log("Final rubric analysis complete (\(results.count) phase(s))", category: .ai)
             }
-        } catch {
-            LogManager.shared.log("Final rubric analysis failed for phase \(phaseID): \(error.localizedDescription)", category: .ai, level: .warning)
+            self.rubricAnalysisState = .idle
         }
     }
 
@@ -669,12 +654,12 @@ final class InterviewRecordingViewModel {
     }
 
     private func makePhaseCycle() -> PhaseCycle? {
-        guard let interview, let phase = interview.activePhase, phase.rubric != nil else {
+        guard let interview, let phase = interview.activePhase, let rubric = phase.rubric else {
             return nil
         }
         return PhaseCycle(
             phaseID: phase.id,
-            rubricSnapshot: phase.rubric!.toSnapshot(),
+            rubricSnapshot: rubric.toSnapshot(),
             traits: impressionTraitSnapshots,
             candidateContext: candidateContextSnapshot,
             meetingID: recordingViewModel.currentMeeting?.id,

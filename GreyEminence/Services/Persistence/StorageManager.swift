@@ -103,28 +103,35 @@ final class StorageManager: Sendable {
     }
 
     /// Copy a user-picked file into the candidate's directory and return
-    /// the destination filename. Replaces any prior resume to avoid orphan
-    /// files. The source URL must already have its security scope started
-    /// by the caller; we just read from it during the copy.
+    /// the destination filename. Two-phase to avoid losing the prior
+    /// resume on failure: copy the new file to a temp name first, only
+    /// then atomically replace the prior file. If the copy throws
+    /// (permission, disk full), the prior resume stays intact. The source
+    /// URL must already have its security scope started by the caller.
     @discardableResult
     func attachResume(sourceURL: URL, candidateID: UUID, replacingFilename: String?) throws -> String {
         let dir = candidateDirectory(for: candidateID)
-        // Drop any pre-existing resume for this candidate so we don't leak
-        // disk on replacement. Cheap enough — typical candidate has 0 or 1.
-        if let prior = replacingFilename {
-            let priorURL = dir.appendingPathComponent(prior)
-            try? FileManager.default.removeItem(at: priorURL)
-        }
-        // Sanitize filename: strip path separators (defensive — shouldn't
-        // happen via NSOpenPanel but a malformed bookmark could).
+        let fm = FileManager.default
+
+        // Defensive sanitize — NSOpenPanel doesn't return separator-bearing
+        // filenames, but a malformed security-scoped bookmark theoretically could.
         let baseName = sourceURL.lastPathComponent
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: ":", with: "_")
         let destURL = dir.appendingPathComponent(baseName)
-        // If a file of the same name already exists from a half-broken
-        // earlier attach, remove it before copying so the copy doesn't fail.
-        try? FileManager.default.removeItem(at: destURL)
-        try FileManager.default.copyItem(at: sourceURL, to: destURL)
+        let stagingURL = dir.appendingPathComponent(".staging-\(UUID().uuidString)-\(baseName)")
+
+        try fm.copyItem(at: sourceURL, to: stagingURL)
+        do {
+            if let prior = replacingFilename {
+                try? fm.removeItem(at: dir.appendingPathComponent(prior))
+            }
+            try? fm.removeItem(at: destURL)
+            try fm.moveItem(at: stagingURL, to: destURL)
+        } catch {
+            try? fm.removeItem(at: stagingURL)
+            throw error
+        }
         return baseName
     }
 

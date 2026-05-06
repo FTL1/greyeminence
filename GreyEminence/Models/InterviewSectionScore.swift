@@ -104,9 +104,8 @@ final class InterviewSectionScore {
 
     var interview: Interview?
 
-    /// The phase this score belongs to. Optional for backward compatibility
-    /// with scores created before phase support; the startup backfill
-    /// links legacy scores to a generated single-phase wrapper.
+    /// Optional for backward compat with pre-phase scores; the startup
+    /// backfill links those to a synthesized single-phase wrapper.
     var phase: InterviewPhase?
 
     @Relationship(deleteRule: .cascade, inverse: \ScoreEvidence.sectionScore)

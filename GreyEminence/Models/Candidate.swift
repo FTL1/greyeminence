@@ -11,15 +11,9 @@ final class Candidate {
     var isArchived: Bool
     var createdAt: Date
 
-    /// Filename of the resume copied into the candidate's directory under
-    /// AppSupport. Resolved to a URL via `StorageManager.candidateResumeURL`.
-    /// Nil when no resume is attached. We copy the file into our container
-    /// at attach time so we don't depend on the original security-scoped
-    /// URL surviving across launches.
+    /// Filename of the resume copied into the candidate's directory.
+    /// Resolved via `StorageManager.candidateResumeURL`.
     var resumeFilename: String?
-
-    /// When the resume was attached (or last replaced). Used in the UI to
-    /// give the reader a sense of how stale it might be.
     var resumeAddedAt: Date?
 
     var role: InterviewRole?

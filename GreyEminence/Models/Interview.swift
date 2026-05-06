@@ -77,12 +77,9 @@ final class Interview {
     var sectionScores: [InterviewSectionScore]
 
     /// Ordered phases that compose this interview. Each phase has its own
-    /// rubric (or none, for intro/conclusion) and its own scoring window.
-    /// Empty for legacy interviews created before phase support; the
-    /// startup backfill in MaintenanceService converts those to a single
-    /// phase containing the legacy `rubric`. No `= []` default — SwiftData
-    /// migration on macOS 26 chokes on default literals for new
-    /// relationships.
+    /// rubric (or none, for intro/conclusion) and scoring window. No
+    /// `= []` default — SwiftData migration on macOS 26 chokes on
+    /// default literals for new relationships.
     @Relationship(deleteRule: .cascade, inverse: \InterviewPhase.interview)
     var phases: [InterviewPhase]
 

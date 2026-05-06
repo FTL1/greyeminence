@@ -138,7 +138,7 @@ struct CandidateDetailView: View {
     private var resumeRow: some View {
         if let filename = candidate.resumeFilename, let url = candidate.resumeURL {
             HStack(spacing: 8) {
-                Image(systemName: iconName(for: filename))
+                Image(systemName: iconName(for: url))
                     .foregroundStyle(.cyan)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(filename)
@@ -236,16 +236,15 @@ struct CandidateDetailView: View {
     }
 
     private func isPDF(_ url: URL) -> Bool {
-        url.pathExtension.lowercased() == "pdf"
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) == true
     }
 
-    private func iconName(for filename: String) -> String {
-        let ext = (filename as NSString).pathExtension.lowercased()
-        switch ext {
-        case "pdf": return "doc.richtext"
-        case "doc", "docx": return "doc.text"
-        case "md", "txt", "rtf": return "doc.plaintext"
-        default: return "doc"
+    private func iconName(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "pdf": "doc.richtext"
+        case "doc", "docx": "doc.text"
+        case "md", "txt", "rtf": "doc.plaintext"
+        default: "doc"
         }
     }
 }

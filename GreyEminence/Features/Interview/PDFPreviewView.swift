@@ -1,10 +1,7 @@
 import SwiftUI
 import PDFKit
 
-/// Embedded PDF preview backed by PDFKit's `PDFView`. Used in the
-/// candidate detail screen to show an attached resume inline rather
-/// than handing it off to Preview. Read-only, scroll-paginated,
-/// with the standard PDFKit zoom/scroll controls inherited from AppKit.
+/// Inline PDF preview for attached resumes.
 struct PDFPreviewView: NSViewRepresentable {
     let url: URL
 
@@ -13,8 +10,6 @@ struct PDFPreviewView: NSViewRepresentable {
         view.autoScales = true
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
-        // Inset the page contents slightly so the doc doesn't hug the
-        // edges of the inspector panel.
         view.pageShadowsEnabled = true
         view.backgroundColor = .clear
         view.document = PDFDocument(url: url)
@@ -22,9 +17,7 @@ struct PDFPreviewView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PDFView, context: Context) {
-        // Reload only when the URL actually changes — comparing the
-        // existing document's URL avoids an expensive PDFDocument
-        // re-init on every SwiftUI redraw.
+        // Skip the expensive PDFDocument re-init if the URL hasn't changed.
         if view.document?.documentURL != url {
             view.document = PDFDocument(url: url)
         }

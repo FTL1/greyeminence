@@ -9,6 +9,10 @@ struct InterviewSetupView: View {
 
     var interviewViewModel: InterviewRecordingViewModel
 
+    /// Titles we treat as "untouched defaults" — assigning a rubric to a
+    /// phase whose title is one of these auto-renames it to the rubric.
+    private static let placeholderTitles: Set<String> = ["", "Phase", "Discussion"]
+
     @State private var selectedCandidate: Candidate?
     @State private var plannedPhases: [PlannedPhase] = [.intro(), .conclusion()]
     @State private var selectedInterviewers: Set<UUID> = []
@@ -237,9 +241,7 @@ struct InterviewSetupView: View {
                             // Auto-update title when rubric is freshly assigned
                             // and the user hasn't customized the title yet.
                             if let rubric = plannedPhases[index].rubric,
-                               plannedPhases[index].title.isEmpty
-                                || plannedPhases[index].title == "Phase"
-                                || plannedPhases[index].title == "Discussion" {
+                               Self.placeholderTitles.contains(plannedPhases[index].title) {
                                 plannedPhases[index].title = rubric.name
                             }
                         }

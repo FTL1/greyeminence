@@ -223,20 +223,12 @@ private struct InterviewLiveHeader: View {
 
     private func phaseChip(_ phase: InterviewPhase) -> some View {
         let isActive = phase.status == .active
-        let isCompleted = phase.status == .completed
-        let isSkipped = phase.status == .skipped
-        let icon: String = {
-            if isActive { return "circle.fill" }
-            if isCompleted { return "checkmark.circle.fill" }
-            if isSkipped { return "minus.circle" }
-            return "circle"
-        }()
-        let color: Color = {
-            if isActive { return .cyan }
-            if isCompleted { return .green }
-            if isSkipped { return .secondary }
-            return .secondary
-        }()
+        let (icon, color): (String, Color) = switch phase.status {
+        case .active: ("circle.fill", .cyan)
+        case .completed: ("checkmark.circle.fill", .green)
+        case .skipped: ("minus.circle", .secondary)
+        case .planned: ("circle", .secondary)
+        }
         return HStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.system(size: 9))

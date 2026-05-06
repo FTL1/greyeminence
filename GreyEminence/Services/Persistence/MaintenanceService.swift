@@ -190,12 +190,15 @@ enum MaintenanceService {
         return backfilled
     }
 
-    /// Migrate the legacy `RubricCriterion.evaluationNotes` free-text field
-    /// into a single `CriterionGuidance` bullet (audience: interviewer)
-    /// for any criterion that has notes but no guidance yet. Idempotent —
-    /// once the criterion has any guidance, this leaves it alone.
+    /// Migrate legacy `RubricCriterion.evaluationNotes` into a single
+    /// `CriterionGuidance` bullet (audience: interviewer). Idempotent —
+    /// once a criterion has any guidance, this leaves it alone.
     private static func backfillCriterionGuidance(in context: ModelContext) -> Int {
-        let descriptor = FetchDescriptor<RubricCriterion>()
+        // Only fetch criteria that actually have legacy notes — a rubric
+        // with hundreds of clean criteria shouldn't materialize them all.
+        let descriptor = FetchDescriptor<RubricCriterion>(
+            predicate: #Predicate { $0.evaluationNotes != nil }
+        )
         guard let criteria = try? context.fetch(descriptor) else { return 0 }
         var backfilled = 0
         for criterion in criteria {
