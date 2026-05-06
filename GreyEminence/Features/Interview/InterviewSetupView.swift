@@ -8,6 +8,9 @@ struct InterviewSetupView: View {
     @Query(sort: \Contact.name) private var contacts: [Contact]
 
     var interviewViewModel: InterviewRecordingViewModel
+    /// Called after a successful schedule so the parent (InterviewHubView)
+    /// can switch to the interviews tab and select the new interview.
+    var onScheduled: (Interview) -> Void
 
     /// Titles we treat as "untouched defaults" — assigning a rubric to a
     /// phase whose title is one of these auto-renames it to the rubric.
@@ -195,14 +198,14 @@ struct InterviewSetupView: View {
 
                 // Start button
                 Button {
-                    startInterview()
+                    schedule()
                 } label: {
-                    Label("Start Interview", systemImage: "record.circle")
+                    Label("Ready to interview", systemImage: "checkmark.seal")
                         .font(.headline)
                         .frame(maxWidth: 200)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.red)
+                .tint(.cyan)
                 .controlSize(.large)
                 .disabled(!canStart)
             }
@@ -294,15 +297,27 @@ struct InterviewSetupView: View {
         plannedPhases = phases
     }
 
-    private func startInterview() {
+    /// Persist the planned interview as `.scheduled` and hand the new
+    /// row to the parent so it can navigate to the interviews tab. The
+    /// recording itself doesn't start until the user clicks
+    /// "Start Interview" on the scorecard.
+    private func schedule() {
         guard let candidate = selectedCandidate else { return }
         let interviewerContacts = activeInterviewers.filter { selectedInterviewers.contains($0.id) }
-        interviewViewModel.startInterview(
+        let scheduled = interviewViewModel.scheduleInterview(
             candidate: candidate,
             plannedPhases: plannedPhases,
             interviewers: interviewerContacts,
             notes: preNotes.isEmpty ? nil : preNotes,
             in: modelContext
         )
+        onScheduled(scheduled)
+
+        // Reset the form so the user can schedule another interview
+        // back-to-back without leftover state.
+        selectedCandidate = nil
+        plannedPhases = [.intro(), .conclusion()]
+        selectedInterviewers = []
+        preNotes = ""
     }
 }

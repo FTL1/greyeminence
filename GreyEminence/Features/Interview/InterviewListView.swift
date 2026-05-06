@@ -4,6 +4,7 @@ import SwiftData
 struct InterviewListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Interview.createdAt, order: .reverse) private var interviews: [Interview]
+    var interviewViewModel: InterviewRecordingViewModel
     @Binding var selectedInterview: Interview?
     @Binding var showInspector: Bool
     @Binding var inspectorWidth: CGFloat?
@@ -53,7 +54,7 @@ struct InterviewListView: View {
             }
         } detail: {
             if let interview = selectedInterview {
-                InterviewScorecardView(interview: interview)
+                InterviewScorecardView(interview: interview, interviewViewModel: interviewViewModel)
             } else {
                 ContentUnavailableView(
                     "No Interview Selected",

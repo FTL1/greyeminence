@@ -3,6 +3,7 @@ import SwiftData
 
 struct InterviewScorecardView: View {
     @Bindable var interview: Interview
+    var interviewViewModel: InterviewRecordingViewModel
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \InterviewImpressionTrait.sortOrder) private var traits: [InterviewImpressionTrait]
     @State private var isReanalyzing = false
@@ -20,6 +21,40 @@ struct InterviewScorecardView: View {
         case scoring
         case done
         case failed(String)
+    }
+
+    /// Start / In-Progress button to the left of "Score All Sections".
+    /// Hidden once the interview is completed or archived — by that point
+    /// recording is moot and the scorecard is in review mode.
+    @ViewBuilder
+    private var startInterviewButton: some View {
+        switch interview.status {
+        case .scheduled:
+            Button {
+                interviewViewModel.beginRecording(interview, in: modelContext)
+            } label: {
+                Label("Start Interview", systemImage: "record.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+            .controlSize(.small)
+        case .recording:
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 7, height: 7)
+                    .modifier(PulsingModifier())
+                Text("In Progress")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.red.opacity(0.1), in: Capsule())
+        case .completed, .archived:
+            EmptyView()
+        }
     }
 
     private var sortedScores: [InterviewSectionScore] {
@@ -42,6 +77,8 @@ struct InterviewScorecardView: View {
                 .frame(maxWidth: 200)
 
                 Spacer()
+
+                startInterviewButton
 
                 if isReanalyzing {
                     ProgressView()

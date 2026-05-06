@@ -127,10 +127,9 @@ final class InterviewRecordingViewModel {
         )
     }
 
-    /// Multi-phase interview start. `plannedPhases` is the ordered sequence
-    /// the interviewer intends to run. The first phase (whatever it is) is
-    /// activated immediately; subsequent phases stay `.planned` until the
-    /// interviewer transitions through them.
+    /// Multi-phase interview start. Schedules and immediately begins
+    /// recording — equivalent to `scheduleInterview` followed by
+    /// `beginRecording`. Kept for callers that want the one-step flow.
     func startInterview(
         candidate: Candidate,
         plannedPhases: [PlannedPhase],
@@ -138,19 +137,35 @@ final class InterviewRecordingViewModel {
         notes: String?,
         in modelContext: ModelContext
     ) {
-        // Use the first scored phase's rubric as the legacy `Interview.rubric`
-        // pointer so older code paths and the backfill keep working. If
-        // there's no scored phase, leave it nil.
+        let scheduled = scheduleInterview(
+            candidate: candidate,
+            plannedPhases: plannedPhases,
+            interviewers: interviewers,
+            notes: notes,
+            in: modelContext
+        )
+        beginRecording(scheduled, in: modelContext)
+    }
+
+    /// Persist the planned interview without starting recording. The
+    /// caller can navigate to the new interview's scorecard and let the
+    /// interviewer click "Start Interview" when they're actually ready
+    /// to begin capture.
+    @discardableResult
+    func scheduleInterview(
+        candidate: Candidate,
+        plannedPhases: [PlannedPhase],
+        interviewers: [Contact],
+        notes: String?,
+        in modelContext: ModelContext
+    ) -> Interview {
         let firstScoredRubric = plannedPhases.compactMap(\.rubric).first
         let interview = Interview(candidate: candidate, rubric: firstScoredRubric)
-        interview.status = .recording
+        interview.status = .scheduled
         interview.interviewerNotes = notes
         interview.interviewers = interviewers
         modelContext.insert(interview)
 
-        // Build phase models from the planning input. Order matters; we
-        // assign plannedOrder by position so reordering later doesn't
-        // require array index gymnastics.
         for (idx, planned) in plannedPhases.enumerated() {
             let phase = InterviewPhase(
                 title: planned.title,
@@ -163,66 +178,76 @@ final class InterviewRecordingViewModel {
             populateSectionScores(for: phase, on: interview)
         }
 
+        // Pre-create impression rows so the scorecard renders empty
+        // sliders before any AI analysis lands.
         let traitDescriptor = FetchDescriptor<InterviewImpressionTrait>(
             sortBy: [SortDescriptor(\InterviewImpressionTrait.sortOrder)]
         )
         let traits = (try? modelContext.fetch(traitDescriptor)) ?? []
-        var imps: [InterviewImpression] = []
         for trait in traits {
-            let impression = InterviewImpression(traitName: trait.name, value: 3) // Start at middle
+            let impression = InterviewImpression(traitName: trait.name, value: 3)
             impression.interview = interview
-            imps.append(impression)
         }
 
+        PersistenceGate.save(
+            modelContext,
+            site: "InterviewRecordingViewModel.scheduleInterview",
+            critical: true
+        )
+        return interview
+    }
+
+    /// Pick up a previously-scheduled interview and start the audio
+    /// capture + rubric analysis loop. Hydrates the VM's live state
+    /// from the persisted Interview's relationships.
+    func beginRecording(_ interview: Interview, in modelContext: ModelContext) {
+        self.interview = interview
+        interview.status = .recording
+
+        // Refresh trait snapshots — they may have changed since the
+        // interview was scheduled (admin tweaked the trait library).
+        let traitDescriptor = FetchDescriptor<InterviewImpressionTrait>(
+            sortBy: [SortDescriptor(\InterviewImpressionTrait.sortOrder)]
+        )
+        let traits = (try? modelContext.fetch(traitDescriptor)) ?? []
         self.impressionTraitSnapshots = traits.map {
             ImpressionTraitSnapshot(name: $0.name, labels: $0.labels)
         }
-        self.interview = interview
-        self.impressions = imps
-        self.bookmarks = []
+
+        self.impressions = interview.impressions
+        self.bookmarks = interview.bookmarks
+        self.notes = interview.notes.filter { $0.parentNote == nil }
         self.strengths = []
         self.weaknesses = []
         self.redFlags = []
         self.overallAssessment = ""
-
-        PersistenceGate.save(
-            modelContext,
-            site: "InterviewRecordingViewModel.startInterview/initialInsert",
-            critical: true
-        )
 
         recordingViewModel.startRecording(in: modelContext)
         if let meeting = recordingViewModel.currentMeeting {
             meeting.isInterviewMeeting = true
             interview.meeting = meeting
 
-            for contact in interviewers {
+            for contact in interview.interviewers {
                 if !meeting.attendees.contains(where: { $0.id == contact.id }) {
                     meeting.attendees.append(contact)
                 }
             }
             PersistenceGate.save(
                 modelContext,
-                site: "InterviewRecordingViewModel.startInterview/linkMeeting",
+                site: "InterviewRecordingViewModel.beginRecording/linkMeeting",
                 critical: true,
                 meetingID: meeting.id
             )
         }
 
-        // Activate the first planned phase. If the first phase is unscored
-        // (intro), the AI loop will silently skip cycles until the
-        // interviewer advances to a scored phase.
-        if let first = interview.orderedPhases.first {
+        // Activate the first .planned phase. If the first phase is
+        // unscored (intro), the AI loop will silently skip cycles
+        // until the interviewer advances to a scored phase.
+        if let first = interview.orderedPhases.first(where: { $0.status == .planned }) {
             activatePhase(first, in: modelContext)
         }
 
-        // Build candidate-context snapshot once (resume extraction is
-        // synchronous file I/O — keep it off the per-cycle hot path).
         buildCandidateContextSnapshot()
-
-        // Start rubric analysis loop (offset from standard AI by ~20s).
-        // The loop reads the active phase's rubric per cycle, so it
-        // tolerates phase changes without restart.
         startRubricAnalysis()
     }
 

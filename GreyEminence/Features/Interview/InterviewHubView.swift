@@ -36,10 +36,21 @@ struct InterviewHubView: View {
                 Group {
                     switch activeTab {
                     case .interviews:
-                        InterviewListView(selectedInterview: $selectedInterview, showInspector: $showInspector, inspectorWidth: $inspectorWidth)
-                            .id("interviewList")
+                        InterviewListView(
+                            interviewViewModel: interviewViewModel,
+                            selectedInterview: $selectedInterview,
+                            showInspector: $showInspector,
+                            inspectorWidth: $inspectorWidth
+                        )
+                        .id("interviewList")
                     case .setup:
-                        InterviewSetupView(interviewViewModel: interviewViewModel)
+                        InterviewSetupView(
+                            interviewViewModel: interviewViewModel,
+                            onScheduled: { interview in
+                                selectedInterview = interview
+                                activeTab = .interviews
+                            }
+                        )
                     case .candidates:
                         CandidateListView()
                     case .rubrics:
