@@ -747,35 +747,44 @@ final class RecordingViewModel {
                     }
                     // Periodic amplitude summary so silent-mic recordings are
                     // visible in the log without spamming. Once every ~30 s.
+                    // The silence-auto-pause check piggybacks on this window:
+                    // we evaluate the just-computed avg BEFORE resetting,
+                    // otherwise the reset zeroes the counters and the next
+                    // buffer flips the freshly-empty average to 0 and trips
+                    // the auto-pause spuriously.
                     if Date().timeIntervalSince(lastDiagLog) > 30 {
                         let avg = summedAmplitude / Float(max(bufferCount, 1))
+                        let bufferCountAtFlush = bufferCount
                         await MainActor.run {
-                            self.log.log("Mic activity: \(bufferCount) buffers, avg RMS \(String(format: "%.4f", avg)) over last 30s", category: .audio, level: avg < 0.001 ? .warning : .info)
+                            self.log.log("Mic activity: \(bufferCountAtFlush) buffers, avg RMS \(String(format: "%.4f", avg)) over last 30s", category: .audio, level: avg < 0.001 ? .warning : .info)
                         }
+
+                        // After 60 s of all-silent buffers, surface a clear
+                        // errorMessage AND auto-pause. Common causes: mic
+                        // perm revoked in System Settings mid-recording,
+                        // device hardware-mute pressed, system input volume
+                        // at 0, or another app (Teams) holding exclusive
+                        // access. Auto-pausing means we stop writing
+                        // minutes of silent audio while the user is
+                        // unaware. They can resume after fixing the
+                        // underlying issue.
+                        if !silenceWarningSurfaced,
+                           Date().timeIntervalSince(captureStart) > 60,
+                           bufferCountAtFlush > 0,
+                           avg < 0.0005 {
+                            silenceWarningSurfaced = true
+                            await MainActor.run {
+                                self.errorMessage = "Mic is silent — recording auto-paused. Check System Settings → Privacy & Security → Microphone, Sound → Input level, and any conferencing app holding the mic, then resume."
+                                self.log.log("Mic silent over the last 30s (avg RMS \(String(format: "%.4f", avg)) < 0.0005). Auto-pausing recording.", category: .audio, level: .error)
+                                if self.state == .recording {
+                                    self.pauseRecording()
+                                }
+                            }
+                        }
+
                         bufferCount = 0
                         summedAmplitude = 0
                         lastDiagLog = Date()
-                    }
-
-                    // After 60 s of all-silent buffers, surface a clear
-                    // errorMessage AND auto-pause. Common causes: mic perm
-                    // revoked in System Settings mid-recording, device
-                    // hardware-mute pressed, system input volume at 0, or
-                    // another app (Teams) holding exclusive access. Auto-
-                    // pausing means we stop writing minutes of silent audio
-                    // while the user is unaware. They can resume after
-                    // fixing the underlying issue.
-                    if !silenceWarningSurfaced,
-                       Date().timeIntervalSince(captureStart) > 60,
-                       summedAmplitude / Float(max(bufferCount, 1)) < 0.0005 {
-                        silenceWarningSurfaced = true
-                        await MainActor.run {
-                            self.errorMessage = "Mic is silent — recording auto-paused. Check System Settings → Privacy & Security → Microphone, Sound → Input level, and any conferencing app holding the mic, then resume."
-                            self.log.log("Mic silent for 60s after capture start (avg RMS < 0.0005). Auto-pausing recording.", category: .audio, level: .error)
-                            if self.state == .recording {
-                                self.pauseRecording()
-                            }
-                        }
                     }
 
                     if !(await micWriter.isWriting) {
