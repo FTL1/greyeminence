@@ -56,4 +56,5 @@ Open the built app from DerivedData or run from Xcode.
 
 ## License
 
-Proprietary. See `LICENSE` if present, otherwise treat as all rights reserved.
+MIT — see [LICENSE](LICENSE) at the repo root, or open
+**Help → License** inside the app.

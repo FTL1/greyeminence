@@ -41,7 +41,8 @@ in `project.yml`.
   Rubrics · Test.
 - Developer Settings: database size now reads the actual ModelContainer
   config URL instead of guessing a path; schema version is read live.
-- Help menu surfaces README, CONTRIBUTING, and CHANGELOG inside the app.
+- Help menu surfaces README, CONTRIBUTING, CHANGELOG, and the MIT
+  LICENSE inside the app.
 
 **Schema**
 - Migrations through V8: rubric brief moved from section to rubric;

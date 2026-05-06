@@ -20,6 +20,7 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
     case readme = "README"
     case contributing = "CONTRIBUTING"
     case changelog = "CHANGELOG"
+    case license = "LICENSE"
 
     var id: String { rawValue }
     var menuTitle: String {
@@ -27,6 +28,7 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
         case .readme: "Read Me"
         case .contributing: "Contributing"
         case .changelog: "Changelog"
+        case .license: "License"
         }
     }
     var resourceName: String { rawValue }
@@ -35,6 +37,7 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
         case .readme: "book"
         case .contributing: "hammer"
         case .changelog: "clock.arrow.circlepath"
+        case .license: "scroll"
         }
     }
 }
