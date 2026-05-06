@@ -8,7 +8,17 @@ final class Rubric {
     var isArchived: Bool
     var createdAt: Date
 
+    /// Legacy single-role pointer. Kept for backward compat reads; new
+    /// writes go through `roleLinks`. The startup maintenance pass
+    /// migrates a non-nil `role` into a single `RoleRubricLink` with
+    /// strictness `.standard`.
     var role: InterviewRole?
+
+    /// Many-to-many connection to roles via `RoleRubricLink`. Each link
+    /// also carries calibration metadata (strictness) so the same rubric
+    /// can apply to multiple roles with different bars.
+    @Relationship(deleteRule: .cascade, inverse: \RoleRubricLink.rubric)
+    var roleLinks: [RoleRubricLink]
 
     @Relationship(deleteRule: .cascade, inverse: \RubricSection.rubric)
     var sections: [RubricSection]
@@ -19,6 +29,25 @@ final class Rubric {
         self.isArchived = false
         self.createdAt = .now
         self.sections = []
+        self.roleLinks = []
+    }
+
+    /// All roles this rubric is linked to (via `roleLinks`), plus the
+    /// legacy single `role` if no links exist yet. Convenience for
+    /// callers that just want the union — UI surfaces should prefer
+    /// `roleLinks` directly so they can also show strictness.
+    var linkedRoles: [InterviewRole] {
+        let linked = roleLinks.compactMap(\.role)
+        if !linked.isEmpty { return linked }
+        return role.map { [$0] } ?? []
+    }
+
+    /// True when this rubric applies to the given role — checks both the
+    /// legacy `role` field and the `roleLinks` join. Used by the phase
+    /// planner to filter rubrics for the candidate's role.
+    func appliesTo(role queryRole: InterviewRole) -> Bool {
+        if role?.id == queryRole.id { return true }
+        return roleLinks.contains { $0.role?.id == queryRole.id }
     }
 
     /// Rescale section weights so they sum to exactly 100. No-op if the

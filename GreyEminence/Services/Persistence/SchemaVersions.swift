@@ -99,23 +99,32 @@ enum SchemaV3: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV2.models }
 }
 
+/// SchemaV4 adds `RoleRubricLink` (the join model for many-to-many
+/// Rubric↔Role with per-link strictness metadata) plus the
+/// corresponding `roleLinks` / `roleRubricLinks` relationships on
+/// `Rubric` and `InterviewRole`. The legacy `Rubric.role` single
+/// pointer stays for backward compat. Purely additive.
+enum SchemaV4: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(4, 0, 0) }
+    static var models: [any PersistentModel.Type] {
+        SchemaV3.models + [RoleRubricLink.self]
+    }
+}
+
 /// Migration plan for the SwiftData store. Each new `SchemaV*` version is
 /// appended to `schemas` along with a corresponding `MigrationStage` in
 /// `stages`. Lightweight migration (adding optional fields, new models)
 /// works automatically and doesn't need property-level transforms.
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self]
     }
 
     static var stages: [MigrationStage] {
         [
-            // V1 → V2: adds InterviewPhase and the optional relationships
-            // linking it to Interview and InterviewSectionScore.
             .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self),
-            // V2 → V3: adds Candidate.resumeSummary / characterSheetJSON /
-            // resumeAnalyzedAt for AI-generated resume analysis.
-            .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self)
+            .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self),
+            .lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self)
         ]
     }
 }

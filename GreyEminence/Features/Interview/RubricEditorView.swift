@@ -10,20 +10,48 @@ struct RubricEditorView: View {
         rubric.sections.sorted { $0.sortOrder < $1.sortOrder }
     }
 
+    private var sortedLinks: [RoleRubricLink] {
+        rubric.roleLinks.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private var unlinkedRoles: [InterviewRole] {
+        let linkedIDs = Set(rubric.roleLinks.compactMap(\.role?.id))
+        return roles.filter { !linkedIDs.contains($0.id) }
+    }
+
     var body: some View {
         List {
             // Header
             Section("Rubric Details") {
                 TextField("Name", text: $rubric.name)
-                Picker("Role", selection: Binding(
-                    get: { rubric.role },
-                    set: { rubric.role = $0 }
-                )) {
-                    Text("None").tag(nil as InterviewRole?)
-                    ForEach(roles) { role in
-                        Text(role.fullDescription).tag(role as InterviewRole?)
+            }
+
+            Section {
+                if sortedLinks.isEmpty {
+                    Text("Not linked to any role yet — this rubric is available everywhere via the phase planner's full list.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(sortedLinks) { link in
+                    roleLinkRow(link)
+                }
+                if !unlinkedRoles.isEmpty {
+                    Menu {
+                        ForEach(unlinkedRoles) { role in
+                            Button(role.fullDescription) {
+                                addRoleLink(role: role)
+                            }
+                        }
+                    } label: {
+                        Label("Add Role", systemImage: "plus.circle")
                     }
                 }
+            } header: {
+                Text("Applies To")
+            } footer: {
+                Text("Linking a rubric to a role makes it the default suggestion in the phase planner for candidates in that role. Strictness shifts how harshly the AI grades — \"Standard\" is the default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if !rubric.sections.isEmpty {
@@ -68,6 +96,76 @@ struct RubricEditorView: View {
         .onAppear {
             rubric.normalizeWeightsToHundred()
         }
+    }
+
+    // MARK: - Role Link UI
+
+    @ViewBuilder
+    private func roleLinkRow(_ link: RoleRubricLink) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: link.strictness.symbolName)
+                .foregroundStyle(strictnessColor(link.strictness))
+                .frame(width: 18)
+
+            Text(link.role?.fullDescription ?? "Unassigned role")
+                .font(.body)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer()
+
+            Picker("", selection: Binding(
+                get: { link.strictness },
+                set: { link.strictness = $0 }
+            )) {
+                ForEach(RubricStrictness.allCases, id: \.self) { value in
+                    Label(value.label, systemImage: value.symbolName).tag(value)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+
+            Button {
+                removeRoleLink(link)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func strictnessColor(_ strictness: RubricStrictness) -> Color {
+        switch strictness {
+        case .lenient: .blue
+        case .standard: .secondary
+        case .strict: .orange
+        }
+    }
+
+    private func addRoleLink(role: InterviewRole) {
+        let nextOrder = (rubric.roleLinks.map(\.sortOrder).max() ?? -1) + 1
+        let link = RoleRubricLink(
+            rubric: rubric,
+            role: role,
+            strictness: .standard,
+            sortOrder: nextOrder
+        )
+        modelContext.insert(link)
+        rubric.roleLinks.append(link)
+        // Mirror the first link to the legacy `role` field so older code
+        // paths (and the phase planner's fallback) keep finding it.
+        if rubric.role == nil {
+            rubric.role = role
+        }
+    }
+
+    private func removeRoleLink(_ link: RoleRubricLink) {
+        rubric.roleLinks.removeAll { $0.id == link.id }
+        modelContext.delete(link)
+        // Keep the legacy `role` field aligned with the first remaining link.
+        rubric.role = rubric.roleLinks.sorted { $0.sortOrder < $1.sortOrder }.first?.role
     }
 
     private func addSection() {

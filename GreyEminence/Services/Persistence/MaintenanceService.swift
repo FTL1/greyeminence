@@ -21,6 +21,7 @@ enum MaintenanceService {
         var actionItemsBackfilled = 0
         var interviewsBackfilledToPhases = 0
         var criterionGuidanceBackfilled = 0
+        var roleRubricLinksBackfilled = 0
         var skipped = false
 
         var summary: String {
@@ -32,7 +33,8 @@ enum MaintenanceService {
             \(stuckAnalyzingFlagsReset) stuck analysis flag(s) cleared, \
             \(actionItemsBackfilled) action item source(s) backfilled, \
             \(interviewsBackfilledToPhases) legacy interview(s) wrapped in phases, \
-            \(criterionGuidanceBackfilled) evaluation note(s) migrated to guidance bullets
+            \(criterionGuidanceBackfilled) evaluation note(s) migrated to guidance bullets, \
+            \(roleRubricLinksBackfilled) rubric→role link(s) backfilled
             """
         }
     }
@@ -58,6 +60,7 @@ enum MaintenanceService {
         report.actionItemsBackfilled = backfillActionItemSources(meetings: meetings, in: modelContext)
         report.interviewsBackfilledToPhases = backfillInterviewPhases(in: modelContext)
         report.criterionGuidanceBackfilled = backfillCriterionGuidance(in: modelContext)
+        report.roleRubricLinksBackfilled = backfillRoleRubricLinks(in: modelContext)
 
         UserDefaults.standard.set(Date(), forKey: lastRunKey)
         LogManager.send(report.summary, category: .general)
@@ -216,6 +219,32 @@ enum MaintenanceService {
         }
         if backfilled > 0 {
             PersistenceGate.save(context, site: "Maintenance.backfillCriterionGuidance")
+        }
+        return backfilled
+    }
+
+    /// For each rubric that has a legacy single `role` pointer but no
+    /// `roleLinks`, synthesize one `RoleRubricLink` with strictness
+    /// `.standard` so the new many-to-many UI sees consistent data.
+    /// Idempotent — once a rubric has any link, this leaves it alone.
+    private static func backfillRoleRubricLinks(in context: ModelContext) -> Int {
+        let descriptor = FetchDescriptor<Rubric>()
+        guard let rubrics = try? context.fetch(descriptor) else { return 0 }
+        var backfilled = 0
+        for rubric in rubrics {
+            guard let role = rubric.role, rubric.roleLinks.isEmpty else { continue }
+            let link = RoleRubricLink(
+                rubric: rubric,
+                role: role,
+                strictness: .standard,
+                sortOrder: 0
+            )
+            context.insert(link)
+            rubric.roleLinks.append(link)
+            backfilled += 1
+        }
+        if backfilled > 0 {
+            PersistenceGate.save(context, site: "Maintenance.backfillRoleRubricLinks")
         }
         return backfilled
     }

@@ -14,6 +14,12 @@ final class InterviewRole {
     @Relationship(deleteRule: .cascade, inverse: \Rubric.role)
     var rubrics: [Rubric]
 
+    /// Many-to-many links to rubrics that apply to this role with
+    /// per-link strictness metadata. Replaces the legacy
+    /// `rubrics` one-to-many for new code.
+    @Relationship(deleteRule: .cascade, inverse: \RoleRubricLink.role)
+    var roleRubricLinks: [RoleRubricLink]
+
     init(level: RoleLevel? = nil, department: Department? = nil, team: Team? = nil, customTitle: String? = nil) {
         self.id = UUID()
         self.level = level
@@ -22,6 +28,7 @@ final class InterviewRole {
         self.customTitle = customTitle
         self.createdAt = .now
         self.rubrics = []
+        self.roleRubricLinks = []
     }
 
     var displayTitle: String {

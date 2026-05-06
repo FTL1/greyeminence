@@ -32,10 +32,12 @@ struct InterviewSetupView: View {
     }
 
     /// Rubrics likely relevant to this candidate's role — used to seed
-    /// suggestions and order the rubric picker.
+    /// suggestions and order the rubric picker. Reads through both the
+    /// legacy `Rubric.role` pointer and the newer `roleLinks` join so
+    /// the planner finds rubrics that apply to multiple roles.
     private var roleScopedRubrics: [Rubric] {
         guard let role = selectedCandidate?.role else { return activeRubrics }
-        let matching = activeRubrics.filter { $0.role?.id == role.id }
+        let matching = activeRubrics.filter { $0.appliesTo(role: role) }
         return matching.isEmpty ? activeRubrics : matching
     }
 

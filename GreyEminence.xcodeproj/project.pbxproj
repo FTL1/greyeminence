@@ -66,6 +66,7 @@
 		5B0D134A768087BDA747466F /* TranscriptDeduplicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3808CC293C20D0583278C3F9 /* TranscriptDeduplicator.swift */; };
 		5B110CFEFA6600A386C0BCF4 /* EmbeddingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23C382DEF7EA4E7691E8679D /* EmbeddingService.swift */; };
 		5BE06B68015F12B69EB436D8 /* TranscriptPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5225DE7E98248F22B00C08CB /* TranscriptPanelView.swift */; };
+		63649560034B239D8F7FD968 /* RoleRubricLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9DC43270047C0FBF582EDB1 /* RoleRubricLink.swift */; };
 		6428B269561C1610AE114AB8 /* RecordingToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 130974A6F8E2B27E4705F6A3 /* RecordingToolbar.swift */; };
 		645FB051CDDEF1925D77944A /* BedrockAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A4997345983696DC9017FF /* BedrockAPIClient.swift */; };
 		6632545DC3BCE1347E7D2AAF /* VocabularyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A49043AC4DC48EF88C729BE /* VocabularyManager.swift */; };
@@ -332,6 +333,7 @@
 		C5E0850098FB7EB6B1D48C73 /* ScoreEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScoreEvidence.swift; sourceTree = "<group>"; };
 		C6774606B2258926F847E4C4 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		C6F5DC8974A4F45DDF6B19FC /* EditableTranscriptSegmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditableTranscriptSegmentRow.swift; sourceTree = "<group>"; };
+		C9DC43270047C0FBF582EDB1 /* RoleRubricLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleRubricLink.swift; sourceTree = "<group>"; };
 		CA9332875D8DF9786389A129 /* InterviewRole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewRole.swift; sourceTree = "<group>"; };
 		CCD46DD530F5CE11FE209E36 /* DedupDebugRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DedupDebugRow.swift; sourceTree = "<group>"; };
 		CD9733020AF86912380852E7 /* AWSCredentialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AWSCredentialLoader.swift; sourceTree = "<group>"; };
@@ -707,6 +709,7 @@
 				8FFDC9ABAD40D943DE809198 /* Meeting.swift */,
 				BA2B75D0915DCF472081C0F4 /* MeetingInsight.swift */,
 				E016B91CDEA91AF1DF999437 /* RoleLevel.swift */,
+				C9DC43270047C0FBF582EDB1 /* RoleRubricLink.swift */,
 				16FDDE6B20442020C1A542EC /* Rubric.swift */,
 				19C6927F280175D31CAADD91 /* RubricBonusSignal.swift */,
 				4763E15F118E2C39BBE17F27 /* RubricCriterion.swift */,
@@ -1075,6 +1078,7 @@
 				0D999193690073A261246592 /* ResumeAnalyzer.swift in Sources */,
 				126E753BE35486221B3CC48A /* ResumeTextExtractor.swift in Sources */,
 				20E58AD8BC35A77A824C2633 /* RoleLevel.swift in Sources */,
+				63649560034B239D8F7FD968 /* RoleRubricLink.swift in Sources */,
 				970E364563D298477D3B8815 /* Rubric.swift in Sources */,
 				1BD50BA428B227711DD3FD21 /* RubricBonusSignal.swift in Sources */,
 				731B99180852038A8C312858 /* RubricCriterion.swift in Sources */,
