@@ -22,6 +22,7 @@ struct LiveInterviewIntelligenceView: View {
     @Environment(\.modelContext) private var modelContext
     var interviewViewModel: InterviewRecordingViewModel
     @Query(sort: \InterviewImpressionTrait.sortOrder) private var traits: [InterviewImpressionTrait]
+    @Query(sort: \Rubric.createdAt, order: .reverse) private var allRubrics: [Rubric]
 
     private var recordingVM: RecordingViewModel {
         interviewViewModel.recordingViewModel
@@ -34,9 +35,11 @@ struct LiveInterviewIntelligenceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Phase icons (left) + Impressions (right)
+            // Phase icons (left) + transition controls + Impressions (right)
             HStack(spacing: 0) {
                 phaseIcons
+                phaseControls
+                    .padding(.leading, 6)
                 Spacer(minLength: 8)
                 impressionsStrip
             }
@@ -162,6 +165,57 @@ struct LiveInterviewIntelligenceView: View {
             .fill(Color.secondary.opacity(0.2))
             .frame(width: 8, height: 1.5)
             .padding(.bottom, 14)
+    }
+
+    /// Right-of-icon-strip transition controls. "Next" closes the active
+    /// phase and advances; the ellipsis menu adds an ad-hoc phase or
+    /// ends the active phase without advancing. Replaces the chip-row
+    /// controls that used to live in InterviewLiveHeader.
+    private var phaseControls: some View {
+        HStack(spacing: 4) {
+            Button {
+                interviewViewModel.advancePhase(in: modelContext)
+            } label: {
+                Image(systemName: "arrow.right.circle")
+                    .font(.system(size: 14))
+            }
+            .buttonStyle(.plain)
+            .help("Advance to the next planned phase")
+
+            Menu {
+                Button("End Active Phase") {
+                    interviewViewModel.endActivePhase(in: modelContext)
+                }
+                Divider()
+                Section("Add ad-hoc phase") {
+                    ForEach(allRubrics.filter { !$0.isArchived }) { rubric in
+                        Button(rubric.name) {
+                            interviewViewModel.addAdHocPhase(
+                                title: rubric.name,
+                                rubric: rubric,
+                                in: modelContext
+                            )
+                        }
+                    }
+                    Divider()
+                    Button("Unscored Discussion") {
+                        interviewViewModel.addAdHocPhase(
+                            title: "Discussion",
+                            rubric: nil,
+                            in: modelContext
+                        )
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 14))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("More phase actions")
+        }
+        .padding(.bottom, 14)
     }
 
     /// Weighted composite gradePoints across this phase's section

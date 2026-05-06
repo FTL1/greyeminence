@@ -2,14 +2,18 @@ import SwiftUI
 import SwiftData
 import AppKit
 
-/// Load a saved transcript and test it against a rubric without recording.
+/// Rescore an existing interview against a different rubric (or a
+/// specific phase against a different rubric) without re-recording.
+/// Useful for trying a refined rubric on a past interview, or for
+/// validating a new rubric design against a known transcript.
 struct TranscriptTestView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Rubric.createdAt, order: .reverse) private var rubrics: [Rubric]
-    @Query(sort: \Meeting.date, order: .reverse) private var meetings: [Meeting]
+    @Query(sort: \Interview.createdAt, order: .reverse) private var interviews: [Interview]
 
     @State private var loadedTranscript: TranscriptFile?
-    @State private var selectedMeeting: Meeting?
+    @State private var selectedInterview: Interview?
+    @State private var selectedPhaseID: UUID?
     @State private var selectedRubric: Rubric?
     @State private var isAnalyzing = false
     @State private var analysisError: String?
@@ -20,29 +24,73 @@ struct TranscriptTestView: View {
         rubrics.filter { !$0.isArchived }
     }
 
-    private var meetingsWithSegments: [Meeting] {
-        meetings.filter { !$0.segments.isEmpty && $0.status == .completed }
+    /// Interviews that actually have a recorded transcript to analyze.
+    /// Filters out scheduled-but-unrecorded entries (no meeting attached
+    /// yet) and any with empty segments.
+    private var interviewsWithTranscript: [Interview] {
+        interviews.filter { interview in
+            guard let meeting = interview.meeting else { return false }
+            return !meeting.segments.isEmpty
+        }
     }
+
+    private var phasesForSelected: [InterviewPhase] {
+        (selectedInterview?.orderedPhases ?? []).filter { $0.startedAt != nil }
+    }
+
+    private var interviewLabel: (Interview) -> String {
+        { interview in
+            let candidate = interview.candidate?.name ?? "Untitled"
+            let dateStr = Self.dateFormatter.string(from: interview.createdAt)
+            let segCount = interview.meeting?.segments.count ?? 0
+            return "\(candidate) — \(dateStr) (\(segCount) seg)"
+        }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
 
     var body: some View {
         VStack(spacing: 0) {
             // Top bar
             HStack(spacing: 12) {
-                // Meeting picker
-                Picker("Meeting", selection: $selectedMeeting) {
-                    Text("Select meeting...").tag(nil as Meeting?)
-                    ForEach(meetingsWithSegments) { meeting in
-                        Text("\(meeting.title) (\(meeting.segments.count) seg)")
-                            .tag(meeting as Meeting?)
+                // Interview picker
+                Picker("Interview", selection: $selectedInterview) {
+                    Text("Select interview...").tag(nil as Interview?)
+                    ForEach(interviewsWithTranscript) { interview in
+                        Text(interviewLabel(interview))
+                            .tag(interview as Interview?)
                     }
                 }
                 .frame(maxWidth: 280)
                 .controlSize(.small)
-                .onChange(of: selectedMeeting) { _, meeting in
-                    if let meeting {
-                        loadedTranscript = TranscriptFile.from(meeting: meeting)
-                        result = nil
-                        criterionEvals = [:]
+                .onChange(of: selectedInterview) { _, interview in
+                    rebuildTranscript()
+                    selectedPhaseID = nil
+                    // Pre-select the rubric of the first scored phase as a
+                    // sensible default — common case is rescoring against
+                    // the same rubric to validate prompt or schema changes.
+                    selectedRubric = interview?.orderedPhases.compactMap(\.rubric).first
+                }
+
+                // Phase scope (only shown when interview has phases with
+                // recorded boundaries — lets you rescore a single phase
+                // rather than the whole transcript).
+                if !phasesForSelected.isEmpty {
+                    Picker("Phase", selection: $selectedPhaseID) {
+                        Text("Whole interview").tag(nil as UUID?)
+                        ForEach(phasesForSelected, id: \.id) { phase in
+                            Text(phase.title).tag(phase.id as UUID?)
+                        }
+                    }
+                    .frame(maxWidth: 180)
+                    .controlSize(.small)
+                    .onChange(of: selectedPhaseID) { _, _ in
+                        rebuildTranscript()
                     }
                 }
 
@@ -85,7 +133,7 @@ struct TranscriptTestView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Label("Analyze", systemImage: "brain")
+                        Label("Rescore", systemImage: "brain")
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -286,12 +334,58 @@ struct TranscriptTestView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             loadedTranscript = try TranscriptFile.read(from: url)
-            selectedMeeting = nil
+            selectedInterview = nil
+            selectedPhaseID = nil
             result = nil
             criterionEvals = [:]
         } catch {
             analysisError = "Failed to load: \(error.localizedDescription)"
         }
+    }
+
+    /// Rebuild the loaded transcript from the currently selected interview,
+    /// optionally scoped to one phase's `[startedAt, endedAt]` window.
+    /// No-ops when no interview is selected.
+    private func rebuildTranscript() {
+        guard let interview = selectedInterview, let meeting = interview.meeting else {
+            loadedTranscript = nil
+            return
+        }
+        let allSegments = meeting.segments.sorted { $0.startTime < $1.startTime }
+        let scoped: [TranscriptSegment]
+        if let phaseID = selectedPhaseID,
+           let phase = interview.phases.first(where: { $0.id == phaseID }) {
+            // Phase windows are wall-clock dates, segment.startTime is
+            // seconds since recording start — convert via meeting.date.
+            let recordingStart = meeting.date
+            let lower = phase.startedAt.map { $0.timeIntervalSince(recordingStart) } ?? -.infinity
+            let upper = phase.endedAt.map { $0.timeIntervalSince(recordingStart) } ?? .infinity
+            scoped = allSegments.filter { $0.startTime >= lower && $0.startTime <= upper }
+        } else {
+            scoped = allSegments
+        }
+        let snapshots = scoped.map {
+            SegmentSnapshot(
+                speaker: $0.speaker,
+                text: $0.text,
+                formattedTimestamp: $0.formattedTimestamp,
+                isFinal: $0.isFinal
+            )
+        }
+        let candidate = interview.candidate?.name ?? "Untitled"
+        let phaseSuffix: String = {
+            guard let phaseID = selectedPhaseID,
+                  let phase = interview.phases.first(where: { $0.id == phaseID }) else { return "" }
+            return " — \(phase.title)"
+        }()
+        loadedTranscript = TranscriptFile(
+            title: "\(candidate)\(phaseSuffix)",
+            date: meeting.date,
+            duration: meeting.duration,
+            segments: snapshots
+        )
+        result = nil
+        criterionEvals = [:]
     }
 
     @MainActor
