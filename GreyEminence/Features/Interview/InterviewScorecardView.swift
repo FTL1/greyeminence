@@ -180,6 +180,22 @@ struct InterviewScorecardView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 200)
 
+                if let templateName = interview.templateNameAtSchedule, !templateName.isEmpty {
+                    HStack(spacing: 3) {
+                        Image(systemName: "list.bullet.rectangle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(templateName)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.08), in: Capsule())
+                    .help("Scheduled from template: \(templateName)")
+                    .padding(.leading, 8)
+                }
+
                 Spacer()
 
                 startInterviewButton

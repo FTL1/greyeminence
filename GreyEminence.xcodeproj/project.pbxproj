@@ -42,7 +42,6 @@
 		32F2D5A931A3AA1356F022D8 /* ScoreEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5E0850098FB7EB6B1D48C73 /* ScoreEvidence.swift */; };
 		33715D44310936A4E6B8B6D0 /* FollowUpQuestionsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = D628D6D9F9CA270605365A14 /* FollowUpQuestionsSection.swift */; };
 		34858E9392DE15CD6EB29714 /* MyProfileSetupSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87D1BE56DAC018A93D783368 /* MyProfileSetupSheet.swift */; };
-		34C618A611D7F51790982544 /* InterviewSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75935675593F5D61DBF1542 /* InterviewSetupView.swift */; };
 		358B6538C05E798409F51190 /* AWSCredentialLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9733020AF86912380852E7 /* AWSCredentialLoader.swift */; };
 		35E1728D83EE5E36848E0733 /* SpeakerContactMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F5B5497FD93F6C7BFE23CE6 /* SpeakerContactMapper.swift */; };
 		367C511BC7B8D998882DFE3C /* EmbeddingRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC7F4A787F25A862374515E /* EmbeddingRecord.swift */; };
@@ -391,7 +390,6 @@
 		F441D2EB2BBE4A6F48F3B85C /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		F59A83B6524CF1BD8477EC89 /* InterviewHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewHubView.swift; sourceTree = "<group>"; };
 		F73D9FABAEDE678B9FA98234 /* TransientActivityCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransientActivityCoordinator.swift; sourceTree = "<group>"; };
-		F75935675593F5D61DBF1542 /* InterviewSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewSetupView.swift; sourceTree = "<group>"; };
 		FC233C54275759186A528C47 /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
 		FCA07D6809E46B405979C97F /* ContactRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactRowView.swift; sourceTree = "<group>"; };
 		FCF870910A70FECDA4849F93 /* MicLevelMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicLevelMonitor.swift; sourceTree = "<group>"; };
@@ -865,7 +863,6 @@
 				E5EDCC80A8D4B916A192C52E /* InterviewRecordingViewModel.swift */,
 				77CBEB9C00C6D9F952CEA6EE /* InterviewScorecardView.swift */,
 				467A2217512A73AC48F65308 /* InterviewSectionScoreCard.swift */,
-				F75935675593F5D61DBF1542 /* InterviewSetupView.swift */,
 				52BA4CA49EBD1B2A041D5E84 /* LiveInterviewIntelligenceView.swift */,
 				85571895F31B17D9B41094BB /* LiveInterviewView.swift */,
 				0F38EF7FBBDF59AB8EE46CE2 /* MarkdownEditor.swift */,
@@ -1111,7 +1108,6 @@
 				240145ECED5179E26AD5EA54 /* InterviewScorecardView.swift in Sources */,
 				28C92B79DE182F4A9FFE4F80 /* InterviewSectionScore.swift in Sources */,
 				7E1823E29DFDFD8A58B894D6 /* InterviewSectionScoreCard.swift in Sources */,
-				34C618A611D7F51790982544 /* InterviewSetupView.swift in Sources */,
 				51B7ECAC056D1EF87EC0D3E0 /* InterviewTemplate.swift in Sources */,
 				86F02ADF378523CCF8CD5AFC /* InterviewTemplatePhase.swift in Sources */,
 				6124A5877A26A23800F37813 /* InterviewTemplateSeeder.swift in Sources */,

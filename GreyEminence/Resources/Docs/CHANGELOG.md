@@ -6,6 +6,25 @@ in `project.yml`.
 
 ## 0.10.0-dev (in progress)
 
+**Interview templates (V9)**
+- New `InterviewTemplate` concept: a reusable, named, role-scoped plan
+  that composes rubrics into the loop you actually run. Distinct from
+  rubrics (which define *what* to evaluate). Templates live under a new
+  Templates hub tab.
+- New interview creation modal launched from the Interviews tab (+
+  button or ⌘N). Two-pane layout: template rail on the left (with
+  Recent / Templates / Role-linked rubrics palette), editable phase
+  pane on the right. Drag-and-drop a rubric from the rail onto the
+  phases. Click a template to adopt its phases as the spine, then
+  add/remove/reorder freely.
+- "New Interview" tab removed — creation lives in the modal.
+- Default templates seeded on first run: Standard Interview, Backend
+  Loop, Frontend Loop. Rubric refs resolve via fuzzy name match
+  against the user's existing rubrics.
+- Scorecard header shows "scheduled from template X" when applicable.
+- Per-phase target minutes (soft time-box) are part of the template
+  and carry through into scheduled phases.
+
 **Interview workflow**
 - Per-phase scorecard. Each phase (Intro / System Design / etc.) gets its
   own card with a composite grade and its rubric sections nested inside.
