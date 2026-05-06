@@ -22,15 +22,7 @@ struct TransientActivityStatusBar: View {
 
                 Spacer(minLength: 8)
             }
-            .padding(.horizontal, 12)
-            .frame(height: 28)
-            .background(alignment: .top) {
-                Rectangle()
-                    .fill(.separator)
-                    .frame(height: 0.5)
-            }
-            .background(.bar)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .bottomActivityBarStyle()
             .animation(.easeOut(duration: 0.24), value: current)
             .animation(.easeOut(duration: 0.24), value: completed)
         }

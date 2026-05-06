@@ -104,7 +104,7 @@ struct RubricEditorView: View {
     private func roleLinkRow(_ link: RoleRubricLink) -> some View {
         HStack(spacing: 8) {
             Image(systemName: link.strictness.symbolName)
-                .foregroundStyle(strictnessColor(link.strictness))
+                .foregroundStyle(link.strictness.color)
                 .frame(width: 18)
 
             Text(link.role?.fullDescription ?? "Unassigned role")
@@ -133,14 +133,6 @@ struct RubricEditorView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-        }
-    }
-
-    private func strictnessColor(_ strictness: RubricStrictness) -> Color {
-        switch strictness {
-        case .lenient: .blue
-        case .standard: .secondary
-        case .strict: .orange
         }
     }
 

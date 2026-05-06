@@ -287,28 +287,33 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
     PersistenceGate.save(context, site: "seedOrganizationAndRubrics/final")
 }
 
-// MARK: - System Design Rubric (idempotent)
+// MARK: - Idempotent rubric seeders
 
-/// Adds a comprehensive standalone "System Design" rubric. Expanded from
-/// the System Design *section* embedded in the legacy General/Senior
-/// Engineering Interview rubrics — same starting criteria, plus broader
-/// coverage of requirements gathering, data modeling, reliability,
-/// observability, and trade-off articulation. Unattached to a role so
-/// the phase planner can compose it alongside any role's coding /
-/// AI-assisted phases. Idempotent by name.
+/// Insert a named rubric if no rubric with that name exists yet. Wraps
+/// the activity-coordinator + persistence-save + log-send dance so each
+/// individual seed function only has to declare its name and how to
+/// populate the sections.
 @MainActor
-private func seedSystemDesignRubricIfMissing(in context: ModelContext) {
-    let rubricName = "System Design"
+private func seedRubricIfMissing(
+    named rubricName: String,
+    in context: ModelContext,
+    build: (Rubric, ModelContext) -> Void
+) {
     let existing = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
     if existing.contains(where: { $0.name == rubricName }) { return }
 
     TransientActivityCoordinator.shared.run("Seeding \"\(rubricName)\" rubric…") {
         let rubric = Rubric(name: rubricName)
         context.insert(rubric)
-        seedSystemDesignRubric(rubric, in: context)
-        PersistenceGate.save(context, site: "seedSystemDesignRubricIfMissing")
+        build(rubric, context)
+        PersistenceGate.save(context, site: "seedRubricIfMissing/\(rubricName)")
         LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
     }
+}
+
+@MainActor
+private func seedSystemDesignRubricIfMissing(in context: ModelContext) {
+    seedRubricIfMissing(named: "System Design", in: context, build: seedSystemDesignRubric)
 }
 
 private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) {
@@ -465,17 +470,7 @@ private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) 
 /// Design, Coding, etc. for any role.
 @MainActor
 private func seedAIAssistedEngineeringRubricIfMissing(in context: ModelContext) {
-    let rubricName = "AI-Assisted Engineering"
-    let existing = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
-    if existing.contains(where: { $0.name == rubricName }) { return }
-
-    TransientActivityCoordinator.shared.run("Seeding \"\(rubricName)\" rubric…") {
-        let rubric = Rubric(name: rubricName)
-        context.insert(rubric)
-        seedAIAssistedEngineeringRubric(rubric, in: context)
-        PersistenceGate.save(context, site: "seedAIAssistedEngineeringRubricIfMissing")
-        LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
-    }
+    seedRubricIfMissing(named: "AI-Assisted Engineering", in: context, build: seedAIAssistedEngineeringRubric)
 }
 
 private func seedAIAssistedEngineeringRubric(_ rubric: Rubric, in context: ModelContext) {

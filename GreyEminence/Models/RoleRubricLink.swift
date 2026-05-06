@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwiftUI
 
 /// How strictly the AI should grade against the rubric for a given role.
 /// Doesn't gate which rubric is *available* — just shifts the calibration
@@ -23,6 +24,14 @@ enum RubricStrictness: String, Codable, CaseIterable, Sendable {
         case .lenient: "tortoise"
         case .standard: "scalemass"
         case .strict: "flame"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .lenient: .blue
+        case .standard: .secondary
+        case .strict: .orange
         }
     }
 

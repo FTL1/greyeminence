@@ -54,16 +54,8 @@ struct ReProcessingStatusBar: View {
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .frame(height: 28)
-            .background(alignment: .top) {
-                Rectangle()
-                    .fill(.separator)
-                    .frame(height: 0.5)
-            }
-            .background(.bar)
+            .bottomActivityBarStyle()
             .onHover { isHovering = $0 }
-            .transition(.move(edge: .bottom).combined(with: .opacity))
             .animation(.easeOut(duration: 0.24), value: isActive)
             .animation(.easeOut(duration: 0.24), value: recentlyCompleted)
         }

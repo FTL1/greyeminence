@@ -223,12 +223,14 @@ enum MaintenanceService {
         return backfilled
     }
 
-    /// For each rubric that has a legacy single `role` pointer but no
-    /// `roleLinks`, synthesize one `RoleRubricLink` with strictness
-    /// `.standard` so the new many-to-many UI sees consistent data.
-    /// Idempotent — once a rubric has any link, this leaves it alone.
+    /// Synthesize one `RoleRubricLink` for every rubric that has the
+    /// legacy `role` pointer but no `roleLinks`. Idempotent.
     private static func backfillRoleRubricLinks(in context: ModelContext) -> Int {
-        let descriptor = FetchDescriptor<Rubric>()
+        // Only fetch rubrics that have a legacy role pointer — rubrics
+        // with role == nil have nothing to migrate.
+        let descriptor = FetchDescriptor<Rubric>(
+            predicate: #Predicate { $0.role != nil }
+        )
         guard let rubrics = try? context.fetch(descriptor) else { return 0 }
         var backfilled = 0
         for rubric in rubrics {
