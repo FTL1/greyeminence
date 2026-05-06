@@ -56,9 +56,7 @@ struct InterviewSetupView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-
+        ScrollView {
             VStack(spacing: 24) {
                 // Header
                 VStack(spacing: 8) {
@@ -71,6 +69,7 @@ struct InterviewSetupView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                .padding(.top, 24)
 
                 // Form
                 Form {
@@ -146,9 +145,16 @@ struct InterviewSetupView: View {
                             .help("Replace with the default phase plan for this candidate's role")
                         }
                     } footer: {
-                        Text("Phases run in order. The AI scores only during phases that have a rubric attached.")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Phases run in order. Drag the grip on the left to reorder. The AI scores only during phases that have a rubric attached.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                            if let role = selectedCandidate?.role {
+                                Text(defaultsExplainer(role: role))
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
                     }
 
                     Section {
@@ -194,7 +200,8 @@ struct InterviewSetupView: View {
                     }
                 }
                 .formStyle(.grouped)
-                .frame(maxWidth: 560, maxHeight: 600)
+                .frame(maxWidth: 560)
+                .scrollDisabled(true)
 
                 // Start button
                 Button {
@@ -208,11 +215,10 @@ struct InterviewSetupView: View {
                 .tint(.cyan)
                 .controlSize(.large)
                 .disabled(!canStart)
+                .padding(.bottom, 24)
             }
-
-            Spacer()
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
         .sheet(isPresented: $showAddCandidate) {
             AddCandidateSheet()
         }
@@ -226,9 +232,35 @@ struct InterviewSetupView: View {
     @ViewBuilder
     private func phaseRow(at index: Int, phase: PlannedPhase) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: phase.rubric != nil ? "checklist" : "bubble.left.and.bubble.right")
-                .foregroundStyle(phase.rubric != nil ? .cyan : .secondary)
-                .frame(width: 18)
+            // Drag grip — visible affordance for reorder. The Form's
+            // .onMove still does the actual move; this just makes
+            // discoverability obvious.
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .help("Drag to reorder")
+
+            // Icon picker — each phase gets a distinct glyph so the live
+            // phase strip is scannable. Defaults to checklist/intro/conclusion
+            // based on title + rubric.
+            Menu {
+                ForEach(PhaseIconCatalog.symbols, id: \.self) { sym in
+                    Button {
+                        plannedPhases[index].iconName = sym
+                    } label: {
+                        Label(sym, systemImage: sym)
+                    }
+                }
+            } label: {
+                Image(systemName: phase.resolvedIconName)
+                    .foregroundStyle(phase.rubric != nil ? .cyan : .secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Pick phase icon")
 
             VStack(alignment: .leading, spacing: 2) {
                 TextField("Phase title", text: Binding(
@@ -283,6 +315,18 @@ struct InterviewSetupView: View {
     }
 
     // MARK: - Actions
+
+    /// One-line explainer for the auto-populated defaults — names the role
+    /// and the rubrics linked to it so the user understands where the
+    /// pre-filled phases came from. Linked rubrics are managed on each
+    /// rubric's "Applies To" section in the Rubrics tab.
+    private func defaultsExplainer(role: InterviewRole) -> String {
+        let names = roleScopedRubrics.map(\.name)
+        if names.isEmpty {
+            return "Defaults: no rubrics are linked to \(role.displayTitle) yet — add links in the Rubrics tab so this role gets pre-filled phases."
+        }
+        return "Defaults for \(role.displayTitle): \(names.joined(separator: " → ")). Manage links in the Rubrics tab."
+    }
 
     /// Build a sensible default phase plan for the selected candidate's role.
     /// Pattern: Intro → all role-scoped rubrics in their natural order →

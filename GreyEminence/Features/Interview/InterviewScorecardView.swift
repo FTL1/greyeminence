@@ -520,7 +520,9 @@ struct InterviewScorecardView: View {
                 Text("You")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, alignment: .leading)
+                    .frame(width: 32, alignment: .leading)
+                    .lineLimit(1)
+                    .fixedSize()
                 ForEach(1...5, id: \.self) { value in
                     Circle()
                         .fill(value <= impression.value ? dotColor(impression.value) : .secondary.opacity(0.2))
@@ -537,7 +539,9 @@ struct InterviewScorecardView: View {
                     Text("AI")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 22, alignment: .leading)
+                        .frame(width: 32, alignment: .leading)
+                    .lineLimit(1)
+                    .fixedSize()
                     ForEach(1...5, id: \.self) { value in
                         Circle()
                             .stroke(value <= aiValue ? dotColor(aiValue) : .secondary.opacity(0.3), lineWidth: 1.5)

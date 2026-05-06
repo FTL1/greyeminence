@@ -19,6 +19,7 @@ func bellCurveColor(for normalizedValue: Double) -> Color {
 // MARK: - Main Panel (no header — header is in InterviewHubView)
 
 struct LiveInterviewIntelligenceView: View {
+    @Environment(\.modelContext) private var modelContext
     var interviewViewModel: InterviewRecordingViewModel
     @Query(sort: \InterviewImpressionTrait.sortOrder) private var traits: [InterviewImpressionTrait]
 
@@ -84,39 +85,55 @@ struct LiveInterviewIntelligenceView: View {
 
     // MARK: - Phase Icon Buttons
 
+    /// One icon per *interview phase* (intro / system design / coding /
+    /// conclusion / etc.). Sections inside a phase happen in parallel
+    /// against the active rubric and are surfaced as the criteria
+    /// checklist in `ActiveSectionDetail`, not as separate path nodes.
+    /// Falls back to the legacy intro→sections→conclusion pseudo-strip
+    /// only when the interview wasn't planned with phases (shouldn't
+    /// happen post-V2 schema but defensive).
     private var phaseIcons: some View {
-        HStack(spacing: 2) {
-            phaseIconButton(icon: "person.wave.2", label: "Intro", id: InterviewRecordingViewModel.introID, grade: nil)
-            phaseConnector
-
-            let sections = interviewViewModel.sectionScores.sorted { $0.sortOrder < $1.sortOrder }
-            ForEach(Array(sections.enumerated()), id: \.element.id) { index, score in
-                phaseIconButton(icon: "list.clipboard", label: score.rubricSectionTitle, id: score.rubricSectionID, grade: score.effectiveLetterGrade)
-                if index < sections.count - 1 {
+        let phases = interviewViewModel.interview?.orderedPhases ?? []
+        return HStack(spacing: 2) {
+            ForEach(Array(phases.enumerated()), id: \.element.id) { index, phase in
+                phaseIconButton(phase: phase)
+                if index < phases.count - 1 {
                     phaseConnector
                 }
             }
-
-            phaseConnector
-            phaseIconButton(icon: "questionmark.bubble", label: "Conclusion", id: InterviewRecordingViewModel.conclusionID, grade: nil)
         }
     }
 
-    private func phaseIconButton(icon: String, label: String, id: UUID, grade: LetterGrade?) -> some View {
-        let isActive = interviewViewModel.activePhaseID == id
-        return Button {
-            interviewViewModel.setActivePhase(id)
+    private func phaseIconButton(phase: InterviewPhase) -> some View {
+        let isActive = phase.status == .active
+        let composite = phaseComposite(phase)
+        let summaryGrade: LetterGrade? = composite.map { LetterGrade.from(gradePoints: $0) }
+
+        return Menu {
+            Button("Set Active") {
+                interviewViewModel.activatePhase(phase, in: modelContext)
+            }
+            Divider()
+            Section("Icon") {
+                ForEach(PhaseIconCatalog.symbols, id: \.self) { sym in
+                    Button {
+                        phase.iconName = sym
+                    } label: {
+                        Label(sym, systemImage: sym)
+                    }
+                }
+            }
         } label: {
             VStack(spacing: 1) {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: icon)
+                    Image(systemName: phase.resolvedIconName)
                         .font(.system(size: 12))
                         .foregroundStyle(isActive ? .cyan : .secondary)
                         .frame(width: 28, height: 28)
                         .background(isActive ? Color.cyan.opacity(0.15) : Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(isActive ? .cyan : .clear, lineWidth: 1.5))
 
-                    if let grade {
+                    if let grade = summaryGrade {
                         Text(grade.label)
                             .font(.system(size: 6, weight: .bold))
                             .foregroundStyle(.white)
@@ -126,16 +143,18 @@ struct LiveInterviewIntelligenceView: View {
                     }
                 }
 
-                Text(label)
+                Text(phase.title)
                     .font(.system(size: 8, weight: isActive ? .bold : .medium))
                     .foregroundStyle(isActive ? .cyan : .secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
-                    .frame(width: 52)
+                    .frame(width: 64)
             }
         }
-        .buttonStyle(.plain)
-        .help(label)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(phase.title)
     }
 
     private var phaseConnector: some View {
@@ -143,6 +162,18 @@ struct LiveInterviewIntelligenceView: View {
             .fill(Color.secondary.opacity(0.2))
             .frame(width: 8, height: 1.5)
             .padding(.bottom, 14)
+    }
+
+    /// Weighted composite gradePoints across this phase's section
+    /// scores. Nil when no scores have grades yet.
+    private func phaseComposite(_ phase: InterviewPhase) -> Double? {
+        let weighted: [(Double, Double)] = phase.sectionScores.compactMap { s in
+            guard let gp = s.effectiveGradePoints else { return nil }
+            return (gp, s.weight)
+        }
+        let totalWeight = weighted.reduce(0.0) { $0 + $1.1 }
+        guard totalWeight > 0 else { return nil }
+        return weighted.reduce(0.0) { $0 + $1.0 * $1.1 } / totalWeight
     }
 
     // MARK: - Impressions Strip

@@ -9,17 +9,34 @@ struct PlannedPhase: Identifiable {
     let id: UUID
     var title: String
     var rubric: Rubric?
+    var iconName: String?
 
-    init(id: UUID = UUID(), title: String, rubric: Rubric? = nil) {
+    init(id: UUID = UUID(), title: String, rubric: Rubric? = nil, iconName: String? = nil) {
         self.id = id
         self.title = title
         self.rubric = rubric
+        self.iconName = iconName
     }
 
-    static func intro() -> PlannedPhase { PlannedPhase(title: "Intro", rubric: nil) }
-    static func conclusion() -> PlannedPhase { PlannedPhase(title: "Conclusion", rubric: nil) }
+    static func intro() -> PlannedPhase {
+        PlannedPhase(title: "Intro", rubric: nil, iconName: "person.wave.2")
+    }
+    static func conclusion() -> PlannedPhase {
+        PlannedPhase(title: "Conclusion", rubric: nil, iconName: "questionmark.bubble")
+    }
     static func from(rubric: Rubric) -> PlannedPhase {
         PlannedPhase(title: rubric.name, rubric: rubric)
+    }
+
+    /// Resolved icon — same fallback policy as `InterviewPhase.resolvedIconName`.
+    var resolvedIconName: String {
+        if let iconName, !iconName.isEmpty { return iconName }
+        let lower = title.lowercased()
+        if lower.contains("intro") { return "person.wave.2" }
+        if lower.contains("conclusion") || lower.contains("wrap") || lower.contains("q&a") {
+            return "questionmark.bubble"
+        }
+        return rubric != nil ? "list.clipboard" : "bubble.left.and.bubble.right"
     }
 }
 
@@ -171,7 +188,8 @@ final class InterviewRecordingViewModel {
                 title: planned.title,
                 rubric: planned.rubric,
                 plannedOrder: idx,
-                status: .planned
+                status: .planned,
+                iconName: planned.iconName
             )
             phase.interview = interview
             interview.phases.append(phase)
@@ -256,7 +274,9 @@ final class InterviewRecordingViewModel {
     /// Mark the given phase active and refresh derived state (section
     /// scores mirror, rubric snapshot, segment tag). Closes any other
     /// `.active` phase first to maintain the "at most one active" invariant.
-    private func activatePhase(_ phase: InterviewPhase, in modelContext: ModelContext) {
+    /// Mark the given phase active. Public so the live phase strip can let
+    /// the interviewer jump to any phase, not just advance linearly.
+    func activatePhase(_ phase: InterviewPhase, in modelContext: ModelContext) {
         guard let interview else { return }
         // Close any currently active phase first.
         for other in interview.phases where other.status == .active && other.id != phase.id {

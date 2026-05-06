@@ -31,6 +31,12 @@ final class InterviewPhase {
     var startedAt: Date?
     var endedAt: Date?
     var createdAt: Date
+    /// SF Symbol name for the phase chip / icon strip. Nil falls back to a
+    /// computed default (`person.wave.2` for intro, `questionmark.bubble`
+    /// for conclusion, `list.clipboard` for any scored phase). Letting
+    /// the user pick gives system-design vs coding vs take-home a
+    /// distinguishable glance.
+    var iconName: String?
 
     var interview: Interview?
     var rubric: Rubric?
@@ -53,13 +59,15 @@ final class InterviewPhase {
         title: String,
         rubric: Rubric? = nil,
         plannedOrder: Int = 0,
-        status: InterviewPhaseStatus = .planned
+        status: InterviewPhaseStatus = .planned,
+        iconName: String? = nil
     ) {
         self.id = UUID()
         self.title = title
         self.rubric = rubric
         self.plannedOrder = plannedOrder
         self.statusRawValue = status.rawValue
+        self.iconName = iconName
         self.createdAt = .now
         self.sectionScores = []
         self.notes = []
@@ -69,4 +77,45 @@ final class InterviewPhase {
     /// scoring. Intro/conclusion phases (no rubric) are skipped by the
     /// analysis loop.
     var isScored: Bool { rubric != nil }
+
+    /// Resolved SF Symbol — explicit `iconName` if set, else a default
+    /// based on whether the phase is an intro/conclusion (unscored)
+    /// or a scored rubric phase. The intro/conclusion fallbacks are
+    /// keyed on title rather than position so renamed phases still
+    /// pick a sensible icon.
+    var resolvedIconName: String {
+        if let iconName, !iconName.isEmpty { return iconName }
+        let lower = title.lowercased()
+        if lower.contains("intro") { return "person.wave.2" }
+        if lower.contains("conclusion") || lower.contains("wrap") || lower.contains("q&a") {
+            return "questionmark.bubble"
+        }
+        return rubric != nil ? "list.clipboard" : "bubble.left.and.bubble.right"
+    }
+}
+
+/// Curated SF Symbols a user can pick from for a phase. Kept short so
+/// the menu stays scannable. Add to taste — anything in SF Symbols
+/// works at runtime, this is just the picker affordance.
+enum PhaseIconCatalog {
+    static let symbols: [String] = [
+        "person.wave.2",
+        "list.clipboard",
+        "questionmark.bubble",
+        "bubble.left.and.bubble.right",
+        "chevron.left.slash.chevron.right",
+        "rectangle.connected.to.line.below",
+        "ruler",
+        "wand.and.stars",
+        "brain.head.profile",
+        "hammer",
+        "graduationcap",
+        "chart.bar.doc.horizontal",
+        "doc.text.magnifyingglass",
+        "person.2.wave.2",
+        "lightbulb",
+        "puzzlepiece.extension",
+        "terminal",
+        "sparkles"
+    ]
 }
