@@ -304,6 +304,7 @@ private func seedSystemDesignRubricIfMissing(in context: ModelContext) {
     context.insert(rubric)
     seedSystemDesignRubric(rubric, in: context)
     PersistenceGate.save(context, site: "seedSystemDesignRubricIfMissing")
+    LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
 }
 
 private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) {
@@ -467,6 +468,7 @@ private func seedAIAssistedEngineeringRubricIfMissing(in context: ModelContext) 
     context.insert(rubric)
     seedAIAssistedEngineeringRubric(rubric, in: context)
     PersistenceGate.save(context, site: "seedAIAssistedEngineeringRubricIfMissing")
+    LogManager.send("Seeded \"\(rubricName)\" rubric", category: .general)
 }
 
 private func seedAIAssistedEngineeringRubric(_ rubric: Rubric, in context: ModelContext) {
