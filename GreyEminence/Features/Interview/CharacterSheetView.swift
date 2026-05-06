@@ -11,9 +11,22 @@ struct CharacterSheetView: View {
     /// the parchment-on-brown text color literally.
     private static let darkBrown = Color(red: 0.35, green: 0.22, blue: 0.10)
 
+    /// True when the panel should show AI reasoning under the level and
+    /// each attribute. Off by default — the compact grid is the primary
+    /// view; reasoning is a click away for the curious.
+    @State private var showReasoning = false
+
+    private var anyReasoningAvailable: Bool {
+        sheet.levelReasoning != nil
+            || sheet.attributes.contains { $0.reasoning != nil }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             classHeader
+            if showReasoning, let reasoning = sheet.levelReasoning, !reasoning.isEmpty {
+                reasoningCallout(reasoning)
+            }
             attributesGrid
             if !sheet.specializations.isEmpty {
                 specializationsRow
@@ -47,11 +60,38 @@ struct CharacterSheetView: View {
                 }
             }
             Spacer()
+            if anyReasoningAvailable {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { showReasoning.toggle() }
+                } label: {
+                    Image(systemName: showReasoning ? "info.circle.fill" : "info.circle")
+                        .foregroundStyle(Self.darkBrown.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .help(showReasoning ? "Hide AI reasoning" : "Show AI reasoning")
+            }
             VStack(alignment: .trailing, spacing: 0) {
                 Text("LVL \(sheet.level)")
                     .font(.system(size: 16, weight: .heavy, design: .serif))
                     .foregroundStyle(Self.darkBrown)
             }
+        }
+    }
+
+    /// Italicized callout block used to render level / attribute reasoning
+    /// when the user toggles `showReasoning`. Indented and faded so it
+    /// reads as commentary rather than primary content.
+    private func reasoningCallout(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "quote.opening")
+                .font(.system(size: 9))
+                .foregroundStyle(Self.darkBrown.opacity(0.6))
+                .padding(.top, 2)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.primary.opacity(0.75))
+                .italic()
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -68,27 +108,50 @@ struct CharacterSheetView: View {
     }
 
     private func attributeBox(_ attribute: DnDAttribute) -> some View {
-        VStack(spacing: 2) {
-            Text(attribute.abbreviation)
-                .font(.system(size: 9, weight: .heavy, design: .serif))
-                .foregroundStyle(.secondary)
-                .tracking(1.2)
-            Text("\(attribute.value)")
-                .font(.system(size: 22, weight: .bold, design: .serif))
-                .foregroundStyle(attributeColor(attribute.value))
-            Text(attribute.name)
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        VStack(spacing: 4) {
+            VStack(spacing: 2) {
+                Text(attribute.abbreviation)
+                    .font(.system(size: 9, weight: .heavy, design: .serif))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.2)
+                Text("\(attribute.value)")
+                    .font(.system(size: 22, weight: .bold, design: .serif))
+                    .foregroundStyle(attributeColor(attribute.value))
+                Text(attribute.name)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(.brown.opacity(0.25), lineWidth: 0.5)
+            )
+            .help(attributeTooltip(attribute))
+
+            if showReasoning, let reasoning = attribute.reasoning, !reasoning.isEmpty {
+                Text(reasoning)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.primary.opacity(0.75))
+                    .italic()
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(.brown.opacity(0.25), lineWidth: 0.5)
-        )
-        .help(attribute.descriptor)
+    }
+
+    /// Tooltip combines the static descriptor (what the attribute means)
+    /// with the AI's per-candidate reasoning (why this value), so the
+    /// hover surface is useful even when the reasoning panel is collapsed.
+    private func attributeTooltip(_ attribute: DnDAttribute) -> String {
+        if let reasoning = attribute.reasoning, !reasoning.isEmpty {
+            return "\(attribute.descriptor)\n\nFor this candidate: \(reasoning)"
+        }
+        return attribute.descriptor
     }
 
     /// 8 (low) -> red. 10 (median) -> neutral. 18 (max) -> bright green.

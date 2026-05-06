@@ -9,6 +9,10 @@ struct CharacterSheet: Codable, Sendable, Equatable {
     let className: String
     let classDescription: String?
     let level: Int
+    /// AI-supplied reasoning for the chosen level. Older sheets generated
+    /// before this field shipped will decode with `nil` and the UI hides
+    /// the reasoning row.
+    let levelReasoning: String?
     let attributes: [DnDAttribute]
     let specializations: [String]
     let notableFeats: [String]
@@ -17,6 +21,7 @@ struct CharacterSheet: Codable, Sendable, Equatable {
         case className = "class_name"
         case classDescription = "class_description"
         case level
+        case levelReasoning = "level_reasoning"
         case attributes
         case specializations
         case notableFeats = "notable_feats"
@@ -32,6 +37,9 @@ struct DnDAttribute: Codable, Sendable, Equatable, Identifiable {
     let abbreviation: String
     let value: Int
     let descriptor: String
+    /// AI-supplied per-candidate justification for the chosen value.
+    /// Older sheets decode with `nil`.
+    let reasoning: String?
 }
 
 extension CharacterSheet {

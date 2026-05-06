@@ -52,20 +52,26 @@ enum ResumeAnalyzer {
           "summary": "200–500 char summary covering: years of experience, key technical domains, notable shipped projects/scope, leadership scope. Bullet-style with sentence fragments is fine.",
           "character_sheet": {
             "class_name": "Pick a fun class that fits the candidate's primary craft, e.g., Backend Wizard, Frontend Bard, DevOps Cleric, Data Druid, Fullstack Ranger, Platform Paladin, ML Sorcerer, Mobile Monk, Security Rogue, SRE Warlock, Embedded Artificer.",
-            "class_description": "One short sentence (≤80 chars) on why this class.",
+            "class_description": "One short sentence (≤80 chars) on why this class fits.",
             "level": 1-20 integer, calibrated as: intern/new-grad 1-3, junior 3-6, mid 6-9, senior 9-13, staff/principal 13-17, distinguished/architect 17-20.,
+            "level_reasoning": "One sentence (≤200 chars) citing specific resume signals that justify this level — years of experience, scope of impact, role titles, etc.",
             "attributes": [
-              {"name": "Strength",     "abbreviation": "STR", "value": 8-18, "descriptor": "Technical depth — raw problem-solving power and system mastery"},
-              {"name": "Dexterity",    "abbreviation": "DEX", "value": 8-18, "descriptor": "Iteration speed, debugging, ability to context-switch and ship fast"},
-              {"name": "Constitution", "abbreviation": "CON", "value": 8-18, "descriptor": "Track record of sustained delivery, low-drama, ships consistently"},
-              {"name": "Intelligence", "abbreviation": "INT", "value": 8-18, "descriptor": "Learning velocity, abstract thinking, novel-problem analysis"},
-              {"name": "Wisdom",       "abbreviation": "WIS", "value": 8-18, "descriptor": "Judgment, system design intuition, knowing when NOT to use a tool"},
-              {"name": "Charisma",     "abbreviation": "CHA", "value": 8-18, "descriptor": "Communication, leadership, written/verbal influence"}
+              {"name": "Strength",     "abbreviation": "STR", "value": 8-18, "descriptor": "Technical depth — raw problem-solving power and system mastery", "reasoning": "..."},
+              {"name": "Dexterity",    "abbreviation": "DEX", "value": 8-18, "descriptor": "Iteration speed, debugging, ability to context-switch and ship fast", "reasoning": "..."},
+              {"name": "Constitution", "abbreviation": "CON", "value": 8-18, "descriptor": "Track record of sustained delivery, low-drama, ships consistently", "reasoning": "..."},
+              {"name": "Intelligence", "abbreviation": "INT", "value": 8-18, "descriptor": "Learning velocity, abstract thinking, novel-problem analysis", "reasoning": "..."},
+              {"name": "Wisdom",       "abbreviation": "WIS", "value": 8-18, "descriptor": "Judgment, system design intuition, knowing when NOT to use a tool", "reasoning": "..."},
+              {"name": "Charisma",     "abbreviation": "CHA", "value": 8-18, "descriptor": "Communication, leadership, written/verbal influence", "reasoning": "..."}
             ],
             "specializations": ["2-5 short tags. e.g., 'Distributed Systems', 'React', 'Postgres', 'iOS', 'ML Infra'."],
             "notable_feats": ["2-4 short highlights drawn directly from the resume. Each ≤100 chars. Specific scope/scale beats vague claims."]
           }
         }
+
+        Per-attribute `reasoning` rules:
+        - One sentence each (≤200 chars). Cite specific resume evidence: "10y at Stripe scaling payments", "ICs only, never managed", "wrote three blog posts on TLA+", etc.
+        - When the resume is silent on an attribute and you defaulted to 10, say so explicitly: e.g., "No resume signal on this dimension — defaulted to median."
+        - Don't restate the descriptor or use generic praise. The reasoning explains why THIS candidate got THIS value, not what the attribute means in general.
 
         Calibration rules:
         - Default attributes to 10 (median) when the resume doesn't speak to that dimension. Don't inflate.
