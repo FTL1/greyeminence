@@ -118,6 +118,7 @@
 		9D7653A675A0763B57614A71 /* AudioFileWriterEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4EF91E8F82E0C8EF8ED9093 /* AudioFileWriterEncoderTests.swift */; };
 		A02605F83C29F34FD45E8B79 /* DedupDebugRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD46DD530F5CE11FE209E36 /* DedupDebugRow.swift */; };
 		A173DAAD896AF99772AC00EA /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0D2BB249FEACDA87A7EF0B /* PeopleView.swift */; };
+		A4F0A640210D27055A71A9BE /* MarkdownEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F38EF7FBBDF59AB8EE46CE2 /* MarkdownEditor.swift */; };
 		A56AA659210C04EDA55E5547 /* TopicMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5F1219300D6C15092F27872 /* TopicMapView.swift */; };
 		A6084800D0732B67F76DA306 /* StorageManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0AF2329398C06BB75B022FF /* StorageManager.swift */; };
 		A8740BAFD283BC00E8F1C08E /* Candidate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B86BEE74BFC9E0E417DCF5A /* Candidate.swift */; };
@@ -176,6 +177,7 @@
 		F1C63EC5E3E3C89899D43533 /* TranscriptTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9777ACE77F882D5DF615E010 /* TranscriptTestView.swift */; };
 		F9A80A4871C0F7EFA7A4D3A6 /* Interview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E9FE67D22C9B5648478322 /* Interview.swift */; };
 		F9E5B7B92D5523164E3619A8 /* SectionMarkerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EBBBD940532534CC8B5F6BD /* SectionMarkerView.swift */; };
+		F9F5D69FC961BF022CBA5220 /* MarkdownEditorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E64FB7F4C471A01EA9AED8D0 /* MarkdownEditorSheet.swift */; };
 		FA8953738B11A84516D35908 /* CandidateListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE35BB1B53FA715D0E3B606 /* CandidateListView.swift */; };
 		FAB783AAE7BF3195F74E220E /* MaintenanceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01ADE44EED8DFB74E7F17B2 /* MaintenanceService.swift */; };
 		FAF507B483908D2C3227910D /* SystemAudioCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A9A340B566AD4ABDBB929D /* SystemAudioCaptureService.swift */; };
@@ -203,6 +205,7 @@
 		07C2F2D5D37B973CB7660588 /* AddCandidateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCandidateSheet.swift; sourceTree = "<group>"; };
 		0967272565AFAF7A394DB16E /* FluidAsrService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluidAsrService.swift; sourceTree = "<group>"; };
 		0B86BEE74BFC9E0E417DCF5A /* Candidate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Candidate.swift; sourceTree = "<group>"; };
+		0F38EF7FBBDF59AB8EE46CE2 /* MarkdownEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditor.swift; sourceTree = "<group>"; };
 		10F8F5AD9A2BC34E742295DC /* APIKeySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeySettingsView.swift; sourceTree = "<group>"; };
 		130974A6F8E2B27E4705F6A3 /* RecordingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingToolbar.swift; sourceTree = "<group>"; };
 		16FDDE6B20442020C1A542EC /* Rubric.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rubric.swift; sourceTree = "<group>"; };
@@ -354,6 +357,7 @@
 		E1623F804DDEF0B92D3B6A41 /* VocabularySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularySettingsView.swift; sourceTree = "<group>"; };
 		E1894E666B02691D0316570C /* ContactPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactPicker.swift; sourceTree = "<group>"; };
 		E5EDCC80A8D4B916A192C52E /* InterviewRecordingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewRecordingViewModel.swift; sourceTree = "<group>"; };
+		E64FB7F4C471A01EA9AED8D0 /* MarkdownEditorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorSheet.swift; sourceTree = "<group>"; };
 		E750BB3E0037D9160A228F10 /* ForceSimulation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForceSimulation.swift; sourceTree = "<group>"; };
 		EA282F9DB6AE4DA53A6FFDDF /* TranscriptFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFile.swift; sourceTree = "<group>"; };
 		EAAE2A31F9F164242D15B47A /* OrganizationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationSettingsView.swift; sourceTree = "<group>"; };
@@ -812,6 +816,8 @@
 				F75935675593F5D61DBF1542 /* InterviewSetupView.swift */,
 				52BA4CA49EBD1B2A041D5E84 /* LiveInterviewIntelligenceView.swift */,
 				85571895F31B17D9B41094BB /* LiveInterviewView.swift */,
+				0F38EF7FBBDF59AB8EE46CE2 /* MarkdownEditor.swift */,
+				E64FB7F4C471A01EA9AED8D0 /* MarkdownEditorSheet.swift */,
 				6E1C9C53FD728F572A404D5E /* PDFPreviewView.swift */,
 				FD672DF259613086F9FC8826 /* RubricEditorView.swift */,
 				A47BC52049DFA6A2808B1FC6 /* RubricListView.swift */,
@@ -1053,6 +1059,8 @@
 				36A1C9238C5911FED5D5B521 /* LogManager.swift in Sources */,
 				F0C354CA30884FC2707533FC /* LogView.swift in Sources */,
 				FAB783AAE7BF3195F74E220E /* MaintenanceService.swift in Sources */,
+				A4F0A640210D27055A71A9BE /* MarkdownEditor.swift in Sources */,
+				F9F5D69FC961BF022CBA5220 /* MarkdownEditorSheet.swift in Sources */,
 				ECFE81215DB0777BFBCD5FA7 /* Meeting.swift in Sources */,
 				55A2068CDD71B2430C84E5DE /* MeetingAttendeesRow.swift in Sources */,
 				D05877DA620547F1B8059550 /* MeetingDeletion.swift in Sources */,
