@@ -80,18 +80,24 @@ struct InterviewScorecardView: View {
 
                 startInterviewButton
 
-                if isReanalyzing {
-                    ProgressView()
+                // Score-all only makes sense when the user is looking at
+                // the scorecard. Hide it on the Transcript tab so that
+                // tab's header has only the picker + (when relevant) the
+                // Start Interview button.
+                if scorecardTab == .scorecard {
+                    if isReanalyzing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button {
+                            Task { await reanalyze() }
+                        } label: {
+                            Label("Score All Sections", systemImage: "brain")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                } else {
-                    Button {
-                        Task { await reanalyze() }
-                    } label: {
-                        Label("Score All Sections", systemImage: "brain")
-                            .font(.caption)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
                 }
             }
             .padding(.horizontal)
