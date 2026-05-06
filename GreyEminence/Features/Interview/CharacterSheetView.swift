@@ -35,6 +35,7 @@ struct CharacterSheetView: View {
                 feats
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(parchmentBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -119,12 +120,29 @@ struct CharacterSheetView: View {
 
     // MARK: - Attributes
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
-
+    /// Deterministic 3×2 grid via stacked HStacks. We had `LazyVGrid` here
+    /// originally but it doesn't measure correctly inside a List row on
+    /// first render — the panel rendered with broken proportions until
+    /// the window was resized or refocused. Two HStacks each containing
+    /// three `attributeBox` views (which use `.frame(maxWidth: .infinity)`)
+    /// give us the same 3-up layout with eager sizing.
     private var attributesGrid: some View {
-        LazyVGrid(columns: columns, spacing: 8) {
-            ForEach(sheet.attributes) { attribute in
-                attributeBox(attribute)
+        let pairs = stride(from: 0, to: sheet.attributes.count, by: 3).map { start in
+            Array(sheet.attributes[start..<min(start + 3, sheet.attributes.count)])
+        }
+        return VStack(spacing: 8) {
+            ForEach(Array(pairs.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 8) {
+                    ForEach(row) { attribute in
+                        attributeBox(attribute)
+                    }
+                    // Pad short rows so a partial row's items still get
+                    // the same 1/3 width as a full row's.
+                    ForEach(row.count..<3, id: \.self) { _ in
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                    }
+                }
             }
         }
     }
