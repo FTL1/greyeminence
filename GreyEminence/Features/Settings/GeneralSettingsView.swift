@@ -13,7 +13,12 @@ struct GeneralSettingsView: View {
     @AppStorage("stalledThresholdDays") private var stalledThresholdDays = 7
     @AppStorage("appFontSize") private var appFontSize = "medium"
     @AppStorage("myContactID") private var myContactIDString = ""
+    /// 0 = unlimited (default). >0 means delete audio for any completed
+    /// meeting older than that many days. Transcripts always stay.
+    @AppStorage("recordingRetentionDays") private var recordingRetentionDays = 0
     @Query(sort: \Contact.name) private var contacts: [Contact]
+    @Query private var allMeetings: [Meeting]
+    @State private var lastRetentionResult: String?
 
     init(updater: SPUUpdater?) {
         self.updater = updater
@@ -92,6 +97,37 @@ struct GeneralSettingsView: View {
             Section {
                 Toggle("Auto-start recording when meeting app detected", isOn: $autoStart)
                 Toggle("Auto-detect calendar events", isOn: $calendarIntegration)
+
+                Divider()
+
+                Toggle(
+                    "Auto-delete audio after a retention period",
+                    isOn: Binding(
+                        get: { recordingRetentionDays > 0 },
+                        set: { recordingRetentionDays = $0 ? max(recordingRetentionDays, 30) : 0 }
+                    )
+                )
+                if recordingRetentionDays > 0 {
+                    Stepper(
+                        "Keep audio for \(recordingRetentionDays) day\(recordingRetentionDays == 1 ? "" : "s")",
+                        value: $recordingRetentionDays,
+                        in: 1...365
+                    )
+                }
+                Text("Transcripts and meeting rows always stay. Only the (large) audio files are removed for completed meetings older than the threshold. Sweep runs at app launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Run cleanup now") { runRetentionNow() }
+                        .controlSize(.small)
+                        .disabled(recordingRetentionDays == 0)
+                    if let last = lastRetentionResult {
+                        Text(last)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } header: {
                 Label("Recording", systemImage: "record.circle")
                     .font(.subheadline.weight(.semibold))
@@ -138,5 +174,23 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func runRetentionNow() {
+        guard recordingRetentionDays > 0 else { return }
+        var ages: [UUID: Date] = [:]
+        for m in allMeetings where m.status == .completed {
+            ages[m.id] = m.date.addingTimeInterval(m.duration)
+        }
+        let result = StorageManager.shared.purgeRecordingsOlderThan(
+            days: recordingRetentionDays,
+            meetingFinishedAt: ages
+        )
+        if result.count > 0 {
+            let mb = Double(result.bytes) / 1_048_576
+            lastRetentionResult = "Removed \(result.count) recording(s), freed \(String(format: "%.1f", mb)) MB"
+        } else {
+            lastRetentionResult = "Nothing to remove."
+        }
     }
 }

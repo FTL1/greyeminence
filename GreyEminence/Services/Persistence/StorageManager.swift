@@ -52,6 +52,34 @@ final class StorageManager: Sendable {
         }
     }
 
+    /// Delete the recording folders of any meeting older than `days` whose
+    /// completion date is in the supplied map. Audio is purged but the
+    /// meeting row + transcript stay — only the (large) m4a files go.
+    /// `days <= 0` is a no-op (keep forever).
+    func purgeRecordingsOlderThan(
+        days: Int,
+        meetingFinishedAt: [UUID: Date]
+    ) -> (count: Int, bytes: Int64) {
+        guard days > 0 else { return (0, 0) }
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        let fm = FileManager.default
+        var count = 0
+        var bytes: Int64 = 0
+        for (meetingID, finishedAt) in meetingFinishedAt where finishedAt < cutoff {
+            let dir = recordingsURL.appendingPathComponent(meetingID.uuidString, isDirectory: true)
+            guard fm.fileExists(atPath: dir.path) else { continue }
+            let size = directorySize(at: dir)
+            do {
+                try fm.removeItem(at: dir)
+                count += 1
+                bytes += size
+            } catch {
+                // Skip on failure; next launch will retry.
+            }
+        }
+        return (count, bytes)
+    }
+
     /// Sweep the Recordings directory and remove any per-meeting folder whose
     /// UUID isn't referenced by the provided set (meeting IDs +
     /// `audioSourceMeetingID` of split meetings). Returns the number of

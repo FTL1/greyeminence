@@ -235,6 +235,28 @@ struct ContentView: View {
             )
         }
 
+        // Recording-retention sweep: drop audio files for completed meetings
+        // older than the configured threshold. Transcripts + meeting rows
+        // stay; only the (large) m4a files go. 0 = unlimited.
+        let retentionDays = UserDefaults.standard.integer(forKey: "recordingRetentionDays")
+        if retentionDays > 0 {
+            var ages: [UUID: Date] = [:]
+            for m in allMeetings where m.status == .completed {
+                ages[m.id] = m.date.addingTimeInterval(m.duration)
+            }
+            let aged = StorageManager.shared.purgeRecordingsOlderThan(
+                days: retentionDays,
+                meetingFinishedAt: ages
+            )
+            if aged.count > 0 {
+                let mb = Double(aged.bytes) / 1_048_576
+                LogManager.send(
+                    "Retention sweep: removed audio for \(aged.count) meeting(s) older than \(retentionDays) day\(retentionDays == 1 ? "" : "s"), freed \(String(format: "%.1f", mb)) MB",
+                    category: .general
+                )
+            }
+        }
+
         if !lockFiles.isEmpty {
             let knownIDs = Set(allMeetings.map(\.id))
             let ghosts = lockFiles.filter { !knownIDs.contains($0.meetingID) }

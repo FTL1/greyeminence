@@ -12,9 +12,9 @@ struct InterviewHubView: View {
     @State private var activeTab: InterviewHubTab = .interviews
 
     enum InterviewHubTab: String, CaseIterable {
-        case interviews = "Interviews"
-        case setup = "New Interview"
         case candidates = "Candidates"
+        case setup = "New Interview"
+        case interviews = "Interviews"
         case rubrics = "Rubrics"
         case test = "Test"
     }

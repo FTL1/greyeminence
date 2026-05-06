@@ -171,19 +171,15 @@ private struct DebugInfo {
     @MainActor
     static func gather(context: ModelContext) -> DebugInfo {
         let storage = StorageManager.shared
-        let fm = FileManager.default
 
-        // Database path & size
-        let dbDir = storage.appSupportURL
-        let storePath = dbDir.appendingPathComponent("default.store").path
-        let actualPath: String
-        if fm.fileExists(atPath: storePath) {
-            actualPath = storePath
-        } else {
-            // SwiftData may use a named configuration
-            let named = dbDir.appendingPathComponent("GreyEminence.store").path
-            actualPath = fm.fileExists(atPath: named) ? named : storePath
-        }
+        // Database path & size — ask the live ModelContainer where its
+        // store actually lives instead of guessing. SwiftData does not
+        // place named configurations under our custom appSupportURL —
+        // it uses `<applicationSupport>/<bundleID>/<config-name>.store`
+        // by default, so the legacy guess-the-path code came up empty
+        // and reported 0 bytes.
+        let configURL = context.container.configurations.first?.url
+        let actualPath = configURL?.path ?? ""
         let dbSize = Self.fileSize(atPath: actualPath)
             + Self.fileSize(atPath: actualPath + "-wal")
             + Self.fileSize(atPath: actualPath + "-shm")
@@ -215,7 +211,10 @@ private struct DebugInfo {
             contactCount: count(Contact.self),
             interviewCount: count(Interview.self),
             candidateCount: count(Candidate.self),
-            schemaVersion: "SchemaV1",
+            schemaVersion: {
+                let v = context.container.schema.version
+                return "V\(v.major).\(v.minor).\(v.patch)"
+            }(),
             buildInfo: "\(version) (\(build))",
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             seedVersion: UserDefaults.standard.integer(forKey: "interviewSeedVersion")
