@@ -8,6 +8,12 @@ final class Rubric {
     var isArchived: Bool
     var createdAt: Date
 
+    /// Markdown brief that the interviewer hands to the candidate when
+    /// this rubric is the active phase — the problem statement /
+    /// scenario for the whole phase, not per-section. Surfaced in the
+    /// live interview view with Copy + Export-PDF affordances.
+    var candidateInstructions: String?
+
     /// Legacy single-role pointer. Kept for backward compat reads; new
     /// writes go through `roleLinks`. The startup maintenance pass
     /// migrates a non-nil `role` into a single `RoleRubricLink` with

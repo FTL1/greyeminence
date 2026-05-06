@@ -112,16 +112,27 @@ enum SchemaV4: VersionedSchema {
 }
 
 /// SchemaV5 adds `RubricSection.candidateInstructions` (optional markdown
-/// brief shown to the candidate during the live interview). Purely
-/// additive.
+/// brief). Briefly used as a per-section field; superseded by the
+/// rubric-level field in V6. Field stays on the model for backward
+/// compat reads.
 enum SchemaV5: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(5, 0, 0) }
     static var models: [any PersistentModel.Type] { SchemaV4.models }
 }
 
+/// SchemaV6 promotes the candidate brief from the section level to the
+/// rubric level — briefs describe the whole phase, not individual
+/// rubric sections. Adds `Rubric.candidateInstructions`. The legacy
+/// `RubricSection.candidateInstructions` field stays on the model
+/// unused for backward compat. Purely additive.
+enum SchemaV6: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(6, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV5.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self]
     }
 
     static var stages: [MigrationStage] {
@@ -129,7 +140,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV1.self, toVersion: SchemaV2.self),
             .lightweight(fromVersion: SchemaV2.self, toVersion: SchemaV3.self),
             .lightweight(fromVersion: SchemaV3.self, toVersion: SchemaV4.self),
-            .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self)
+            .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self),
+            .lightweight(fromVersion: SchemaV5.self, toVersion: SchemaV6.self)
         ]
     }
 }

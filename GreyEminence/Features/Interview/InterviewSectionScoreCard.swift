@@ -2,10 +2,6 @@ import SwiftUI
 
 struct InterviewSectionScoreCard: View {
     @Bindable var score: InterviewSectionScore
-    /// Live RubricSection for this score (looked up by the parent), used
-    /// to surface the candidate brief and instructions. Nil for legacy
-    /// scores whose rubric is gone.
-    var rubricSection: RubricSection? = nil
     @State private var isExpanded = false
 
     private var sortedCriteria: [CriterionEvaluation] {
@@ -19,15 +15,6 @@ struct InterviewSectionScoreCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 // Dual score display
                 gradeRow
-
-                // Candidate brief — markdown the interviewer hands out.
-                if let instructions = rubricSection?.candidateInstructions,
-                   !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    CandidateInstructionsPanel(
-                        sectionTitle: score.rubricSectionTitle,
-                        markdown: instructions
-                    )
-                }
 
                 // Per-criterion evaluations
                 if !sortedCriteria.isEmpty {

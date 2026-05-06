@@ -27,6 +27,16 @@ struct RubricEditorView: View {
             }
 
             Section {
+                candidateBriefRow
+            } header: {
+                Text("Candidate Brief")
+            } footer: {
+                Text("Markdown problem statement / scenario for the whole phase. The interviewer pastes this into the candidate's chat or hands it to them as a PDF when this rubric becomes the active phase.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 if sortedLinks.isEmpty {
                     Text("Not linked to any role yet — this rubric is available everywhere via the phase planner's full list.")
                         .font(.caption)
@@ -96,6 +106,70 @@ struct RubricEditorView: View {
         .onAppear {
             rubric.normalizeWeightsToHundred()
         }
+    }
+
+    // MARK: - Candidate Brief
+
+    @State private var showInstructionsEditor = false
+
+    @ViewBuilder
+    private var candidateBriefRow: some View {
+        let brief = rubric.candidateInstructions ?? ""
+        let trimmed = brief.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasContent = !trimmed.isEmpty
+
+        Button {
+            showInstructionsEditor = true
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: hasContent ? "doc.text.fill" : "doc.text")
+                    .foregroundStyle(hasContent ? .cyan : .secondary)
+                    .font(.caption)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hasContent ? "Brief attached" : "Add candidate brief")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if hasContent {
+                        Text(briefPreviewSnippet(trimmed))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.tail)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer()
+                Image(systemName: "pencil")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 2)
+        .sheet(isPresented: $showInstructionsEditor) {
+            MarkdownEditorSheet(
+                text: Binding(
+                    get: { rubric.candidateInstructions ?? "" },
+                    set: { rubric.candidateInstructions = $0.isEmpty ? nil : $0 }
+                ),
+                title: "Candidate Brief",
+                subtitle: rubric.name.isEmpty ? nil : rubric.name
+            )
+        }
+    }
+
+    private func briefPreviewSnippet(_ markdown: String) -> String {
+        markdown
+            .replacingOccurrences(of: "#", with: "")
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: ">", with: "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     // MARK: - Role Link UI

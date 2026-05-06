@@ -11,7 +11,6 @@ struct RubricSectionEditorView: View {
     @State private var newBonusLabel = ""
     @State private var newBonusExpected = "yes"
     @State private var newBonusValue = 1
-    @State private var showInstructionsEditor = false
 
     private var sortedCriteria: [RubricCriterion] {
         section.criteria.sorted { $0.sortOrder < $1.sortOrder }
@@ -27,8 +26,6 @@ struct RubricSectionEditorView: View {
             TextField("Description", text: $section.sectionDescription, axis: .vertical)
                 .lineLimit(2...4)
                 .font(.caption)
-
-            candidateInstructionsRow
 
             // Criteria
             if !sortedCriteria.isEmpty {
@@ -140,77 +137,6 @@ struct RubricSectionEditorView: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-
-    /// Compact row that summarizes the candidate brief and opens the
-    /// full markdown editor sheet on click. Replaces the cramped inline
-    /// TextField — long briefs need a real editor.
-    @ViewBuilder
-    private var candidateInstructionsRow: some View {
-        let instructions = section.candidateInstructions ?? ""
-        let trimmed = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasContent = !trimmed.isEmpty
-
-        Button {
-            showInstructionsEditor = true
-        } label: {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: hasContent ? "doc.text.fill" : "doc.text")
-                    .foregroundStyle(hasContent ? .cyan : .secondary)
-                    .font(.caption)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hasContent ? "Candidate Brief" : "Add Candidate Brief")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if hasContent {
-                        Text(previewSnippet(trimmed))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .truncationMode(.tail)
-                            .multilineTextAlignment(.leading)
-                    } else {
-                        Text("Markdown brief you'll paste into the candidate's chat — problem statement, scenario, expected deliverable.")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-                Spacer()
-                Image(systemName: "pencil")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 2)
-        .sheet(isPresented: $showInstructionsEditor) {
-            MarkdownEditorSheet(
-                text: Binding(
-                    get: { section.candidateInstructions ?? "" },
-                    set: { section.candidateInstructions = $0.isEmpty ? nil : $0 }
-                ),
-                title: "Candidate Brief",
-                subtitle: section.title.isEmpty ? nil : section.title
-            )
-        }
-    }
-
-    /// Strip markdown markers and collapse whitespace for a clean
-    /// one-line preview snippet shown in the section editor row.
-    private func previewSnippet(_ markdown: String) -> String {
-        markdown
-            .replacingOccurrences(of: "#", with: "")
-            .replacingOccurrences(of: "**", with: "")
-            .replacingOccurrences(of: "*", with: "")
-            .replacingOccurrences(of: "`", with: "")
-            .replacingOccurrences(of: ">", with: "")
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
     }
 
     private func addCriterion() {

@@ -284,11 +284,10 @@ private struct ActiveSectionDetail: View {
     @Bindable var score: InterviewSectionScore
     var interviewViewModel: InterviewRecordingViewModel
 
-    /// Live RubricSection for the active score, looked up via the
-    /// active phase. Used to surface candidate-facing instructions.
-    private var rubricSection: RubricSection? {
-        interviewViewModel.interview?.activePhase?.rubric?.sections
-            .first { $0.id == score.rubricSectionID }
+    /// Active phase's rubric — the brief lives here (rubric-level), not
+    /// per-section.
+    private var activeRubric: Rubric? {
+        interviewViewModel.interview?.activePhase?.rubric
     }
 
     var body: some View {
@@ -304,12 +303,13 @@ private struct ActiveSectionDetail: View {
                 }
             }
 
-            // Candidate brief — markdown the interviewer pastes into chat
-            // or exports as PDF. Hidden when the section has no brief.
-            if let instructions = rubricSection?.candidateInstructions,
+            // Phase-level candidate brief — same markdown for every
+            // section in the phase. Hidden when the rubric has no brief.
+            if let rubric = activeRubric,
+               let instructions = rubric.candidateInstructions,
                !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 CandidateInstructionsPanel(
-                    sectionTitle: score.rubricSectionTitle,
+                    sectionTitle: rubric.name,
                     markdown: instructions
                 )
             }
