@@ -193,6 +193,8 @@ enum InterviewPromptTemplates {
             CURRENT INTERVIEW PHASE: Introduction/Conclusion
             Summarize the discussion. Do not score rubric sections. Return section_scores as an empty array.
 
+            \(candidateContext != nil ? "RESUME CROSS-CHECK: Compare what the candidate says about themselves to the resume background above. If anything they claim contradicts or materially differs from the resume — mismatched years of experience, different role scope, technologies they don't mention on paper, employment-history gaps glossed over — surface each contradiction explicitly in `red_flags`, prefixed with `Resume mismatch: `. Quote the candidate verbatim where you can." : "")
+
             """
         }
 
@@ -312,6 +314,8 @@ enum InterviewPromptTemplates {
             lines.append("---")
             lines.append(resume)
             lines.append("---")
+            lines.append("")
+            lines.append("If the candidate's statements during the conversation contradict or materially differ from the resume above (different years of experience, role scope, technologies, gaps glossed over), surface each contradiction in `red_flags` prefixed with `Resume mismatch: ` — with a verbatim quote when possible — so the interviewer can probe.")
         }
         return lines.joined(separator: "\n")
     }
