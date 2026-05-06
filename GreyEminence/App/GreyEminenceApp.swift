@@ -117,7 +117,20 @@ struct GreyEminenceApp: App {
                     updaterController.checkForUpdates(nil)
                 }
             }
+            CommandGroup(replacing: .help) {
+                HelpMenuCommands()
+            }
         }
+
+        // Help docs viewer — value-driven so the same window scene serves
+        // README / CONTRIBUTING / CHANGELOG. Help-menu commands open it
+        // via openWindow(id:value:).
+        WindowGroup("Help", id: "help-doc", for: HelpDoc.self) { $doc in
+            if let doc {
+                HelpDocsView(doc: doc)
+            }
+        }
+        .windowResizability(.contentSize)
 
         MenuBarExtra("Grey Eminence", systemImage: menuBarIcon) {
             if let container = sharedModelContainer {
