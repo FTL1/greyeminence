@@ -11,10 +11,10 @@ struct CharacterSheetView: View {
     /// the parchment-on-brown text color literally.
     private static let darkBrown = Color(red: 0.35, green: 0.22, blue: 0.10)
 
-    /// True when the panel should show AI reasoning under the level and
-    /// each attribute. Off by default — the compact grid is the primary
-    /// view; reasoning is a click away for the curious.
-    @State private var showReasoning = false
+    /// True when the panel shows AI reasoning under the level and each
+    /// attribute. Open by default since the reasoning is the main reason
+    /// to look at the panel — the compact grid is just the index.
+    @State private var showReasoning = true
 
     private var anyReasoningAvailable: Bool {
         sheet.levelReasoning != nil
@@ -64,11 +64,22 @@ struct CharacterSheetView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { showReasoning.toggle() }
                 } label: {
-                    Image(systemName: showReasoning ? "info.circle.fill" : "info.circle")
-                        .foregroundStyle(Self.darkBrown.opacity(0.7))
+                    HStack(spacing: 3) {
+                        Image(systemName: showReasoning ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(showReasoning ? "Hide why" : "Why?")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(Self.darkBrown)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.brown.opacity(0.15), in: Capsule())
+                    .overlay(
+                        Capsule().stroke(Self.darkBrown.opacity(0.3), lineWidth: 0.5)
+                    )
                 }
                 .buttonStyle(.plain)
-                .help(showReasoning ? "Hide AI reasoning" : "Show AI reasoning")
+                .help(showReasoning ? "Hide AI reasoning for each value" : "See why the AI picked these values")
             }
             VStack(alignment: .trailing, spacing: 0) {
                 Text("LVL \(sheet.level)")
