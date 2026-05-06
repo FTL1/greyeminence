@@ -37,6 +37,10 @@ final class InterviewPhase {
     /// the user pick gives system-design vs coding vs take-home a
     /// distinguishable glance.
     var iconName: String?
+    /// Soft-target duration in minutes carried over from the template
+    /// phase. The live UI shows this as a pill ("45 min") and warns when
+    /// elapsed time exceeds the target by ~25%. Nil = no target.
+    var targetMinutes: Int?
 
     var interview: Interview?
     var rubric: Rubric?
@@ -60,7 +64,8 @@ final class InterviewPhase {
         rubric: Rubric? = nil,
         plannedOrder: Int = 0,
         status: InterviewPhaseStatus = .planned,
-        iconName: String? = nil
+        iconName: String? = nil,
+        targetMinutes: Int? = nil
     ) {
         self.id = UUID()
         self.title = title
@@ -68,6 +73,7 @@ final class InterviewPhase {
         self.plannedOrder = plannedOrder
         self.statusRawValue = status.rawValue
         self.iconName = iconName
+        self.targetMinutes = targetMinutes
         self.createdAt = .now
         self.sectionScores = []
         self.notes = []

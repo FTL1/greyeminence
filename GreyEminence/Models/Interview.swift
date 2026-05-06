@@ -70,6 +70,18 @@ final class Interview {
     var candidate: Candidate?
     var rubric: Rubric?
 
+    /// Template this interview was scheduled from. Optional — interviews
+    /// scheduled from a blank plan have no template. The relation is
+    /// nullable so deleting a template doesn't cascade-destroy historical
+    /// interviews; the denormalized `templateNameAtSchedule` snapshot
+    /// below is the analytical fallback for that case.
+    var template: InterviewTemplate?
+    /// Snapshot of the template's name at the moment of scheduling.
+    /// Survives template renames and deletes — the scorecard renders this
+    /// directly so historical interviews always show the loop they were
+    /// run under, even if the template has since been edited.
+    var templateNameAtSchedule: String?
+
     @Relationship(deleteRule: .cascade)
     var meeting: Meeting?
 

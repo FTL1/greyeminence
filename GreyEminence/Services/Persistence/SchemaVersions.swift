@@ -149,9 +149,33 @@ enum SchemaV8: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV7.models }
 }
 
+/// SchemaV9 introduces interview templates as a first-class concept:
+/// `InterviewTemplate`, `InterviewTemplatePhase`, `TemplateRoleLink`.
+/// Plus additive fields on existing models:
+/// - `Interview.template` (optional relation) and
+///   `Interview.templateNameAtSchedule` (denormalized snapshot string,
+///   so historical interviews keep their template label even after the
+///   template is renamed or deleted).
+/// - `InterviewPhase.targetMinutes` and `InterviewTemplatePhase.targetMinutes`
+///   for soft per-phase time-boxing.
+/// - `InterviewTemplatePhase.briefOverride` schema field reserved for a
+///   future per-template brief override; UI in v1 always defers to the
+///   rubric-level brief.
+/// All changes are additive — lightweight migration handles V8 → V9.
+enum SchemaV9: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(9, 0, 0) }
+    static var models: [any PersistentModel.Type] {
+        SchemaV8.models + [
+            InterviewTemplate.self,
+            InterviewTemplatePhase.self,
+            TemplateRoleLink.self
+        ]
+    }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self]
     }
 
     static var stages: [MigrationStage] {
@@ -162,7 +186,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV4.self, toVersion: SchemaV5.self),
             .lightweight(fromVersion: SchemaV5.self, toVersion: SchemaV6.self),
             .lightweight(fromVersion: SchemaV6.self, toVersion: SchemaV7.self),
-            .lightweight(fromVersion: SchemaV7.self, toVersion: SchemaV8.self)
+            .lightweight(fromVersion: SchemaV7.self, toVersion: SchemaV8.self),
+            .lightweight(fromVersion: SchemaV8.self, toVersion: SchemaV9.self)
         ]
     }
 }

@@ -48,7 +48,7 @@ struct GreyEminenceApp: App {
         // exactly what V1→V2 is. Migration stages still exist in the plan
         // type for documentation and for future non-additive changes that
         // genuinely need custom handlers.
-        let schema = Schema(versionedSchema: SchemaV8.self)
+        let schema = Schema(versionedSchema: SchemaV9.self)
         let config = ModelConfiguration(
             "GreyEminence",
             schema: schema,
@@ -162,6 +162,10 @@ struct GreyEminenceApp: App {
 private func seedInterviewDefaults(in context: ModelContext) {
     seedAIAssistedEngineeringRubricIfMissing(in: context)
     seedSystemDesignRubricIfMissing(in: context)
+    // Templates seed runs after rubric seeders so the fuzzy name match
+    // can hook the freshly-seeded rubrics. Idempotent — only fires when
+    // the template table is empty.
+    InterviewTemplateSeeder.seedIfEmpty(in: context)
 
     let seedVersion = UserDefaults.standard.integer(forKey: "interviewSeedVersion")
     guard seedVersion < 4 else { return }
