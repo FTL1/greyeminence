@@ -31,6 +31,45 @@ struct CandidateDetailView: View {
     ]
 
     var body: some View {
+        VStack(spacing: 0) {
+            candidateHero
+            list
+        }
+        .navigationTitle(candidate.name.isEmpty ? "Untitled Candidate" : candidate.name)
+    }
+
+    /// Candidate-flavored variant of the editor hero — uses the
+    /// initials-on-color avatar instead of an SF Symbol icon since
+    /// candidates have identity expressed through people, not glyphs.
+    private var candidateHero: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(candidate.initials)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(candidate.avatarColor.gradient, in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Untitled Candidate", text: $candidate.name)
+                    .textFieldStyle(.plain)
+                    .font(.title2.weight(.semibold))
+                if let role = candidate.role {
+                    Text(role.fullDescription)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No role assigned")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .overlay(alignment: .bottom) { Divider().opacity(0.6) }
+    }
+
+    private var list: some View {
         List {
             if candidate.isArchived {
                 Section {
@@ -40,8 +79,7 @@ struct CandidateDetailView: View {
                 }
             }
 
-            Section("Details") {
-                TextField("Name", text: $candidate.name)
+            Section {
                 TextField("Email", text: Binding(
                     get: { candidate.email ?? "" },
                     set: { candidate.email = $0.isEmpty ? nil : $0 }
@@ -55,6 +93,8 @@ struct CandidateDetailView: View {
                         Text(role.fullDescription).tag(role as InterviewRole?)
                     }
                 }
+            } header: {
+                Text("Contact")
             }
 
             Section {
@@ -186,7 +226,6 @@ struct CandidateDetailView: View {
                 }
             }
         }
-        .navigationTitle(candidate.name)
         .toolbar {
             if let interviewVM = interviewViewModel {
                 ToolbarItem(placement: .primaryAction) {

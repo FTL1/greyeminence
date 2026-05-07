@@ -13,13 +13,28 @@ import SwiftData
 /// the user gets shape; rubric population is best-effort.
 enum InterviewTemplateSeeder {
 
-    /// Run the seed once per fresh install. No-op if any template already
-    /// exists — protects against re-seeding after the user archives or
-    /// deletes them.
+    /// Versioned seed key. Bumped when the canonical default templates
+    /// change so existing installs can be re-seeded — but only when the
+    /// user hasn't customized them. See `pruneUnmodifiedLegacyTemplates`.
+    private static let seedVersionKey = "interviewTemplateSeedVersion"
+    private static let currentSeedVersion = 2
+
+    /// Run the seed on a fresh install, or re-seed when the canonical
+    /// defaults have changed *and* the user hasn't touched the old ones
+    /// yet. Idempotent in both directions: never overwrites a user-edited
+    /// template, never duplicates one.
     @MainActor
     static func seedIfEmpty(in context: ModelContext) {
+        let storedVersion = UserDefaults.standard.integer(forKey: seedVersionKey)
+        if storedVersion < currentSeedVersion {
+            pruneUnmodifiedLegacyTemplates(in: context)
+        }
+
         let existingCount = (try? context.fetchCount(FetchDescriptor<InterviewTemplate>())) ?? 0
-        guard existingCount == 0 else { return }
+        if existingCount > 0 {
+            UserDefaults.standard.set(currentSeedVersion, forKey: seedVersionKey)
+            return
+        }
 
         let allRubrics = (try? context.fetch(FetchDescriptor<Rubric>())) ?? []
         let activeRubrics = allRubrics.filter { !$0.isArchived }
@@ -55,6 +70,32 @@ enum InterviewTemplateSeeder {
             "Seeded \(defaultTemplates.count) default interview template(s)",
             category: .general
         )
+        UserDefaults.standard.set(currentSeedVersion, forKey: seedVersionKey)
+    }
+
+    /// Delete templates seeded by an older version *only if* the user
+    /// hasn't used them — usageCount == 0 and lastUsedAt == nil. Names
+    /// hard-coded to the prior canonical set so a user-renamed template
+    /// won't be touched even by accident. Skips any template whose
+    /// phase count or titles diverge from the legacy spec, since that
+    /// signals manual edits.
+    @MainActor
+    private static func pruneUnmodifiedLegacyTemplates(in context: ModelContext) {
+        let legacyNames: Set<String> = ["Backend Loop", "Frontend Loop"]
+        let templates = (try? context.fetch(FetchDescriptor<InterviewTemplate>())) ?? []
+        var removed = 0
+        for template in templates where legacyNames.contains(template.name) {
+            guard template.usageCount == 0, template.lastUsedAt == nil else { continue }
+            context.delete(template)
+            removed += 1
+        }
+        if removed > 0 {
+            PersistenceGate.save(context, site: "InterviewTemplateSeeder.pruneLegacy", critical: false)
+            LogManager.send(
+                "Removed \(removed) unmodified legacy template(s) before re-seeding",
+                category: .general
+            )
+        }
     }
 
     // MARK: - Specs
@@ -91,9 +132,9 @@ enum InterviewTemplateSeeder {
             ]
         ),
         TemplateSpec(
-            name: "Backend Loop",
-            description: "Standard backend-engineer loop: system design, coding, behavioral. Bookended with intro and conclusion.",
-            iconName: "server.rack",
+            name: "Software Engineer",
+            description: "Standard IC engineer loop: system design, coding, behavioral. Bookended with intro and conclusion.",
+            iconName: "chevron.left.slash.chevron.right",
             appliesToAnyRole: true,
             phases: [
                 PhaseSpec(title: "Intro", kind: .intro, iconName: "person.wave.2", targetMinutes: 5, rubricNameHints: nil),
@@ -104,15 +145,29 @@ enum InterviewTemplateSeeder {
             ]
         ),
         TemplateSpec(
-            name: "Frontend Loop",
-            description: "Standard frontend loop: UI build, code review, behavioral. Bookended with intro and conclusion.",
-            iconName: "rectangle.on.rectangle.angled",
+            name: "Staff Software Engineer",
+            description: "Senior IC loop: two system-design rounds for breadth and depth, plus a code-review challenge and behavioral.",
+            iconName: "rectangle.connected.to.line.below",
             appliesToAnyRole: true,
             phases: [
                 PhaseSpec(title: "Intro", kind: .intro, iconName: "person.wave.2", targetMinutes: 5, rubricNameHints: nil),
-                PhaseSpec(title: "UI Build", kind: .scored, iconName: "rectangle.on.rectangle.angled", targetMinutes: 60, rubricNameHints: ["ui", "frontend", "front-end"]),
-                PhaseSpec(title: "Code Review", kind: .scored, iconName: "doc.text.magnifyingglass", targetMinutes: 30, rubricNameHints: ["code review", "review"]),
+                PhaseSpec(title: "System Design — Breadth", kind: .scored, iconName: "rectangle.connected.to.line.below", targetMinutes: 60, rubricNameHints: ["system design"]),
+                PhaseSpec(title: "System Design — Deep Dive", kind: .scored, iconName: "rectangle.3.group", targetMinutes: 60, rubricNameHints: ["system design", "architecture"]),
+                PhaseSpec(title: "Code Review Challenge", kind: .scored, iconName: "doc.text.magnifyingglass", targetMinutes: 45, rubricNameHints: ["code review", "review"]),
                 PhaseSpec(title: "Behavioral", kind: .scored, iconName: "person.2.wave.2", targetMinutes: 30, rubricNameHints: ["behavioral", "leadership", "values"]),
+                PhaseSpec(title: "Conclusion", kind: .conclusion, iconName: "questionmark.bubble", targetMinutes: 5, rubricNameHints: nil)
+            ]
+        ),
+        TemplateSpec(
+            name: "Engineering Manager",
+            description: "EM loop: system design, code review, leadership / behavioral. No coding exercise — managers are evaluated on judgement, not a fresh whiteboard.",
+            iconName: "person.2.wave.2",
+            appliesToAnyRole: true,
+            phases: [
+                PhaseSpec(title: "Intro", kind: .intro, iconName: "person.wave.2", targetMinutes: 5, rubricNameHints: nil),
+                PhaseSpec(title: "System Design", kind: .scored, iconName: "rectangle.connected.to.line.below", targetMinutes: 45, rubricNameHints: ["system design"]),
+                PhaseSpec(title: "Code Review", kind: .scored, iconName: "doc.text.magnifyingglass", targetMinutes: 45, rubricNameHints: ["code review", "review"]),
+                PhaseSpec(title: "Leadership & Behavioral", kind: .scored, iconName: "person.2.wave.2", targetMinutes: 45, rubricNameHints: ["leadership", "behavioral", "values", "management"]),
                 PhaseSpec(title: "Conclusion", kind: .conclusion, iconName: "questionmark.bubble", targetMinutes: 5, rubricNameHints: nil)
             ]
         )

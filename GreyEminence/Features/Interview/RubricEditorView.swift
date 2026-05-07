@@ -20,12 +20,25 @@ struct RubricEditorView: View {
     }
 
     var body: some View {
-        List {
-            // Header
-            Section("Rubric Details") {
-                TextField("Name", text: $rubric.name)
-            }
+        VStack(spacing: 0) {
+            EntityHeaderView(
+                name: $rubric.name,
+                description: .constant(""),
+                iconName: .constant(""),
+                iconFallback: "list.clipboard",
+                tint: .indigo,
+                namePrompt: "Untitled Rubric",
+                descriptionPrompt: "",
+                iconCatalog: nil
+            )
+            list
+        }
+        .navigationTitle(rubric.name.isEmpty ? "Untitled Rubric" : rubric.name)
+        .onAppear { rubric.normalizeWeightsToHundred() }
+    }
 
+    private var list: some View {
+        List {
             Section {
                 candidateBriefRow
             } header: {
@@ -101,10 +114,6 @@ struct RubricEditorView: View {
                     Label("Add Section", systemImage: "plus.circle")
                 }
             }
-        }
-        .navigationTitle(rubric.name)
-        .onAppear {
-            rubric.normalizeWeightsToHundred()
         }
     }
 

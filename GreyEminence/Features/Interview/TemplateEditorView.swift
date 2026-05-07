@@ -28,32 +28,64 @@ struct TemplateEditorView: View {
     }
 
     var body: some View {
-        List {
-            Section("Template Details") {
-                HStack(spacing: 8) {
-                    PhaseIconMenu(
-                        current: template.iconName ?? "list.bullet.rectangle",
-                        tint: .cyan,
-                        background: Color.cyan.opacity(0.1),
-                        size: 26
-                    ) { sym in
-                        template.iconName = sym
-                        template.updatedAt = .now
-                    }
-                    .help("Pick template icon")
-
-                    TextField("Name", text: $template.name)
-                }
-                TextField("Description", text: Binding(
+        VStack(spacing: 0) {
+            EntityHeaderView(
+                name: $template.name,
+                description: Binding(
                     get: { template.templateDescription ?? "" },
                     set: {
                         template.templateDescription = $0.isEmpty ? nil : $0
                         template.updatedAt = .now
                     }
-                ), axis: .vertical)
-                .lineLimit(2...5)
-            }
+                ),
+                iconName: Binding(
+                    get: { template.iconName ?? "" },
+                    set: {
+                        template.iconName = $0.isEmpty ? nil : $0
+                        template.updatedAt = .now
+                    }
+                ),
+                iconFallback: "list.bullet.rectangle",
+                tint: .cyan,
+                namePrompt: "Untitled Template"
+            )
+            templateMetaStrip
+            list
+        }
+        .navigationTitle(template.name.isEmpty ? "Untitled Template" : template.name)
+    }
 
+    /// Light row under the hero: phase count + total minutes + scored
+    /// count. Refreshes from the live phase list on every render. Keeps
+    /// "shape of the loop" visible without scrolling to the Phases
+    /// section.
+    private var templateMetaStrip: some View {
+        let totalMinutes = sortedPhases.compactMap(\.targetMinutes).reduce(0, +)
+        let scoredCount = sortedPhases.filter { $0.kind == .scored }.count
+        return HStack(spacing: 12) {
+            Label("\(sortedPhases.count) phase\(sortedPhases.count == 1 ? "" : "s")", systemImage: "list.bullet")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if scoredCount > 0 {
+                Label("\(scoredCount) scored", systemImage: "checkmark.seal")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if totalMinutes > 0 {
+                Label("~\(totalMinutes) min total", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(.bar.opacity(0.4))
+        .overlay(alignment: .bottom) { Divider().opacity(0.6) }
+    }
+
+    private var list: some View {
+        List {
             Section {
                 Toggle("Available for any role", isOn: $template.appliesToAnyRole)
                 if !template.appliesToAnyRole {
@@ -128,7 +160,6 @@ struct TemplateEditorView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle(template.name)
     }
 
     // MARK: - Role link row

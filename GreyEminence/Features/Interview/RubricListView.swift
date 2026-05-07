@@ -86,9 +86,16 @@ struct AddRubricSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("New Rubric")
-                .font(.headline)
-                .padding()
+            VStack(spacing: 2) {
+                Text("New Rubric")
+                    .font(.title2.weight(.semibold))
+                Text("Scoring template for one phase")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
 
             Form {
                 Picker("Role", selection: $selectedRole) {

@@ -35,6 +35,7 @@
 		2A3497DC017555A3BE9E29C3 /* TranscriptSegment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE45FF59C2AC3113F02C4CC /* TranscriptSegment.swift */; };
 		2B9F3EFF0BFC3FFBF5D62A54 /* MeetingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8141402D9688729287F5C68F /* MeetingStore.swift */; };
 		2BB4EABCC993F6D6BD3EE091 /* AskSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C545A92420F35CB8B9F137A1 /* AskSettingsView.swift */; };
+		2BC270C05EBA992D43F7B912 /* EntityHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18BD94651D6DC1EEC0EE91DE /* EntityHeaderView.swift */; };
 		2BF009A9D76C95D73B91CCDD /* RecordingLockFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B253F64F1BB1E9EB1097F826 /* RecordingLockFile.swift */; };
 		2F5426980E4A67F002187DCA /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 355D52E442FFB5C7B6F89C4F /* MenuBarView.swift */; };
 		3052BD7FCCDE88CE3C036561 /* InterviewImpression.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F08738D7D9258962EA6B659 /* InterviewImpression.swift */; };
@@ -224,6 +225,7 @@
 		130974A6F8E2B27E4705F6A3 /* RecordingToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingToolbar.swift; sourceTree = "<group>"; };
 		16FDDE6B20442020C1A542EC /* Rubric.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rubric.swift; sourceTree = "<group>"; };
 		176C0D546904574EAA12A436 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		18BD94651D6DC1EEC0EE91DE /* EntityHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntityHeaderView.swift; sourceTree = "<group>"; };
 		19C6927F280175D31CAADD91 /* RubricBonusSignal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RubricBonusSignal.swift; sourceTree = "<group>"; };
 		1A1365BE3180CD996B444127 /* InterviewTemplateSeeder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewTemplateSeeder.swift; sourceTree = "<group>"; };
 		1A449FC8E55341990C8A3A7A /* MeetingPrepView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPrepView.swift; sourceTree = "<group>"; };
@@ -862,6 +864,7 @@
 				31B42DDA6EE672DE406DD148 /* CandidateInstructionsPanel.swift */,
 				7EE35BB1B53FA715D0E3B606 /* CandidateListView.swift */,
 				1E4A14EBE4E82FF3649CD5F5 /* CharacterSheetView.swift */,
+				18BD94651D6DC1EEC0EE91DE /* EntityHeaderView.swift */,
 				5F47726CB844501C13CE03E6 /* InterviewCreationSheet.swift */,
 				F59A83B6524CF1BD8477EC89 /* InterviewHubView.swift */,
 				B1883C32FA38176C32ED9B57 /* InterviewListView.swift */,
@@ -1091,6 +1094,7 @@
 				367C511BC7B8D998882DFE3C /* EmbeddingRecord.swift in Sources */,
 				5B110CFEFA6600A386C0BCF4 /* EmbeddingService.swift in Sources */,
 				E9E3C9481988624094B820A1 /* EmbeddingStore.swift in Sources */,
+				2BC270C05EBA992D43F7B912 /* EntityHeaderView.swift in Sources */,
 				BCFE8F9A5D779015BD38FA97 /* FluidAsrService.swift in Sources */,
 				33715D44310936A4E6B8B6D0 /* FollowUpQuestionsSection.swift in Sources */,
 				410FF2704E7C22D08D23D9D6 /* ForceSimulation.swift in Sources */,
