@@ -43,7 +43,7 @@ final class TransientActivityCoordinator {
     }
 
     @discardableResult
-    func runAsync<T>(_ label: String, _ work: () async throws -> T) async rethrows -> T {
+    func runAsync<T: Sendable>(_ label: String, _ work: () async throws -> T) async rethrows -> T {
         let activity = beginActivity(label: label)
         defer { Task { await endActivity(activity) } }
         return try await work()
