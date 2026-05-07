@@ -152,6 +152,10 @@ struct LiveInterviewIntelligenceView: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(width: 64)
+
+                if !phase.assignedInterviewers.isEmpty {
+                    ownerInitials(phase.assignedInterviewers)
+                }
             }
         }
         .menuStyle(.borderlessButton)
@@ -216,6 +220,32 @@ struct LiveInterviewIntelligenceView: View {
             .help("More phase actions")
         }
         .padding(.bottom, 14)
+    }
+
+    /// Compact horizontal stack of assigned interviewer initials, used
+    /// under each phase icon to remind whoever's running the phase that
+    /// they own it. Caps at 3 visible bubbles; spills into a "+N" tail
+    /// so the strip doesn't get cluttered for big panels.
+    @ViewBuilder
+    private func ownerInitials(_ contacts: [Contact]) -> some View {
+        HStack(spacing: -3) {
+            ForEach(contacts.prefix(3)) { contact in
+                Text(contact.initials)
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 12, height: 12)
+                    .background(contact.avatarColor.gradient, in: Circle())
+                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 0.8))
+            }
+            if contacts.count > 3 {
+                Text("+\(contacts.count - 3)")
+                    .font(.system(size: 6, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12, height: 12)
+                    .background(Color.secondary.opacity(0.25), in: Circle())
+            }
+        }
+        .help("Phase owners: \(contacts.map(\.name).joined(separator: ", "))")
     }
 
     /// Weighted composite gradePoints across this phase's section

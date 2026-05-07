@@ -61,6 +61,14 @@ final class InterviewCreationViewModel {
         editablePhases.append(phase)
     }
 
+    /// Insert a phase at a specific index, clamped to the array bounds.
+    /// Used by per-row drop targets so dragging onto a row inserts
+    /// before that row instead of always appending.
+    func insertPhase(_ phase: PlannedPhase, at index: Int) {
+        let clamped = max(0, min(index, editablePhases.count))
+        editablePhases.insert(phase, at: clamped)
+    }
+
     func removePhase(at index: Int) {
         guard editablePhases.indices.contains(index) else { return }
         editablePhases.remove(at: index)
@@ -535,24 +543,38 @@ struct InterviewCreationSheet: View {
                         vm.removePhase(at: idx)
                     }
                 )
+                .dropDestination(for: String.self) { items, _ in
+                    insertDroppedRubrics(items, at: idx)
+                }
             }
             addPhaseMenu
         }
         .padding(10)
         .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-        // Drop target for rubrics dragged from the rail.
+        // Pane-level drop target — fallback when the user drops in the
+        // gutter between rows or below the last one. Per-row destinations
+        // above take precedence and insert at that index.
         .dropDestination(for: String.self) { items, _ in
-            let used = usedRubricIDs
-            var didAccept = false
-            for str in items {
-                guard let id = UUID(uuidString: str), !used.contains(id) else { continue }
-                if let rubric = allRubrics.first(where: { $0.id == id }) {
-                    vm.appendPhase(.from(rubric: rubric))
-                    didAccept = true
-                }
-            }
-            return didAccept
+            insertDroppedRubrics(items, at: vm.editablePhases.count)
         }
+    }
+
+    /// Resolve dragged rubric-id strings to Rubric records, skip
+    /// duplicates already in the plan, and insert each at `index`.
+    /// Returns true if any rubric actually landed so SwiftUI's drop
+    /// animation reflects whether the gesture did anything.
+    private func insertDroppedRubrics(_ items: [String], at index: Int) -> Bool {
+        let used = usedRubricIDs
+        var insertAt = index
+        var didAccept = false
+        for str in items {
+            guard let id = UUID(uuidString: str), !used.contains(id) else { continue }
+            guard let rubric = allRubrics.first(where: { $0.id == id }) else { continue }
+            vm.insertPhase(.from(rubric: rubric), at: insertAt)
+            insertAt += 1
+            didAccept = true
+        }
+        return didAccept
     }
 
     private var addPhaseMenu: some View {

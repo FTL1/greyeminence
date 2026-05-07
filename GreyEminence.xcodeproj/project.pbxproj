@@ -164,6 +164,7 @@
 		D0D02AD902D348ADFE6F2935 /* InterviewListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1883C32FA38176C32ED9B57 /* InterviewListView.swift */; };
 		D15B92644A209FBBF7B31D8D /* MeetingPrepView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A449FC8E55341990C8A3A7A /* MeetingPrepView.swift */; };
 		D1BCC317E4B910D757CB9FC6 /* PromptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FB7CEC0E14991A2743BEB83 /* PromptStore.swift */; };
+		D215801D257755052AA249FA /* LibrarySidebarScaffold.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F010A38CE1940FA56C947FE /* LibrarySidebarScaffold.swift */; };
 		D3F792CF7E707B6031803B4E /* AudioChunkValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23D9772408B00E7D046004B1 /* AudioChunkValidator.swift */; };
 		D59E4FDE79625794D5A8A32E /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6774606B2258926F847E4C4 /* AppEnvironment.swift */; };
 		D6576BB5BC20C4820836652A /* AudioFileWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE1444D1BB821BCF57E37F6 /* AudioFileWriterTests.swift */; };
@@ -279,6 +280,7 @@
 		5A42AA08DB1A00AE08C7884B /* ArchiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveView.swift; sourceTree = "<group>"; };
 		5B83B40FCCFC9C150D3A4578 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		5C0D2BB249FEACDA87A7EF0B /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
+		5F010A38CE1940FA56C947FE /* LibrarySidebarScaffold.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySidebarScaffold.swift; sourceTree = "<group>"; };
 		5F47726CB844501C13CE03E6 /* InterviewCreationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewCreationSheet.swift; sourceTree = "<group>"; };
 		5FA6B494CC588C6C3F58E4F1 /* EmbeddingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingProvider.swift; sourceTree = "<group>"; };
 		64E9FE67D22C9B5648478322 /* Interview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Interview.swift; sourceTree = "<group>"; };
@@ -866,6 +868,7 @@
 				E5EDCC80A8D4B916A192C52E /* InterviewRecordingViewModel.swift */,
 				77CBEB9C00C6D9F952CEA6EE /* InterviewScorecardView.swift */,
 				467A2217512A73AC48F65308 /* InterviewSectionScoreCard.swift */,
+				5F010A38CE1940FA56C947FE /* LibrarySidebarScaffold.swift */,
 				52BA4CA49EBD1B2A041D5E84 /* LiveInterviewIntelligenceView.swift */,
 				85571895F31B17D9B41094BB /* LiveInterviewView.swift */,
 				0F38EF7FBBDF59AB8EE46CE2 /* MarkdownEditor.swift */,
@@ -1117,6 +1120,7 @@
 				6124A5877A26A23800F37813 /* InterviewTemplateSeeder.swift in Sources */,
 				4A68EC33839FE5093B329490 /* KeychainHelper.swift in Sources */,
 				C9EBA7BFEBA1F4DAC059CAD7 /* KnowledgeLinksSection.swift in Sources */,
+				D215801D257755052AA249FA /* LibrarySidebarScaffold.swift in Sources */,
 				7C169E02EA7A7A86699F2F32 /* LiveInterviewIntelligenceView.swift in Sources */,
 				93DA0C25320EE99EC20C1EA7 /* LiveInterviewView.swift in Sources */,
 				71DD1B1AACF574A9C2948594 /* LiveTranscriptView.swift in Sources */,

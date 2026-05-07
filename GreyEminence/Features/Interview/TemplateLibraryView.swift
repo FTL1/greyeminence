@@ -6,83 +6,37 @@ import SwiftData
 /// the two browse experiences feel consistent.
 struct TemplateLibraryView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \InterviewTemplate.lastUsedAt, order: .reverse) private var templates: [InterviewTemplate]
-    @State private var selectedTemplate: InterviewTemplate?
-    @State private var showAddSheet = false
-    @State private var searchText = ""
-    @State private var showArchived = false
-
-    private var filteredTemplates: [InterviewTemplate] {
-        let visible = templates.filter { showArchived || !$0.isArchived }
-        if searchText.isEmpty { return visible }
-        let query = searchText.lowercased()
-        return visible.filter {
-            $0.name.lowercased().contains(query) ||
-            ($0.templateDescription?.lowercased().contains(query) ?? false)
-        }
-    }
+    @Query(
+        sort: [
+            SortDescriptor(\InterviewTemplate.lastUsedAt, order: .reverse),
+            SortDescriptor(\InterviewTemplate.name)
+        ]
+    ) private var templates: [InterviewTemplate]
 
     var body: some View {
-        NavigationSplitView {
-            List(filteredTemplates, selection: $selectedTemplate) { template in
-                TemplateRowView(template: template)
-                    .tag(template)
-                    .opacity(template.isArchived ? 0.5 : 1)
-                    .contextMenu {
-                        Button(template.isArchived ? "Unarchive" : "Archive") {
-                            template.isArchived.toggle()
-                        }
-                        Button("Duplicate") {
-                            duplicateTemplate(template)
-                        }
-                        Button("Delete", role: .destructive) {
-                            if selectedTemplate == template { selectedTemplate = nil }
-                            modelContext.delete(template)
-                        }
-                    }
-            }
-            .searchable(text: $searchText, placement: .sidebar, prompt: "Search templates")
-            .navigationTitle("Templates")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showAddSheet = true } label: {
-                        Label("Add Template", systemImage: "plus")
-                    }
-                }
-                ToolbarItem {
-                    Toggle(isOn: $showArchived) {
-                        Label("Show Archived", systemImage: "archivebox")
-                    }
-                    .help(showArchived ? "Hide archived" : "Show archived")
-                }
-            }
-            .overlay {
-                if templates.isEmpty {
-                    ContentUnavailableView(
-                        "No Templates",
-                        systemImage: "list.bullet.rectangle",
-                        description: Text("Create reusable interview templates to standardize your loops")
-                    )
-                } else if filteredTemplates.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
-                }
-            }
-            .sheet(isPresented: $showAddSheet) {
-                AddTemplateSheet { template in
-                    selectedTemplate = template
-                }
-            }
-        } detail: {
-            if let template = selectedTemplate {
-                TemplateEditorView(template: template)
-            } else {
-                ContentUnavailableView(
-                    "No Template Selected",
-                    systemImage: "list.bullet.rectangle",
-                    description: Text("Select a template to edit")
-                )
-            }
-        }
+        LibrarySidebarScaffold(
+            title: "Templates",
+            items: templates,
+            searchPlaceholder: "Search templates",
+            emptyTitle: "No Templates",
+            emptySystemImage: "list.bullet.rectangle",
+            emptyDescription: "Create reusable interview templates to standardize your loops",
+            detailPlaceholderTitle: "No Template Selected",
+            detailPlaceholderSystemImage: "list.bullet.rectangle",
+            detailPlaceholderDescription: "Select a template to edit",
+            isArchived: { $0.isArchived },
+            toggleArchive: { $0.isArchived.toggle() },
+            duplicate: { duplicateTemplate($0) },
+            delete: { modelContext.delete($0) },
+            matchesSearch: { template, query in
+                let q = query.lowercased()
+                return template.name.lowercased().contains(q)
+                    || (template.templateDescription?.lowercased().contains(q) ?? false)
+            },
+            row: { TemplateRowView(template: $0) },
+            editor: { TemplateEditorView(template: $0) },
+            addSheet: { onCreated in AddTemplateSheet(onCreated: onCreated) }
+        )
     }
 
     /// Deep-clone a template so the user can iterate on a variant without
@@ -106,7 +60,6 @@ struct TemplateLibraryView: View {
             modelContext.insert(newLink)
             copy.roleLinks.append(newLink)
         }
-        selectedTemplate = copy
     }
 }
 
@@ -132,7 +85,7 @@ fileprivate func clonePhases(from source: InterviewTemplate, to target: Intervie
 
 // MARK: - Row
 
-private struct TemplateRowView: View {
+struct TemplateRowView: View {
     let template: InterviewTemplate
 
     private var scopeText: String {
@@ -173,7 +126,7 @@ private struct TemplateRowView: View {
 
 // MARK: - Add Sheet
 
-private struct AddTemplateSheet: View {
+struct AddTemplateSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \InterviewTemplate.createdAt, order: .reverse) private var existingTemplates: [InterviewTemplate]

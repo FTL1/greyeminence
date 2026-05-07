@@ -4,82 +4,31 @@ import SwiftData
 struct RubricListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Rubric.createdAt, order: .reverse) private var rubrics: [Rubric]
-    @State private var selectedRubric: Rubric?
-    @State private var showAddSheet = false
-    @State private var searchText = ""
-    @State private var showArchived = false
-
-    private var filteredRubrics: [Rubric] {
-        let visible = rubrics.filter { showArchived || !$0.isArchived }
-        if searchText.isEmpty { return visible }
-        let query = searchText.lowercased()
-        return visible.filter {
-            $0.name.lowercased().contains(query) ||
-            ($0.role?.displayTitle.lowercased().contains(query) ?? false)
-        }
-    }
 
     var body: some View {
-        NavigationSplitView {
-            List(filteredRubrics, selection: $selectedRubric) { rubric in
-                RubricRowView(rubric: rubric)
-                    .tag(rubric)
-                    .opacity(rubric.isArchived ? 0.5 : 1)
-                    .contextMenu {
-                        Button(rubric.isArchived ? "Unarchive" : "Archive") {
-                            rubric.isArchived.toggle()
-                        }
-                        Button("Duplicate") {
-                            duplicateRubric(rubric)
-                        }
-                        Button("Delete", role: .destructive) {
-                            if selectedRubric == rubric { selectedRubric = nil }
-                            modelContext.delete(rubric)
-                        }
-                    }
-            }
-            .searchable(text: $searchText, placement: .sidebar, prompt: "Search rubrics")
-            .navigationTitle("Rubrics")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { showAddSheet = true } label: {
-                        Label("Add Rubric", systemImage: "plus")
-                    }
-                }
-                ToolbarItem {
-                    Toggle(isOn: $showArchived) {
-                        Label("Show Archived", systemImage: "archivebox")
-                    }
-                    .help(showArchived ? "Hide archived" : "Show archived")
-                }
-            }
-            .overlay {
-                if rubrics.isEmpty {
-                    ContentUnavailableView(
-                        "No Rubrics",
-                        systemImage: "list.clipboard",
-                        description: Text("Create rubrics to evaluate interview candidates")
-                    )
-                } else if filteredRubrics.isEmpty {
-                    ContentUnavailableView.search(text: searchText)
-                }
-            }
-            .sheet(isPresented: $showAddSheet) {
-                AddRubricSheet { rubric in
-                    selectedRubric = rubric
-                }
-            }
-        } detail: {
-            if let rubric = selectedRubric {
-                RubricEditorView(rubric: rubric)
-            } else {
-                ContentUnavailableView(
-                    "No Rubric Selected",
-                    systemImage: "list.clipboard",
-                    description: Text("Select a rubric to edit")
-                )
-            }
-        }
+        LibrarySidebarScaffold(
+            title: "Rubrics",
+            items: rubrics,
+            searchPlaceholder: "Search rubrics",
+            emptyTitle: "No Rubrics",
+            emptySystemImage: "list.clipboard",
+            emptyDescription: "Create rubrics to evaluate interview candidates",
+            detailPlaceholderTitle: "No Rubric Selected",
+            detailPlaceholderSystemImage: "list.clipboard",
+            detailPlaceholderDescription: "Select a rubric to edit",
+            isArchived: { $0.isArchived },
+            toggleArchive: { $0.isArchived.toggle() },
+            duplicate: { duplicateRubric($0) },
+            delete: { modelContext.delete($0) },
+            matchesSearch: { rubric, query in
+                let q = query.lowercased()
+                return rubric.name.lowercased().contains(q)
+                    || (rubric.role?.displayTitle.lowercased().contains(q) ?? false)
+            },
+            row: { RubricRowView(rubric: $0) },
+            editor: { RubricEditorView(rubric: $0) },
+            addSheet: { onCreated in AddRubricSheet(onCreated: onCreated) }
+        )
     }
 
     private func duplicateRubric(_ source: Rubric) {
@@ -87,13 +36,12 @@ struct RubricListView: View {
         copy.role = source.role
         modelContext.insert(copy)
         deepCopyRubricContents(from: source, to: copy)
-        selectedRubric = copy
     }
 }
 
 // MARK: - Row View
 
-private struct RubricRowView: View {
+struct RubricRowView: View {
     let rubric: Rubric
 
     var body: some View {
@@ -117,7 +65,7 @@ private struct RubricRowView: View {
 
 // MARK: - Add Sheet
 
-private struct AddRubricSheet: View {
+struct AddRubricSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \InterviewRole.createdAt) private var roles: [InterviewRole]
