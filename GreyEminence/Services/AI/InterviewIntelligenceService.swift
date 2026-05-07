@@ -5,6 +5,15 @@ import Foundation
 struct RubricSnapshot: Sendable {
     let name: String
     let sections: [RubricSectionSnapshot]
+    /// Calibration directive sourced from the role↔rubric strictness link
+    /// (`RubricStrictness.promptAddendum`). Empty for `.standard`.
+    let strictnessAddendum: String
+
+    init(name: String, sections: [RubricSectionSnapshot], strictnessAddendum: String = "") {
+        self.name = name
+        self.sections = sections
+        self.strictnessAddendum = strictnessAddendum
+    }
 }
 
 struct RubricSectionSnapshot: Sendable {
@@ -239,7 +248,8 @@ actor InterviewIntelligenceService {
         let fullTranscript = AIPromptTemplates.formatSegments(nonEmpty)
         let userPrompt = InterviewPromptTemplates.singleSectionPrompt(
             section: section,
-            fullTranscript: fullTranscript
+            fullTranscript: fullTranscript,
+            strictnessAddendum: rubricContext.strictnessAddendum
         )
 
         LogManager.send("Section scoring '\(section.title)': sending \(nonEmpty.count) segments (\(userPrompt.count) chars)", category: .ai, meetingID: meetingID)

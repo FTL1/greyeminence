@@ -44,7 +44,7 @@ struct InterviewHubView: View {
                         )
                         .id("interviewList")
                     case .candidates:
-                        CandidateListView()
+                        CandidateListView(interviewViewModel: interviewViewModel)
                     case .rubrics:
                         RubricListView()
                     case .templates:

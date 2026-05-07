@@ -318,7 +318,7 @@ final class InterviewRecordingViewModel {
         // Mirror the active phase's section scores into the VM array so
         // existing UI bindings keep working without per-view rewrites.
         sectionScores = phase.sectionScores.sorted { $0.sortOrder < $1.sortOrder }
-        rubricSnapshot = phase.rubric?.toSnapshot()
+        rubricSnapshot = phase.rubric?.toSnapshot(strictnessFor: interview.candidate?.role)
         // Tag transcript segments with the phase title + ID so live
         // attribution survives across pause/resume — phase boundaries are
         // persisted now, not just held in this VM.
@@ -466,11 +466,16 @@ final class InterviewRecordingViewModel {
             let snapshot: RubricSnapshot
             let segments: [SegmentSnapshot]
         }
+        let candidateRole = interview?.candidate?.role
         let jobs: [PhaseJob] = interview?.phases.compactMap { phase in
             guard let rubric = phase.rubric else { return nil }
             let segments = filterSegments(allSegments, between: phase.startedAt, and: phase.endedAt)
             guard !segments.isEmpty else { return nil }
-            return PhaseJob(id: phase.id, snapshot: rubric.toSnapshot(), segments: segments)
+            return PhaseJob(
+                id: phase.id,
+                snapshot: rubric.toSnapshot(strictnessFor: candidateRole),
+                segments: segments
+            )
         } ?? []
         let meetingID = recordingViewModel.currentMeeting?.id
         let traits = impressionTraitSnapshots
@@ -737,7 +742,7 @@ final class InterviewRecordingViewModel {
         }
         return PhaseCycle(
             phaseID: phase.id,
-            rubricSnapshot: rubric.toSnapshot(),
+            rubricSnapshot: rubric.toSnapshot(strictnessFor: interview.candidate?.role),
             traits: impressionTraitSnapshots,
             candidateContext: candidateContextSnapshot,
             meetingID: recordingViewModel.currentMeeting?.id,

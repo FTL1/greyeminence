@@ -110,6 +110,9 @@ enum InterviewPromptTemplates {
 
     static func formatFullRubric(_ rubric: RubricSnapshot) -> String {
         var result = "RUBRIC: \(rubric.name)\n\n"
+        if !rubric.strictnessAddendum.isEmpty {
+            result += "CALIBRATION: \(rubric.strictnessAddendum)\n\n"
+        }
         for section in rubric.sections {
             result += formatSection(section)
         }
@@ -212,13 +215,18 @@ enum InterviewPromptTemplates {
     /// Prompt for scoring a single rubric section in isolation.
     static func singleSectionPrompt(
         section: RubricSectionSnapshot,
-        fullTranscript: String
+        fullTranscript: String,
+        strictnessAddendum: String = ""
     ) -> String {
-        """
+        let calibration = strictnessAddendum.isEmpty
+            ? ""
+            : "\nCALIBRATION: \(strictnessAddendum)\n"
+        return """
         Evaluate the candidate's performance on this ONE rubric section based on the \
         interview transcript below. The interviewer is labeled "Me" — their questions provide \
         context for what was being discussed but should NOT be scored. Focus your evaluation \
         exclusively on the candidate's responses (all non-"Me" speakers).
+        \(calibration)
 
         Provide specific strengths and weaknesses observed for THIS section, and flag any \
         red flags. The overall_assessment should summarize the candidate's performance on \

@@ -10,6 +10,11 @@ struct CandidateDetailView: View {
     @State private var resumeError: String?
     @State private var isResumeExpanded = false
     @State private var isAnalyzingResume = false
+    @State private var showCreationSheet = false
+    /// Optional handle on the live recording VM so this view can open the
+    /// interview creation modal with the candidate pre-selected. Nil =
+    /// view embedded somewhere without interview context (button hidden).
+    var interviewViewModel: InterviewRecordingViewModel? = nil
 
     /// File types accepted as resumes. PDF is the common case; doc/docx
     /// covered for users still on Word; plain text and markdown for the
@@ -170,6 +175,19 @@ struct CandidateDetailView: View {
         }
         .navigationTitle(candidate.name)
         .toolbar {
+            if let interviewVM = interviewViewModel {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showCreationSheet = true
+                    } label: {
+                        Label("Schedule Interview", systemImage: "calendar.badge.plus")
+                    }
+                    .disabled(interviewVM.isInterviewActive || candidate.isArchived)
+                    .help(interviewVM.isInterviewActive
+                          ? "Finish the current interview before scheduling another"
+                          : "Schedule a new interview for this candidate")
+                }
+            }
             ToolbarItem {
                 Button {
                     candidate.isArchived.toggle()
@@ -179,6 +197,15 @@ struct CandidateDetailView: View {
                         systemImage: candidate.isArchived ? "tray.and.arrow.up" : "archivebox"
                     )
                 }
+            }
+        }
+        .sheet(isPresented: $showCreationSheet) {
+            if let interviewVM = interviewViewModel {
+                InterviewCreationSheet(
+                    interviewViewModel: interviewVM,
+                    presetCandidate: candidate,
+                    onScheduled: { _ in }
+                )
             }
         }
     }

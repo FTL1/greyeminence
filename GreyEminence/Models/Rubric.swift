@@ -78,7 +78,13 @@ final class Rubric {
         }
     }
 
-    func toSnapshot() -> RubricSnapshot {
+    /// Build a Sendable snapshot for the AI scoring prompt. When `role` is
+    /// supplied, the link's per-role strictness is fed through to the
+    /// prompt as a calibration directive — same rubric, harder/softer
+    /// bar across roles. Falls back to standard (no addendum) when no
+    /// role is given or no link matches.
+    func toSnapshot(strictnessFor role: InterviewRole? = nil) -> RubricSnapshot {
+        let strictness = strictnessFor(role: role)
         let sortedSections = sections.sorted { $0.sortOrder < $1.sortOrder }
         let sectionSnapshots: [RubricSectionSnapshot] = sortedSections.map { section in
             let criterionSnapshots: [CriterionSnapshot] = section.criteria
@@ -105,6 +111,17 @@ final class Rubric {
                 weight: section.weight
             )
         }
-        return RubricSnapshot(name: name, sections: sectionSnapshots)
+        return RubricSnapshot(
+            name: name,
+            sections: sectionSnapshots,
+            strictnessAddendum: strictness.promptAddendum
+        )
+    }
+
+    /// Look up the strictness for `role` via this rubric's `roleLinks`.
+    /// Defaults to `.standard` when no role is provided or no link matches.
+    func strictnessFor(role: InterviewRole?) -> RubricStrictness {
+        guard let role else { return .standard }
+        return roleLinks.first(where: { $0.role?.id == role.id })?.strictness ?? .standard
     }
 }

@@ -8,6 +8,10 @@ struct CandidateListView: View {
     @State private var showAddSheet = false
     @State private var showArchived = false
     @State private var searchText = ""
+    /// Optional interview VM passed through to CandidateDetailView so its
+    /// Schedule button can open the creation modal pre-populated with the
+    /// candidate. Nil → button hidden.
+    var interviewViewModel: InterviewRecordingViewModel? = nil
 
     private var filteredCandidates: [Candidate] {
         let visible = candidates.filter { showArchived || !$0.isArchived }
@@ -66,7 +70,7 @@ struct CandidateListView: View {
             }
         } detail: {
             if let candidate = selectedCandidate {
-                CandidateDetailView(candidate: candidate)
+                CandidateDetailView(candidate: candidate, interviewViewModel: interviewViewModel)
             } else {
                 ContentUnavailableView(
                     "No Candidate Selected",

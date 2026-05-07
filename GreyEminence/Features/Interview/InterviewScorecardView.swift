@@ -227,11 +227,143 @@ struct InterviewScorecardView: View {
 
             switch scorecardTab {
             case .scorecard:
-                scorecardContent
+                if interview.status == .scheduled {
+                    prepContent
+                } else {
+                    scorecardContent
+                }
             case .transcript:
                 transcriptContent
             }
         }
+    }
+
+    /// Pre-interview prep view shown when status == .scheduled. Surfaces
+    /// the candidate brief, character sheet, and per-phase rundown so the
+    /// interviewer has the relevant context before clicking Start
+    /// Interview. Replaces the empty grade/recommendation/impressions
+    /// scorecard, which is meaningless before any transcript exists.
+    private var prepContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let candidate = interview.candidate {
+                    candidatePrepHeader(candidate)
+                        .padding(.horizontal)
+                    if let summary = candidate.resumeSummary, !summary.isEmpty {
+                        prepBlock(title: "Resume Summary", systemImage: "doc.text") {
+                            Text(summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let sheet = candidate.characterSheet {
+                        prepBlock(title: "Character Sheet", systemImage: "person.text.rectangle") {
+                            CharacterSheetView(sheet: sheet)
+                        }
+                    }
+                }
+
+                prepBlock(title: "Phase Plan", systemImage: "list.bullet.rectangle") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(interview.orderedPhases) { phase in
+                            prepPhaseRow(phase)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical)
+        }
+    }
+
+    @ViewBuilder
+    private func candidatePrepHeader(_ candidate: Candidate) -> some View {
+        HStack(spacing: 12) {
+            Text(candidate.initials)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(candidate.avatarColor.gradient, in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(candidate.name)
+                    .font(.title3.weight(.semibold))
+                if let role = candidate.role {
+                    Text(role.fullDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("Scheduled")
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.cyan.opacity(0.15), in: Capsule())
+                    .foregroundStyle(.cyan)
+                Text("Click Start Interview to begin")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .background(.bar.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func prepBlock<Content: View>(
+        title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            content()
+        }
+        .padding(12)
+        .background(.bar.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func prepPhaseRow(_ phase: InterviewPhase) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: phase.resolvedIconName)
+                    .foregroundStyle(phase.rubric != nil ? .cyan : .secondary)
+                    .frame(width: 22, height: 22)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                Text(phase.title)
+                    .font(.subheadline.weight(.semibold))
+                if let minutes = phase.targetMinutes {
+                    Text("\(minutes) min")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(.secondary.opacity(0.12), in: Capsule())
+                }
+                Spacer()
+                if let rubric = phase.rubric {
+                    Text(rubric.name)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("Unscored")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            if let brief = phase.rubric?.candidateInstructions,
+               !brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                CandidateInstructionsPanel(
+                    sectionTitle: phase.rubric?.name ?? phase.title,
+                    markdown: brief
+                )
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private var scorecardContent: some View {
@@ -662,7 +794,7 @@ struct InterviewScorecardView: View {
             }
         }
 
-        let rubricSnapshot = rubric.toSnapshot()
+        let rubricSnapshot = rubric.toSnapshot(strictnessFor: interview.candidate?.role)
 
         // Initialize all sections as pending
         for section in rubricSnapshot.sections {

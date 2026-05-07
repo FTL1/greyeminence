@@ -109,6 +109,9 @@ struct InterviewCreationSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var interviewViewModel: InterviewRecordingViewModel
+    /// Optionally pre-select a candidate when the sheet opens. Useful for
+    /// "Schedule Interview" launched from a candidate's detail page.
+    var presetCandidate: Candidate? = nil
     /// Called after a successful schedule with the new Interview. Lets the
     /// parent select it in the list and navigate to its scorecard.
     var onScheduled: (Interview) -> Void
@@ -157,6 +160,9 @@ struct InterviewCreationSheet: View {
             AddCandidateSheet()
         }
         .onAppear {
+            if let presetCandidate, vm.selectedCandidate == nil {
+                vm.selectedCandidate = presetCandidate
+            }
             if vm.editablePhases.isEmpty {
                 vm.adoptTemplate(nil)
             }
@@ -710,6 +716,10 @@ struct PlannedPhaseRow: View {
     var onUpdate: (PlannedPhase) -> Void
     var onDelete: () -> Void
 
+    @Environment(\.modelContext) private var modelContext
+    @State private var showQuickCreateRubric = false
+    @State private var quickRubricName: String = ""
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "line.3.horizontal")
@@ -749,24 +759,7 @@ struct PlannedPhaseRow: View {
                     }
                 }
 
-                if !availableRubrics.isEmpty {
-                    Picker("Rubric", selection: Binding(
-                        get: { phase.rubric?.id },
-                        set: { newID in
-                            var copy = phase
-                            copy.rubric = availableRubrics.first { $0.id == newID }
-                            onUpdate(copy)
-                        }
-                    )) {
-                        Text("(unscored)").tag(nil as UUID?)
-                        ForEach(availableRubrics) { rubric in
-                            Text(rubric.name).tag(rubric.id as UUID?)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .controlSize(.small)
-                }
+                rubricMenu
             }
 
             Spacer()
@@ -783,6 +776,91 @@ struct PlannedPhaseRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .sheet(isPresented: $showQuickCreateRubric) {
+            quickCreateRubricSheet
+        }
+    }
+
+    /// Rubric picker as a Menu (instead of Picker) so we can mix in a
+    /// "+ New rubric…" action item at the bottom for inline creation.
+    @ViewBuilder
+    private var rubricMenu: some View {
+        Menu {
+            Button("(unscored)") {
+                var copy = phase
+                copy.rubric = nil
+                onUpdate(copy)
+            }
+            if !availableRubrics.isEmpty {
+                Divider()
+                ForEach(availableRubrics) { rubric in
+                    Button(rubric.name) {
+                        var copy = phase
+                        copy.rubric = rubric
+                        onUpdate(copy)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                quickRubricName = phase.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                showQuickCreateRubric = true
+            } label: {
+                Label("New rubric…", systemImage: "plus")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(phase.rubric?.name ?? "(unscored)")
+                    .font(.caption)
+                    .foregroundStyle(phase.rubric == nil ? .secondary : .primary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    /// Inline rubric quick-create. Minimal — name only. The user can flesh
+    /// out sections later in the Rubrics tab. New rubric is auto-selected
+    /// for this phase on create.
+    private var quickCreateRubricSheet: some View {
+        VStack(spacing: 0) {
+            Text("New Rubric")
+                .font(.headline)
+                .padding()
+            Form {
+                TextField("Name", text: $quickRubricName, prompt: Text("Rubric name"))
+            }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .frame(height: 90)
+            HStack {
+                Button("Cancel") { showQuickCreateRubric = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Create") {
+                    createRubric()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(quickRubricName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding()
+        }
+        .frame(width: 360)
+    }
+
+    private func createRubric() {
+        let trimmed = quickRubricName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let rubric = Rubric(name: trimmed)
+        modelContext.insert(rubric)
+        var copy = phase
+        copy.rubric = rubric
+        onUpdate(copy)
+        showQuickCreateRubric = false
     }
 }
 
