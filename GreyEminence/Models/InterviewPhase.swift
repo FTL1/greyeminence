@@ -100,6 +100,64 @@ final class InterviewPhase {
     }
 }
 
+import SwiftUI
+
+/// Reusable inline menu that lets the user pick a phase icon from
+/// `PhaseIconCatalog`. Three call sites use this exact menu (template
+/// header, template phase row, planned phase row) — kept here next to
+/// the catalog so they can't drift.
+struct PhaseIconMenu<Label: View>: View {
+    let current: String?
+    var tint: Color = .secondary
+    var background: Color = .secondary.opacity(0.08)
+    var size: CGFloat = 22
+    var onPick: (String) -> Void
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        Menu {
+            ForEach(PhaseIconCatalog.symbols, id: \.self) { sym in
+                Button {
+                    onPick(sym)
+                } label: {
+                    SwiftUI.Label(sym, systemImage: sym)
+                }
+            }
+        } label: {
+            label()
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+}
+
+extension PhaseIconMenu where Label == AnyView {
+    /// Default tile style — just an SF Symbol on a soft rounded background.
+    /// Most call sites use this; pass a custom `label` for more flair.
+    init(
+        current: String?,
+        tint: Color = .secondary,
+        background: Color = .secondary.opacity(0.08),
+        size: CGFloat = 22,
+        onPick: @escaping (String) -> Void
+    ) {
+        self.current = current
+        self.tint = tint
+        self.background = background
+        self.size = size
+        self.onPick = onPick
+        self.label = {
+            AnyView(
+                Image(systemName: current ?? "list.clipboard")
+                    .foregroundStyle(tint)
+                    .frame(width: size, height: size)
+                    .background(background, in: RoundedRectangle(cornerRadius: 4))
+            )
+        }
+    }
+}
+
 /// Curated SF Symbols a user can pick from for a phase. Kept short so
 /// the menu stays scannable. Add to taste — anything in SF Symbols
 /// works at runtime, this is just the picker affordance.

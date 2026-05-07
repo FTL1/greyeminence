@@ -96,19 +96,7 @@ struct TemplateLibraryView: View {
             appliesToAnyRole: source.appliesToAnyRole
         )
         modelContext.insert(copy)
-        for phase in source.orderedPhases {
-            let newPhase = InterviewTemplatePhase(
-                title: phase.title,
-                kind: phase.kind,
-                rubric: phase.rubric,
-                sortOrder: phase.sortOrder,
-                iconName: phase.iconName,
-                targetMinutes: phase.targetMinutes
-            )
-            newPhase.briefOverride = phase.briefOverride
-            newPhase.template = copy
-            copy.phases.append(newPhase)
-        }
+        clonePhases(from: source, to: copy)
         for link in source.roleLinks {
             let newLink = TemplateRoleLink(
                 template: copy,
@@ -119,6 +107,26 @@ struct TemplateLibraryView: View {
             copy.roleLinks.append(newLink)
         }
         selectedTemplate = copy
+    }
+}
+
+/// Copy every `InterviewTemplatePhase` from `source` to `target`. The
+/// only call site for two-step "duplicate template / new from existing"
+/// flows — keep the field-by-field copy in one place so adding a new
+/// field on `InterviewTemplatePhase` doesn't silently miss one path.
+fileprivate func clonePhases(from source: InterviewTemplate, to target: InterviewTemplate) {
+    for phase in source.orderedPhases {
+        let newPhase = InterviewTemplatePhase(
+            title: phase.title,
+            kind: phase.kind,
+            rubric: phase.rubric,
+            sortOrder: phase.sortOrder,
+            iconName: phase.iconName,
+            targetMinutes: phase.targetMinutes
+        )
+        newPhase.briefOverride = phase.briefOverride
+        newPhase.template = target
+        target.phases.append(newPhase)
     }
 }
 
@@ -226,19 +234,7 @@ private struct AddTemplateSheet: View {
         )
         modelContext.insert(template)
         if let source = sourceTemplate {
-            for phase in source.orderedPhases {
-                let newPhase = InterviewTemplatePhase(
-                    title: phase.title,
-                    kind: phase.kind,
-                    rubric: phase.rubric,
-                    sortOrder: phase.sortOrder,
-                    iconName: phase.iconName,
-                    targetMinutes: phase.targetMinutes
-                )
-                newPhase.briefOverride = phase.briefOverride
-                newPhase.template = template
-                template.phases.append(newPhase)
-            }
+            clonePhases(from: source, to: template)
         } else {
             // Empty template gets the conventional intro/conclusion bookends
             // so the user has something to anchor on.

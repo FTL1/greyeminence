@@ -31,9 +31,9 @@ final class InterviewTemplatePhase {
     /// when the template doesn't carry timing.
     var targetMinutes: Int?
     /// Optional per-template override of the rubric's `candidateInstructions`.
-    /// Schema field is reserved for v2 — UI doesn't expose it in v1 to
-    /// avoid two-layer brief-override confusion. Adding the field now
-    /// avoids a follow-up migration.
+    /// Schema field is reserved; UI is intentionally not wired to avoid
+    /// two-layer brief-override confusion. Field exists now so a future
+    /// override UI doesn't need a migration.
     var briefOverride: String?
 
     var template: InterviewTemplate?

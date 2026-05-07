@@ -31,24 +31,15 @@ struct TemplateEditorView: View {
         List {
             Section("Template Details") {
                 HStack(spacing: 8) {
-                    Menu {
-                        ForEach(PhaseIconCatalog.symbols, id: \.self) { sym in
-                            Button {
-                                template.iconName = sym
-                                template.updatedAt = .now
-                            } label: {
-                                Label(sym, systemImage: sym)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: template.iconName ?? "list.bullet.rectangle")
-                            .foregroundStyle(.cyan)
-                            .frame(width: 26, height: 26)
-                            .background(Color.cyan.opacity(0.1), in: RoundedRectangle(cornerRadius: 5))
+                    PhaseIconMenu(
+                        current: template.iconName ?? "list.bullet.rectangle",
+                        tint: .cyan,
+                        background: Color.cyan.opacity(0.1),
+                        size: 26
+                    ) { sym in
+                        template.iconName = sym
+                        template.updatedAt = .now
                     }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
                     .help("Pick template icon")
 
                     TextField("Name", text: $template.name)
@@ -227,23 +218,12 @@ struct TemplatePhaseRow: View {
                     .font(.caption)
                     .help("Drag to reorder")
 
-                Menu {
-                    ForEach(PhaseIconCatalog.symbols, id: \.self) { sym in
-                        Button {
-                            phase.iconName = sym
-                        } label: {
-                            Label(sym, systemImage: sym)
-                        }
-                    }
-                } label: {
-                    Image(systemName: phase.resolvedIconName)
-                        .foregroundStyle(phase.kind == .scored ? .cyan : .secondary)
-                        .frame(width: 22, height: 22)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                PhaseIconMenu(
+                    current: phase.resolvedIconName,
+                    tint: phase.kind == .scored ? .cyan : .secondary
+                ) { sym in
+                    phase.iconName = sym
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
                 .help("Pick icon")
 
                 TextField("Phase title", text: $phase.title)
@@ -259,7 +239,6 @@ struct TemplatePhaseRow: View {
                 .help("Remove phase")
             }
 
-            // Rubric picker — visible only for scored phases.
             if phase.kind == .scored {
                 HStack(spacing: 6) {
                     Image(systemName: "list.clipboard")
@@ -282,7 +261,6 @@ struct TemplatePhaseRow: View {
                 }
             }
 
-            // Target minutes — soft time-box pill.
             HStack(spacing: 6) {
                 Image(systemName: "clock")
                     .font(.caption2)

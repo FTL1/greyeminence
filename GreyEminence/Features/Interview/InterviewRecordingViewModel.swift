@@ -10,18 +10,30 @@ struct PlannedPhase: Identifiable {
     var title: String
     var rubric: Rubric?
     var iconName: String?
+    /// Soft per-phase target in minutes, carried from the originating
+    /// template phase (if any) into the realized `InterviewPhase`. Nil =
+    /// no time-box.
+    var targetMinutes: Int?
     /// When this planned phase was sourced from an `InterviewTemplatePhase`,
     /// the original template phase ID. Drives the "Template" badge in the
     /// creation modal so the user can tell template-derived phases apart
     /// from ones they added themselves.
     var sourceTemplatePhaseID: UUID?
 
-    init(id: UUID = UUID(), title: String, rubric: Rubric? = nil, iconName: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        rubric: Rubric? = nil,
+        iconName: String? = nil,
+        targetMinutes: Int? = nil,
+        sourceTemplatePhaseID: UUID? = nil
+    ) {
         self.id = id
         self.title = title
         self.rubric = rubric
         self.iconName = iconName
-        self.sourceTemplatePhaseID = nil
+        self.targetMinutes = targetMinutes
+        self.sourceTemplatePhaseID = sourceTemplatePhaseID
     }
 
     static func intro() -> PlannedPhase {
@@ -32,6 +44,15 @@ struct PlannedPhase: Identifiable {
     }
     static func from(rubric: Rubric) -> PlannedPhase {
         PlannedPhase(title: rubric.name, rubric: rubric)
+    }
+    static func from(templatePhase tp: InterviewTemplatePhase) -> PlannedPhase {
+        PlannedPhase(
+            title: tp.title,
+            rubric: tp.rubric,
+            iconName: tp.iconName,
+            targetMinutes: tp.targetMinutes,
+            sourceTemplatePhaseID: tp.id
+        )
     }
 
     /// Resolved icon — same fallback policy as `InterviewPhase.resolvedIconName`.
@@ -195,7 +216,8 @@ final class InterviewRecordingViewModel {
                 rubric: planned.rubric,
                 plannedOrder: idx,
                 status: .planned,
-                iconName: planned.iconName
+                iconName: planned.iconName,
+                targetMinutes: planned.targetMinutes
             )
             phase.interview = interview
             interview.phases.append(phase)

@@ -19,15 +19,11 @@ final class InterviewCreationViewModel {
     var selectedInterviewers: Set<UUID> = []
     var preNotes: String = ""
 
-    /// Role at the moment the template was chosen — used to surface a
-    /// "candidate role changed since template was picked" banner so the
-    /// user can re-suggest without surprise mutations.
+    /// Role at the moment the template was chosen — kept as a snapshot
+    /// (not derivable from `selectedTemplate`) so the role-change banner
+    /// can detect a candidate-role shift without overwriting the user's
+    /// in-progress edits.
     var roleAtTemplateSelection: UUID?
-
-    /// True once any field has been edited; used to gate the close
-    /// confirmation. (Reserved — not currently used; cancel always
-    /// confirms via the sheet's own dismiss.)
-    var isDirty: Bool = false
 
     var canSchedule: Bool {
         selectedCandidate != nil && hasScoredPhase
@@ -58,18 +54,7 @@ final class InterviewCreationViewModel {
             editablePhases = [.intro(), .conclusion()]
             return
         }
-        editablePhases = template.orderedPhases.map { tp in
-            var pp = PlannedPhase(
-                title: tp.title,
-                rubric: tp.rubric,
-                iconName: tp.iconName
-            )
-            // Carry the source-template phase id forward so the row can
-            // render a "Template" badge for phases sourced from the
-            // template (vs user-added).
-            pp.sourceTemplatePhaseID = tp.id
-            return pp
-        }
+        editablePhases = template.orderedPhases.map(PlannedPhase.from(templatePhase:))
     }
 
     func appendPhase(_ phase: PlannedPhase) {
@@ -132,10 +117,14 @@ struct InterviewCreationSheet: View {
     @State private var showAddCandidate = false
 
     @Query(sort: \Candidate.name) private var allCandidates: [Candidate]
-    @Query(sort: \InterviewTemplate.lastUsedAt, order: .reverse) private var allTemplates: [InterviewTemplate]
+    @Query(
+        sort: [
+            SortDescriptor(\InterviewTemplate.lastUsedAt, order: .reverse),
+            SortDescriptor(\InterviewTemplate.name)
+        ]
+    ) private var allTemplates: [InterviewTemplate]
     @Query(sort: \Rubric.createdAt, order: .reverse) private var allRubrics: [Rubric]
     @Query(sort: \Contact.name) private var allContacts: [Contact]
-    @Query(sort: \Interview.createdAt, order: .reverse) private var allInterviews: [Interview]
 
     private var activeCandidates: [Candidate] {
         allCandidates.filter { !$0.isArchived }
@@ -235,9 +224,9 @@ struct InterviewCreationSheet: View {
 
     @ViewBuilder
     private func pastInterviewsSummary(for candidate: Candidate) -> some View {
-        let past = allInterviews.filter {
-            $0.candidate?.id == candidate.id && ($0.status == .completed || $0.status == .archived)
-        }
+        let past = candidate.interviews
+            .filter { $0.status == .completed || $0.status == .archived }
+            .sorted { $0.createdAt > $1.createdAt }
         if past.isEmpty {
             Text("No prior interviews")
                 .font(.caption)
@@ -256,7 +245,7 @@ struct InterviewCreationSheet: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .help(past.compactMap {
+            .help(past.map {
                 let date = $0.createdAt.formatted(date: .abbreviated, time: .omitted)
                 let label = $0.templateNameAtSchedule ?? $0.rubric?.name ?? "Interview"
                 return "\(date) — \(label)"
@@ -316,9 +305,8 @@ struct InterviewCreationSheet: View {
 
                     railSection("Role-linked rubrics") {
                         if let role = vm.selectedCandidate?.role {
-                            let rubrics = roleScopedRubrics(role: role).filter { rubric in
-                                !vm.editablePhases.contains { $0.rubric?.id == rubric.id }
-                            }
+                            let used = usedRubricIDs
+                            let rubrics = roleScopedRubrics(role: role).filter { !used.contains($0.id) }
                             if rubrics.isEmpty {
                                 Text("No additional rubrics linked to \(role.displayTitle).")
                                     .font(.caption2)
@@ -373,6 +361,10 @@ struct InterviewCreationSheet: View {
 
     private func roleScopedRubrics(role: InterviewRole) -> [Rubric] {
         allRubrics.filter { !$0.isArchived && $0.appliesTo(role: role) }
+    }
+
+    private var usedRubricIDs: Set<UUID> {
+        Set(vm.editablePhases.compactMap { $0.rubric?.id })
     }
 
     private func templateRailRow(_ template: InterviewTemplate) -> some View {
@@ -515,7 +507,7 @@ struct InterviewCreationSheet: View {
     private var scoredPhasesSummary: String {
         let scored = vm.editablePhases.filter { $0.rubric != nil }.count
         let total = vm.editablePhases.count
-        let totalMinutes = vm.editablePhases.compactMap { _ in nil as Int? }.reduce(0, +) // placeholder until PlannedPhase carries minutes
+        let totalMinutes = vm.editablePhases.compactMap(\.targetMinutes).reduce(0, +)
         if totalMinutes > 0 {
             return "\(scored) scored · \(total) total · ~\(totalMinutes) min"
         }
@@ -542,22 +534,24 @@ struct InterviewCreationSheet: View {
         .background(Color.secondary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
         // Drop target for rubrics dragged from the rail.
         .dropDestination(for: String.self) { items, _ in
+            let used = usedRubricIDs
+            var didAccept = false
             for str in items {
-                guard let id = UUID(uuidString: str) else { continue }
+                guard let id = UUID(uuidString: str), !used.contains(id) else { continue }
                 if let rubric = allRubrics.first(where: { $0.id == id }) {
                     vm.appendPhase(.from(rubric: rubric))
+                    didAccept = true
                 }
             }
-            return true
+            return didAccept
         }
     }
 
     private var addPhaseMenu: some View {
         Menu {
             if let role = vm.selectedCandidate?.role {
-                let unused = roleScopedRubrics(role: role).filter { rubric in
-                    !vm.editablePhases.contains { $0.rubric?.id == rubric.id }
-                }
+                let used = usedRubricIDs
+                let unused = roleScopedRubrics(role: role).filter { !used.contains($0.id) }
                 if !unused.isEmpty {
                     Section("From this role") {
                         ForEach(unused) { rubric in
@@ -723,25 +717,14 @@ struct PlannedPhaseRow: View {
                 .font(.caption)
                 .help("Drag to reorder")
 
-            Menu {
-                ForEach(PhaseIconCatalog.symbols, id: \.self) { sym in
-                    Button {
-                        var copy = phase
-                        copy.iconName = sym
-                        onUpdate(copy)
-                    } label: {
-                        Label(sym, systemImage: sym)
-                    }
-                }
-            } label: {
-                Image(systemName: phase.resolvedIconName)
-                    .foregroundStyle(phase.rubric != nil ? .cyan : .secondary)
-                    .frame(width: 22, height: 22)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            PhaseIconMenu(
+                current: phase.resolvedIconName,
+                tint: phase.rubric != nil ? .cyan : .secondary
+            ) { sym in
+                var copy = phase
+                copy.iconName = sym
+                onUpdate(copy)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -799,12 +782,7 @@ struct PlannedPhaseRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
-private extension Color {
-    /// Background-aware fill that reads against either light or dark mode
-    /// without bleeding through the rounded corner.
-    static var background: Color { Color(NSColor.windowBackgroundColor) }
-}
