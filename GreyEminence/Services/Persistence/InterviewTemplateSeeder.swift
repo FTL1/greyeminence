@@ -32,7 +32,9 @@ enum InterviewTemplateSeeder {
 
         let existingCount = (try? context.fetchCount(FetchDescriptor<InterviewTemplate>())) ?? 0
         if existingCount > 0 {
-            UserDefaults.standard.set(currentSeedVersion, forKey: seedVersionKey)
+            if storedVersion < currentSeedVersion {
+                UserDefaults.standard.set(currentSeedVersion, forKey: seedVersionKey)
+            }
             return
         }
 

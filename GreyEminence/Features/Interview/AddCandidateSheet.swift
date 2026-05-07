@@ -16,16 +16,7 @@ struct AddCandidateSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 2) {
-                Text("Add Candidate")
-                    .font(.title2.weight(.semibold))
-                Text("New person to interview")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
+            SheetHeader(title: "Add Candidate", subtitle: "New person to interview")
 
             Form {
                 TextField("Name", text: $name)

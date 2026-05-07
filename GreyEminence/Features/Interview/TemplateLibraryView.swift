@@ -141,16 +141,7 @@ struct AddTemplateSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 2) {
-                Text("New Template")
-                    .font(.title2.weight(.semibold))
-                Text("Reusable interview loop")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
+            SheetHeader(title: "New Template", subtitle: "Reusable interview loop")
 
             Form {
                 TextField("Name", text: $name, prompt: Text("Backend Loop"))

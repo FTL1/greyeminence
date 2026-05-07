@@ -1,19 +1,11 @@
 import SwiftUI
 
-/// Hero header for "you're editing a named thing" screens. Replaces the
-/// anti-pattern of a `Section("Template Details") { … }` Form section
-/// with a tiny icon + body-font name field — that read like generic
-/// chrome and made the entity name feel buried.
-///
-/// Layout: large tinted icon (44pt symbol in a 56×56 rounded tile)
-/// alongside an inline title-styled name TextField and a callout-sized
-/// description TextField. The name *is* the title — no mode switch, no
-/// pencil button, just a TextField with `.title2.weight(.semibold)`
-/// styling. Description hides when empty and unfocused.
+/// Hero header for editor screens — replaces the buried-in-a-Section
+/// anti-pattern with a tinted icon tile + inline title TextField.
 ///
 /// Drop in *above* a List/ScrollView in a parent VStack — never as a
-/// list row, since `.insetGrouped` insets and row reordering both fight
-/// the full-bleed treatment.
+/// list row, since `.insetGrouped` insets and row reordering fight the
+/// full-bleed treatment.
 struct EntityHeaderView: View {
     @Binding var name: String
     @Binding var description: String
@@ -32,10 +24,6 @@ struct EntityHeaderView: View {
         iconName.isEmpty ? iconFallback : iconName
     }
 
-    private var trimmedDescription: String {
-        description.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             iconTile
@@ -43,7 +31,7 @@ struct EntityHeaderView: View {
                 TextField(namePrompt, text: $name)
                     .textFieldStyle(.plain)
                     .font(.title2.weight(.semibold))
-                if !trimmedDescription.isEmpty || descriptionFocused {
+                if !description.isEmpty || descriptionFocused {
                     TextField(descriptionPrompt, text: $description, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.callout)
@@ -85,13 +73,29 @@ struct EntityHeaderView: View {
         }
     }
 
-    private var heroIconLabel: AnyView {
-        AnyView(
-            Image(systemName: resolvedIcon)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 56, height: 56)
-                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-        )
+    @ViewBuilder
+    private var heroIconLabel: some View {
+        Image(systemName: resolvedIcon)
+            .font(.system(size: 26, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 56, height: 56)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct SheetHeader: View {
+    let title: String
+    let subtitle: String
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.title2.weight(.semibold))
+            Text(subtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 }

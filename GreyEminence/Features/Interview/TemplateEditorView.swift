@@ -60,10 +60,11 @@ struct TemplateEditorView: View {
     /// "shape of the loop" visible without scrolling to the Phases
     /// section.
     private var templateMetaStrip: some View {
-        let totalMinutes = sortedPhases.compactMap(\.targetMinutes).reduce(0, +)
-        let scoredCount = sortedPhases.filter { $0.kind == .scored }.count
+        let phases = sortedPhases
+        let totalMinutes = phases.compactMap(\.targetMinutes).reduce(0, +)
+        let scoredCount = phases.filter { $0.kind == .scored }.count
         return HStack(spacing: 12) {
-            Label("\(sortedPhases.count) phase\(sortedPhases.count == 1 ? "" : "s")", systemImage: "list.bullet")
+            Label("\(phases.count) phase\(phases.count == 1 ? "" : "s")", systemImage: "list.bullet")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if scoredCount > 0 {
