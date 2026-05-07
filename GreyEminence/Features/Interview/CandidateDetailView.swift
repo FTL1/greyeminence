@@ -11,6 +11,8 @@ struct CandidateDetailView: View {
     @State private var isResumeExpanded = false
     @State private var isAnalyzingResume = false
     @State private var showCreationSheet = false
+    @State private var isFetchingGitHub = false
+    @State private var githubFetchError: String?
     /// Optional handle on the live recording VM so this view can open the
     /// interview creation modal with the candidate pre-selected. Nil =
     /// view embedded somewhere without interview context (button hidden).
@@ -53,6 +55,17 @@ struct CandidateDetailView: View {
                         Text(role.fullDescription).tag(role as InterviewRole?)
                     }
                 }
+            }
+
+            Section {
+                externalLinksRows
+                githubSummarySection
+            } header: {
+                Text("External profiles")
+            } footer: {
+                Text("Public links the interviewer can cross-reference. GitHub summary pulls bio, top public repos, and recent activity from the public REST API.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Resume") {
@@ -212,6 +225,106 @@ struct CandidateDetailView: View {
 
     private var sortedInterviews: [Interview] {
         candidate.interviews.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    // MARK: - External Profiles
+
+    @ViewBuilder
+    private var externalLinksRows: some View {
+        TextField("LinkedIn URL", text: Binding(
+            get: { candidate.linkedInURL ?? "" },
+            set: { candidate.linkedInURL = $0.isEmpty ? nil : $0 }
+        ), prompt: Text("https://www.linkedin.com/in/…"))
+        if let url = candidate.linkedInURL.flatMap(URL.init(string:)) {
+            Link(destination: url) {
+                Label("Open LinkedIn", systemImage: "arrow.up.right.square")
+                    .font(.caption)
+            }
+        }
+
+        HStack {
+            TextField("GitHub username", text: Binding(
+                get: { candidate.githubUsername ?? "" },
+                set: { candidate.githubUsername = $0.isEmpty ? nil : $0 }
+            ), prompt: Text("octocat"))
+            if let username = candidate.githubUsername,
+               !username.trimmingCharacters(in: .whitespaces).isEmpty,
+               let url = URL(string: "https://github.com/\(username)") {
+                Link(destination: url) {
+                    Image(systemName: "arrow.up.right.square")
+                        .font(.caption)
+                }
+                .help("Open on github.com")
+            }
+        }
+
+        TextField("Personal site", text: Binding(
+            get: { candidate.personalSiteURL ?? "" },
+            set: { candidate.personalSiteURL = $0.isEmpty ? nil : $0 }
+        ), prompt: Text("https://example.com"))
+        if let url = candidate.personalSiteURL.flatMap(URL.init(string:)) {
+            Link(destination: url) {
+                Label("Open site", systemImage: "arrow.up.right.square")
+                    .font(.caption)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var githubSummarySection: some View {
+        let username = candidate.githubUsername?.trimmingCharacters(in: .whitespaces) ?? ""
+        if !username.isEmpty {
+            HStack {
+                if let fetchedAt = candidate.githubFetchedAt {
+                    Text("GitHub summary fetched \(fetchedAt.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No GitHub summary yet")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Button {
+                    Task { await fetchGitHubSummary() }
+                } label: {
+                    if isFetchingGitHub {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label(candidate.githubSummary == nil ? "Fetch" : "Refresh",
+                              systemImage: "arrow.down.circle")
+                            .font(.caption)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(isFetchingGitHub)
+            }
+            if let error = githubFetchError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if let summary = candidate.githubSummary, !summary.isEmpty {
+                MarkdownView(text: summary)
+                    .padding(.vertical, 4)
+            }
+        }
+    }
+
+    @MainActor
+    private func fetchGitHubSummary() async {
+        guard let username = candidate.githubUsername?.trimmingCharacters(in: .whitespaces),
+              !username.isEmpty else { return }
+        isFetchingGitHub = true
+        githubFetchError = nil
+        defer { isFetchingGitHub = false }
+        do {
+            let summary = try await GitHubProfileFetcher.fetchSummary(for: username)
+            candidate.githubSummary = summary
+            candidate.githubFetchedAt = .now
+        } catch {
+            githubFetchError = error.localizedDescription
+        }
     }
 
     // MARK: - Resume

@@ -54,6 +54,12 @@ final class InterviewPhase {
     @Relationship(deleteRule: .nullify, inverse: \InterviewNote.phase)
     var notes: [InterviewNote]
 
+    /// Specific interviewers owning this phase. Subset of the parent
+    /// `Interview.interviewers`. Empty = "everyone on the panel runs
+    /// this phase" (the default; no per-phase narrowing).
+    @Relationship(deleteRule: .nullify)
+    var assignedInterviewers: [Contact]
+
     var status: InterviewPhaseStatus {
         get { InterviewPhaseStatus(rawValue: statusRawValue) ?? .planned }
         set { statusRawValue = newValue.rawValue }
@@ -77,6 +83,7 @@ final class InterviewPhase {
         self.createdAt = .now
         self.sectionScores = []
         self.notes = []
+        self.assignedInterviewers = []
     }
 
     /// True when this phase has a rubric and is therefore eligible for AI

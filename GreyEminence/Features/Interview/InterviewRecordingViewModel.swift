@@ -14,6 +14,11 @@ struct PlannedPhase: Identifiable {
     /// template phase (if any) into the realized `InterviewPhase`. Nil =
     /// no time-box.
     var targetMinutes: Int?
+    /// Contact IDs the interviewer has assigned as owners of this phase.
+    /// Subset of the interview-level panel. Empty = "no per-phase
+    /// narrowing — anyone on the panel can run this." Resolved to
+    /// `Contact` references at schedule time.
+    var assignedInterviewerIDs: Set<UUID>
     /// When this planned phase was sourced from an `InterviewTemplatePhase`,
     /// the original template phase ID. Drives the "Template" badge in the
     /// creation modal so the user can tell template-derived phases apart
@@ -26,6 +31,7 @@ struct PlannedPhase: Identifiable {
         rubric: Rubric? = nil,
         iconName: String? = nil,
         targetMinutes: Int? = nil,
+        assignedInterviewerIDs: Set<UUID> = [],
         sourceTemplatePhaseID: UUID? = nil
     ) {
         self.id = id
@@ -33,6 +39,7 @@ struct PlannedPhase: Identifiable {
         self.rubric = rubric
         self.iconName = iconName
         self.targetMinutes = targetMinutes
+        self.assignedInterviewerIDs = assignedInterviewerIDs
         self.sourceTemplatePhaseID = sourceTemplatePhaseID
     }
 
@@ -220,6 +227,8 @@ final class InterviewRecordingViewModel {
                 targetMinutes: planned.targetMinutes
             )
             phase.interview = interview
+            phase.assignedInterviewers = interviewers
+                .filter { planned.assignedInterviewerIDs.contains($0.id) }
             interview.phases.append(phase)
             populateSectionScores(for: phase, on: interview)
         }

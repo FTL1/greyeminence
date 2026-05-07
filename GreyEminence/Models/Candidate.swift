@@ -33,6 +33,18 @@ final class Candidate {
     /// resume should re-trigger analysis.
     var resumeAnalyzedAt: Date?
 
+    /// External profile links the interviewer can quickly cross-reference.
+    /// Stored as URL strings (not URLs) so SwiftData migration stays
+    /// trivial. Validated as URLs at display time.
+    var linkedInURL: String?
+    var githubUsername: String?
+    var personalSiteURL: String?
+    /// AI-rendered summary of the candidate's public GitHub presence
+    /// (bio, top language, repo count, recent activity). Refreshed on
+    /// demand from CandidateDetailView. Nil = never fetched.
+    var githubSummary: String?
+    var githubFetchedAt: Date?
+
     var role: InterviewRole?
 
     @Relationship(deleteRule: .nullify, inverse: \Interview.candidate)

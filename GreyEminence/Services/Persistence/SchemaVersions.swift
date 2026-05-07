@@ -149,6 +149,25 @@ enum SchemaV8: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV7.models }
 }
 
+/// SchemaV11 adds external-info fields to `Candidate`: `linkedInURL`,
+/// `githubUsername`, `personalSiteURL`, `githubSummary`,
+/// `githubFetchedAt`. All optional strings/dates — purely additive,
+/// lightweight migration.
+enum SchemaV11: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(11, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV10.models }
+}
+
+/// SchemaV10 adds `InterviewPhase.assignedInterviewers` — an optional
+/// many-to-many link to `Contact` so each phase can carry its own panel
+/// (e.g., Alice owns System Design, Bob runs Coding). Empty array on a
+/// phase means "no per-phase narrowing — everyone on the interview-level
+/// panel runs this phase." Purely additive — lightweight migration.
+enum SchemaV10: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(10, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV9.models }
+}
+
 /// SchemaV9 introduces interview templates as a first-class concept:
 /// `InterviewTemplate`, `InterviewTemplatePhase`, `TemplateRoleLink`.
 /// Plus additive fields on existing models:
@@ -175,7 +194,7 @@ enum SchemaV9: VersionedSchema {
 
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self]
     }
 
     static var stages: [MigrationStage] {
@@ -187,7 +206,9 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV5.self, toVersion: SchemaV6.self),
             .lightweight(fromVersion: SchemaV6.self, toVersion: SchemaV7.self),
             .lightweight(fromVersion: SchemaV7.self, toVersion: SchemaV8.self),
-            .lightweight(fromVersion: SchemaV8.self, toVersion: SchemaV9.self)
+            .lightweight(fromVersion: SchemaV8.self, toVersion: SchemaV9.self),
+            .lightweight(fromVersion: SchemaV9.self, toVersion: SchemaV10.self),
+            .lightweight(fromVersion: SchemaV10.self, toVersion: SchemaV11.self)
         ]
     }
 }

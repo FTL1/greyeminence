@@ -521,11 +521,13 @@ struct InterviewCreationSheet: View {
     }
 
     private var phaseList: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let panel = activeInterviewers.filter { vm.selectedInterviewers.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 6) {
             ForEach(vm.editablePhases.indices, id: \.self) { idx in
                 PlannedPhaseRow(
                     phase: vm.editablePhases[idx],
                     availableRubrics: allRubrics.filter { !$0.isArchived },
+                    panelInterviewers: panel,
                     onUpdate: { updated in
                         vm.editablePhases[idx] = updated
                     },
@@ -713,6 +715,11 @@ struct InterviewCreationSheet: View {
 struct PlannedPhaseRow: View {
     var phase: PlannedPhase
     let availableRubrics: [Rubric]
+    /// Interviewers the user has selected at the interview level — the
+    /// pool from which a phase's owners can be drawn. Filtering here
+    /// (vs all contacts) keeps the menu short and forces the panel
+    /// decision to happen once at the top.
+    let panelInterviewers: [Contact]
     var onUpdate: (PlannedPhase) -> Void
     var onDelete: () -> Void
 
@@ -760,6 +767,7 @@ struct PlannedPhaseRow: View {
                 }
 
                 rubricMenu
+                ownersChips
             }
 
             Spacer()
@@ -850,6 +858,78 @@ struct PlannedPhaseRow: View {
             .padding()
         }
         .frame(width: 360)
+    }
+
+    /// Compact chip strip showing assigned owners' initials with a Menu
+    /// to toggle each panel member on/off for this phase. Hidden when
+    /// the panel is empty — phase owners are a *narrowing* of the panel,
+    /// pointless before the user picks any panel members.
+    @ViewBuilder
+    private var ownersChips: some View {
+        if !panelInterviewers.isEmpty {
+            Menu {
+                ForEach(panelInterviewers) { contact in
+                    Button {
+                        toggleOwner(contact)
+                    } label: {
+                        if phase.assignedInterviewerIDs.contains(contact.id) {
+                            Label(contact.name, systemImage: "checkmark")
+                        } else {
+                            Text(contact.name)
+                        }
+                    }
+                }
+                if !phase.assignedInterviewerIDs.isEmpty {
+                    Divider()
+                    Button("Clear owners") {
+                        var copy = phase
+                        copy.assignedInterviewerIDs = []
+                        onUpdate(copy)
+                    }
+                }
+            } label: {
+                let owners = panelInterviewers.filter { phase.assignedInterviewerIDs.contains($0.id) }
+                HStack(spacing: -4) {
+                    if owners.isEmpty {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .foregroundStyle(.tertiary)
+                            .font(.caption)
+                    } else {
+                        ForEach(owners.prefix(3)) { contact in
+                            Text(contact.initials)
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 18, height: 18)
+                                .background(contact.avatarColor.gradient, in: Circle())
+                                .overlay(Circle().stroke(Color.white, lineWidth: 1))
+                        }
+                        if owners.count > 3 {
+                            Text("+\(owners.count - 3)")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18, height: 18)
+                                .background(Color.secondary.opacity(0.2), in: Circle())
+                        }
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(phase.assignedInterviewerIDs.isEmpty
+                  ? "Assign phase owners (defaults to whole panel)"
+                  : "Phase owners — \(panelInterviewers.filter { phase.assignedInterviewerIDs.contains($0.id) }.map(\.name).joined(separator: ", "))")
+        }
+    }
+
+    private func toggleOwner(_ contact: Contact) {
+        var copy = phase
+        if copy.assignedInterviewerIDs.contains(contact.id) {
+            copy.assignedInterviewerIDs.remove(contact.id)
+        } else {
+            copy.assignedInterviewerIDs.insert(contact.id)
+        }
+        onUpdate(copy)
     }
 
     private func createRubric() {

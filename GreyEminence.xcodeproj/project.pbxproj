@@ -17,6 +17,7 @@
 		0DA17FC2ACA6257DDF8C6BF5 /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 657275C542280701138F3D42 /* AudioSettingsView.swift */; };
 		123D4745990C59FC22E00449 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE957511562C3879F9C0E27 /* PDFExporter.swift */; };
 		126E753BE35486221B3CC48A /* ResumeTextExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A04196F7926C630F7DC3BC /* ResumeTextExtractor.swift */; };
+		13029B445EF6785F2856B6C6 /* GitHubProfileFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B84563BFBFA048D923362AB5 /* GitHubProfileFetcher.swift */; };
 		1511D8ED93545EDCA506CFE1 /* MeetingInsight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA2B75D0915DCF472081C0F4 /* MeetingInsight.swift */; };
 		15581C8075FE9FB06071E4B0 /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 771A5419E207FBBDED603E7C /* KeychainAccess */; };
 		166B9F5D6DE977883E7A1EC7 /* RecordingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBAB1E4C042E177AB57AA5C0 /* RecordingView.swift */; };
@@ -344,6 +345,7 @@
 		B66D41A4DDC8876D46E90AD7 /* AIIntelligenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIIntelligenceService.swift; sourceTree = "<group>"; };
 		B81DE507A29E8F31EEE7A14B /* Contact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Contact.swift; sourceTree = "<group>"; };
 		B844FF1A1E3ECA5753702A38 /* MeetingPrepService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingPrepService.swift; sourceTree = "<group>"; };
+		B84563BFBFA048D923362AB5 /* GitHubProfileFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubProfileFetcher.swift; sourceTree = "<group>"; };
 		B8DBD9003CCA77B1F437121C /* LogManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogManager.swift; sourceTree = "<group>"; };
 		B99AB2AFF5771EB858517BA9 /* AudioSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionManager.swift; sourceTree = "<group>"; };
 		BA1A084FCAEDCA30D57F7BF5 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -536,6 +538,7 @@
 				59A4997345983696DC9017FF /* BedrockAPIClient.swift */,
 				57B9AB151CD1BBDDDCB15B67 /* ClaudeAPIClient.swift */,
 				066FDCBC8824BB15CDDC73B0 /* CommitmentTrackingService.swift */,
+				B84563BFBFA048D923362AB5 /* GitHubProfileFetcher.swift */,
 				8363D29DBB4CADCC8DD08381 /* InterviewIntelligenceService.swift */,
 				6A9A10AF91F15CA169F503A2 /* InterviewPromptTemplates.swift */,
 				B844FF1A1E3ECA5753702A38 /* MeetingPrepService.swift */,
@@ -1089,6 +1092,7 @@
 				33715D44310936A4E6B8B6D0 /* FollowUpQuestionsSection.swift in Sources */,
 				410FF2704E7C22D08D23D9D6 /* ForceSimulation.swift in Sources */,
 				EA1A3B8F35504E54F26166BA /* GeneralSettingsView.swift in Sources */,
+				13029B445EF6785F2856B6C6 /* GitHubProfileFetcher.swift in Sources */,
 				EBDFB61941795F32A239C472 /* GreyEminenceApp.swift in Sources */,
 				75975FE04822E0E4F46FA626 /* HelpDocsView.swift in Sources */,
 				7ECA8C58F4255BD8241F9D4E /* HighQualityTranscriber.swift in Sources */,
