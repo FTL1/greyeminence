@@ -78,6 +78,134 @@ final class InterviewCreationViewModel {
         editablePhases.move(fromOffsets: source, toOffset: destination)
     }
 
+    /// Diff state of the editable plan vs. the originating template.
+    /// Drives the "Template ▾" footer menu — what's offered changes
+    /// based on whether the user has diverged from the spine.
+    enum TemplateDiffState {
+        /// No template adopted (blank plan). Only "Save as new template…"
+        /// is offered.
+        case noTemplate
+        /// Plan exactly matches the originating template. Offers
+        /// "Duplicate as new template…" only — the in-place save is a
+        /// no-op.
+        case matches(InterviewTemplate)
+        /// Plan diverges from the originating template. Offers
+        /// "Update <name>", "Save as new template…", and "Revert".
+        case diverges(InterviewTemplate)
+    }
+
+    var templateDiffState: TemplateDiffState {
+        guard let template = selectedTemplate else { return .noTemplate }
+        return phasesMatch(template) ? .matches(template) : .diverges(template)
+    }
+
+    /// True when every editable phase corresponds 1:1 (in order, by id +
+    /// content) to the template's persisted phases. Any structural
+    /// change — added phase, removed phase, reorder, retitle, rubric
+    /// swap, icon change, time-box change — flips this to false.
+    private func phasesMatch(_ template: InterviewTemplate) -> Bool {
+        let templatePhases = template.orderedPhases
+        guard templatePhases.count == editablePhases.count else { return false }
+        for (tp, ep) in zip(templatePhases, editablePhases) {
+            if ep.sourceTemplatePhaseID != tp.id { return false }
+            if ep.title != tp.title { return false }
+            if ep.rubric?.id != tp.rubric?.id { return false }
+            if ep.iconName != tp.iconName { return false }
+            if ep.targetMinutes != tp.targetMinutes { return false }
+            if ep.kind != tp.kind { return false }
+        }
+        return true
+    }
+
+    /// Wipe the originating template's phases and replace them with the
+    /// current editable plan. Cascade delete on the relationship clears
+    /// the old phases; new ones get fresh `id`s, then `editablePhases`
+    /// is re-pointed at those fresh ids so the diff state flips back to
+    /// `.matches`.
+    func updateOriginatingTemplate(in modelContext: ModelContext) {
+        guard let template = selectedTemplate else { return }
+        for phase in template.phases {
+            modelContext.delete(phase)
+        }
+        template.phases.removeAll()
+        var newSourceIDs: [UUID] = []
+        for (idx, planned) in editablePhases.enumerated() {
+            let phase = InterviewTemplatePhase(
+                title: planned.title,
+                kind: planned.resolvedKind,
+                rubric: planned.rubric,
+                sortOrder: idx,
+                iconName: planned.iconName,
+                targetMinutes: planned.targetMinutes
+            )
+            phase.template = template
+            template.phases.append(phase)
+            newSourceIDs.append(phase.id)
+        }
+        template.updatedAt = .now
+        // Re-point editable phases at the freshly-saved template phase
+        // ids so the diff flips back to .matches without forcing a
+        // reload of the modal.
+        for (idx, newID) in newSourceIDs.enumerated() where idx < editablePhases.count {
+            editablePhases[idx].sourceTemplatePhaseID = newID
+        }
+    }
+
+    /// Create a brand-new `InterviewTemplate` from the current editable
+    /// plan, optionally scoping it to roles. The new template becomes
+    /// the selected one so subsequent saves go to it. Returns the new
+    /// template so the caller can show it in the library.
+    @discardableResult
+    func saveAsNewTemplate(
+        name: String,
+        description: String?,
+        appliesToAnyRole: Bool,
+        scopedRoles: [InterviewRole],
+        in modelContext: ModelContext
+    ) -> InterviewTemplate {
+        let template = InterviewTemplate(
+            name: name,
+            templateDescription: description,
+            iconName: nil,
+            appliesToAnyRole: appliesToAnyRole
+        )
+        modelContext.insert(template)
+        var newSourceIDs: [UUID] = []
+        for (idx, planned) in editablePhases.enumerated() {
+            let phase = InterviewTemplatePhase(
+                title: planned.title,
+                kind: planned.resolvedKind,
+                rubric: planned.rubric,
+                sortOrder: idx,
+                iconName: planned.iconName,
+                targetMinutes: planned.targetMinutes
+            )
+            phase.template = template
+            template.phases.append(phase)
+            newSourceIDs.append(phase.id)
+        }
+        if !appliesToAnyRole {
+            for (idx, role) in scopedRoles.enumerated() {
+                let link = TemplateRoleLink(template: template, role: role, sortOrder: idx)
+                modelContext.insert(link)
+                template.roleLinks.append(link)
+            }
+        }
+        selectedTemplate = template
+        roleAtTemplateSelection = selectedCandidate?.role?.id
+        for (idx, newID) in newSourceIDs.enumerated() where idx < editablePhases.count {
+            editablePhases[idx].sourceTemplatePhaseID = newID
+        }
+        return template
+    }
+
+    /// Discard local edits and re-adopt the originating template's
+    /// current persisted phases. No-op if no template is selected.
+    func revertToOriginatingTemplate() {
+        guard let template = selectedTemplate else { return }
+        adoptTemplate(template)
+    }
+
     /// Persist the planned interview as `.scheduled`. Bumps the
     /// originating template's usage stats. Returns the created Interview
     /// so the caller can navigate to its scorecard.
@@ -126,6 +254,7 @@ struct InterviewCreationSheet: View {
 
     @State private var vm = InterviewCreationViewModel()
     @State private var showAddCandidate = false
+    @State private var showSaveTemplate = false
 
     @Query(sort: \Candidate.name) private var allCandidates: [Candidate]
     @Query(
@@ -683,6 +812,7 @@ struct InterviewCreationSheet: View {
         HStack {
             statusLabel
             Spacer()
+            templateActionsMenu
             Button {
                 schedule()
             } label: {
@@ -697,6 +827,61 @@ struct InterviewCreationSheet: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .sheet(isPresented: $showSaveTemplate) {
+            SaveTemplateSheet(
+                suggestedRole: vm.selectedCandidate?.role,
+                onSave: { name, description, anyRole, roles in
+                    vm.saveAsNewTemplate(
+                        name: name,
+                        description: description,
+                        appliesToAnyRole: anyRole,
+                        scopedRoles: roles,
+                        in: modelContext
+                    )
+                }
+            )
+        }
+    }
+
+    /// "Template ▾" menu in the footer. Items adapt to the diff state:
+    /// in-place save vs. save-as-new vs. duplicate-only vs. revert. Only
+    /// rendered when the plan has at least one phase to save.
+    @ViewBuilder
+    private var templateActionsMenu: some View {
+        if !vm.editablePhases.isEmpty {
+            Menu {
+                switch vm.templateDiffState {
+                case .noTemplate:
+                    Button("Save as new template…") { showSaveTemplate = true }
+                case .matches(_):
+                    Text("Saved")
+                    Divider()
+                    Button("Duplicate as new template…") { showSaveTemplate = true }
+                case .diverges(let template):
+                    Button("Update '\(template.name)'") {
+                        vm.updateOriginatingTemplate(in: modelContext)
+                    }
+                    Button("Save as new template…") { showSaveTemplate = true }
+                    Divider()
+                    Button("Revert to template", role: .destructive) {
+                        vm.revertToOriginatingTemplate()
+                    }
+                }
+            } label: {
+                Label(templateMenuLabel, systemImage: "list.bullet.rectangle")
+                    .font(.caption)
+            }
+            .controlSize(.small)
+            .help("Save edits to the originating template, or save the current plan as a new template.")
+        }
+    }
+
+    private var templateMenuLabel: String {
+        switch vm.templateDiffState {
+        case .noTemplate: "Template"
+        case .matches: "Template ✓"
+        case .diverges: "Template •"
+        }
     }
 
     @ViewBuilder
@@ -963,6 +1148,107 @@ struct PlannedPhaseRow: View {
         copy.rubric = rubric
         onUpdate(copy)
         showQuickCreateRubric = false
+    }
+}
+
+// MARK: - Save-as-new-template sheet
+
+/// Stacked sheet for "Save as new template…". Asks for a name, optional
+/// description, and role-scope (universal toggle + multi-pick of the
+/// candidate's role plus any others). Defaults the role-scope to the
+/// current candidate's role when set — the common case is "save the
+/// loop I just built for senior backend so I can re-use it next time."
+struct SaveTemplateSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Query(sort: \InterviewRole.createdAt) private var allRoles: [InterviewRole]
+
+    /// Candidate's role at sheet open, used to seed the default scope.
+    let suggestedRole: InterviewRole?
+    var onSave: (_ name: String, _ description: String?, _ appliesToAnyRole: Bool, _ scopedRoles: [InterviewRole]) -> Void
+
+    @State private var name: String = ""
+    @State private var description: String = ""
+    @State private var appliesToAnyRole: Bool = false
+    @State private var selectedRoleIDs: Set<UUID> = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text("Save as Template")
+                .font(.headline)
+                .padding()
+
+            Form {
+                Section {
+                    TextField("Name", text: $name, prompt: Text("Backend Loop"))
+                    TextField("Description (optional)", text: $description, prompt: Text("What this loop is for"), axis: .vertical)
+                        .lineLimit(2...4)
+                }
+
+                Section {
+                    Toggle("Available for any role", isOn: $appliesToAnyRole)
+                    if !appliesToAnyRole {
+                        if allRoles.isEmpty {
+                            Text("No roles defined yet. Add roles in the Organization tab to scope this template.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(allRoles) { role in
+                                Toggle(isOn: Binding(
+                                    get: { selectedRoleIDs.contains(role.id) },
+                                    set: { isOn in
+                                        if isOn {
+                                            selectedRoleIDs.insert(role.id)
+                                        } else {
+                                            selectedRoleIDs.remove(role.id)
+                                        }
+                                    }
+                                )) {
+                                    Text(role.fullDescription)
+                                        .font(.caption)
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Applies to")
+                }
+            }
+            .formStyle(.grouped)
+            .frame(minHeight: 280, maxHeight: 360)
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Save") {
+                    save()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding()
+        }
+        .frame(width: 480)
+        .onAppear {
+            if let role = suggestedRole, selectedRoleIDs.isEmpty {
+                selectedRoleIDs.insert(role.id)
+            }
+        }
+    }
+
+    private func save() {
+        let trimmedName = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmedName.isEmpty else { return }
+        let trimmedDescription = description.trimmingCharacters(in: .whitespaces)
+        let scopedRoles = appliesToAnyRole ? [] : allRoles.filter { selectedRoleIDs.contains($0.id) }
+        onSave(
+            trimmedName,
+            trimmedDescription.isEmpty ? nil : trimmedDescription,
+            appliesToAnyRole,
+            scopedRoles
+        )
+        dismiss()
     }
 }
 

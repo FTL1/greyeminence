@@ -10,6 +10,12 @@ struct PlannedPhase: Identifiable {
     var title: String
     var rubric: Rubric?
     var iconName: String?
+    /// Phase kind carried from the originating template (intro / scored /
+    /// unscored / conclusion) so "save edits back to template" can
+    /// preserve it. Nil for ad-hoc additions made in the modal — the
+    /// template-save path infers a kind in that case (rubric → .scored,
+    /// otherwise .unscored).
+    var kind: InterviewTemplatePhaseKind?
     /// Soft per-phase target in minutes, carried from the originating
     /// template phase (if any) into the realized `InterviewPhase`. Nil =
     /// no time-box.
@@ -30,6 +36,7 @@ struct PlannedPhase: Identifiable {
         title: String,
         rubric: Rubric? = nil,
         iconName: String? = nil,
+        kind: InterviewTemplatePhaseKind? = nil,
         targetMinutes: Int? = nil,
         assignedInterviewerIDs: Set<UUID> = [],
         sourceTemplatePhaseID: UUID? = nil
@@ -38,28 +45,37 @@ struct PlannedPhase: Identifiable {
         self.title = title
         self.rubric = rubric
         self.iconName = iconName
+        self.kind = kind
         self.targetMinutes = targetMinutes
         self.assignedInterviewerIDs = assignedInterviewerIDs
         self.sourceTemplatePhaseID = sourceTemplatePhaseID
     }
 
     static func intro() -> PlannedPhase {
-        PlannedPhase(title: "Intro", rubric: nil, iconName: "person.wave.2")
+        PlannedPhase(title: "Intro", rubric: nil, iconName: "person.wave.2", kind: .intro)
     }
     static func conclusion() -> PlannedPhase {
-        PlannedPhase(title: "Conclusion", rubric: nil, iconName: "questionmark.bubble")
+        PlannedPhase(title: "Conclusion", rubric: nil, iconName: "questionmark.bubble", kind: .conclusion)
     }
     static func from(rubric: Rubric) -> PlannedPhase {
-        PlannedPhase(title: rubric.name, rubric: rubric)
+        PlannedPhase(title: rubric.name, rubric: rubric, kind: .scored)
     }
     static func from(templatePhase tp: InterviewTemplatePhase) -> PlannedPhase {
         PlannedPhase(
             title: tp.title,
             rubric: tp.rubric,
             iconName: tp.iconName,
+            kind: tp.kind,
             targetMinutes: tp.targetMinutes,
             sourceTemplatePhaseID: tp.id
         )
+    }
+
+    /// Best-effort kind for persistence into a template — explicit `kind`
+    /// when set, otherwise inferred from rubric presence.
+    var resolvedKind: InterviewTemplatePhaseKind {
+        if let kind { return kind }
+        return rubric != nil ? .scored : .unscored
     }
 
     /// Resolved icon — same fallback policy as `InterviewPhase.resolvedIconName`.
