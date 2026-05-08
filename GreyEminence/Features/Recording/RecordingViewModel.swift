@@ -1124,12 +1124,17 @@ final class RecordingViewModel {
     // MARK: - Helpers
 
     private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        // Use .common mode so the timer fires during NSMenu event-tracking (e.g.
+        // the phase-icon dropdown) — .scheduledTimer uses .default only, which
+        // pauses while any macOS menu is open, making the elapsed-time display freeze.
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let start = self.recordingStartDate else { return }
                 self.elapsedTime = Date().timeIntervalSince(start) - self.accumulatedPauseDuration
             }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     /// Record a write failure and decide whether the capture loop should stop.

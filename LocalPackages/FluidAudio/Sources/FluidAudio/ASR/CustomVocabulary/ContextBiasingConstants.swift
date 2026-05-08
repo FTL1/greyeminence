@@ -152,6 +152,17 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer.ctcTokenRescore()` and constrained CTC methods
     public static let defaultCbw: Float = 3.0
 
+    /// Reference per-term boost weight at which the similarity floor is unchanged.
+    /// Terms with `weight` at or below this value behave like the legacy global
+    /// `cbw` path; terms above this value progressively relax the similarity
+    /// floor (see `floorReductionPerWeightUnit`).
+    public static let defaultBoostWeight: Float = 10.0
+
+    /// Per-unit reduction of the similarity floor for boost weights above
+    /// `defaultBoostWeight`. With weight=20 the reduction is 0.20, dropping a
+    /// 0.50 floor to 0.30 — enough for "aaron" ↔ "erin" (sim ≈ 0.40) to pass.
+    public static let floorReductionPerWeightUnit: Float = 0.02
+
     /// Default alpha value for weighted score combination.
     ///
     /// Used when combining acoustic and language model scores:

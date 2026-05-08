@@ -11,6 +11,16 @@ enum NoteSentiment: String, Codable, CaseIterable, Sendable {
     case neutral = "Neutral"
     case wow = "Wow"
     case redFlag = "Red Flag"
+
+    /// Cycle order used by the inline sentiment badge: tap once to upgrade a
+    /// neutral note to "wow", tap again to flag it red, again to clear.
+    func next() -> NoteSentiment {
+        switch self {
+        case .neutral: .wow
+        case .wow: .redFlag
+        case .redFlag: .neutral
+        }
+    }
 }
 
 @Model

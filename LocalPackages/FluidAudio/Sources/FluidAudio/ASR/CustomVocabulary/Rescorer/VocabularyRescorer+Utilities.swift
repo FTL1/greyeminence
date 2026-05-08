@@ -85,6 +85,18 @@ extension VocabularyRescorer {
         return minSimilarity
     }
 
+    /// Lower the per-span similarity floor for high-boost terms so near-homophones
+    /// that fall under the default ~0.5 threshold (e.g. "aaron" ↔ "erin", sim≈0.40)
+    /// can still reach CTC rescoring. Weight at or below the FluidAudio default
+    /// (`defaultBoostWeight`) keeps the original floor; each unit above that drops
+    /// the floor by `floorReductionPerWeightUnit`, clamped at `minSimilarityFloor`.
+    func relaxedSimilarityFloor(base: Float, termWeight: Float?) -> Float {
+        guard let weight = termWeight else { return base }
+        let excess = max(0, weight - ContextBiasingConstants.defaultBoostWeight)
+        let reduction = excess * ContextBiasingConstants.floorReductionPerWeightUnit
+        return max(ContextBiasingConstants.minSimilarityFloor, base - reduction)
+    }
+
     // MARK: - Text Utilities
 
     /// Preserve capitalization from original word in replacement

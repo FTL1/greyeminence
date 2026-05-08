@@ -147,6 +147,16 @@ final class InterviewRecordingViewModel {
 
     // Criterion evaluations per section
     var criterionEvaluations: [UUID: [CriterionEvaluationSnapshot]] = [:]
+
+    func rubricSection(withID id: UUID) -> RubricSectionSnapshot? {
+        rubricSnapshot?.sections.first { $0.id == id }
+    }
+
+    func criterionEvaluationsBySignal(for sectionID: UUID) -> [String: CriterionEvaluationSnapshot] {
+        let evals = criterionEvaluations[sectionID] ?? []
+        return Dictionary(evals.map { ($0.signal, $0) }, uniquingKeysWith: { _, last in last })
+    }
+
     /// Snapshot of the *currently active phase's* rubric. Recomputed each
     /// time the active phase changes. Nil when no phase is active or the
     /// active phase has no rubric (intro / conclusion / freeform).
@@ -597,8 +607,18 @@ final class InterviewRecordingViewModel {
 
     // MARK: - Notes
 
-    func addNote(text: String, category: NoteCategory = .general, parent: InterviewNote? = nil) {
-        let note = InterviewNote(text: text, category: category, sortOrder: notes.count)
+    func addNote(
+        text: String,
+        category: NoteCategory = .general,
+        sentiment: NoteSentiment = .neutral,
+        parent: InterviewNote? = nil
+    ) {
+        let note = InterviewNote(
+            text: text,
+            category: category,
+            sentiment: sentiment,
+            sortOrder: notes.count
+        )
         note.interview = interview
         note.parentNote = parent
         // Inherit parent's phase when nesting; otherwise tag with the

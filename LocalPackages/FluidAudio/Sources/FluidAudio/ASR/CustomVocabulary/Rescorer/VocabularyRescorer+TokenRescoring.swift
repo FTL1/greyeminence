@@ -51,6 +51,10 @@ extension VocabularyRescorer {
         let spanIndices: [Int]
         let spanStartTime: Double
         let spanEndTime: Double
+        /// Per-term context-biasing weight from `CustomVocabularyTerm.weight`.
+        /// Nil falls back to the rescorer's global `cbw` parameter; non-nil
+        /// is used directly as the log-prob boost added to the vocab CTC score.
+        let termWeight: Float?
     }
 
     /// Result of CTC match evaluation.
@@ -328,6 +332,13 @@ extension VocabularyRescorer {
                 if shouldSkipStopword { continue }
                 minSimilarityForSpan = adjustedSimilarity
 
+                // Per-term floor relaxation: high-boost vocab terms accept lower
+                // string similarity so near-homophones can reach CTC rescoring.
+                minSimilarityForSpan = relaxedSimilarityFloor(
+                    base: minSimilarityForSpan,
+                    termWeight: term.weight
+                )
+
                 // Check if similarity meets threshold after all adjustments
                 guard similarity >= minSimilarityForSpan else { continue }
 
@@ -344,7 +355,8 @@ extension VocabularyRescorer {
                     spanLength: spanLength,
                     spanIndices: spanIndices,
                     spanStartTime: spanStartTime,
-                    spanEndTime: spanEndTime
+                    spanEndTime: spanEndTime,
+                    termWeight: term.weight
                 )
 
                 let result = evaluateCTCMatch(
@@ -488,10 +500,14 @@ extension VocabularyRescorer {
                             continue
                         }
 
-                        // Use adaptive similarity threshold
-                        let minSimilarityForSpan = requiredSimilarity(
+                        // Use adaptive similarity threshold, relaxed for high-boost terms
+                        let baseFloor = requiredSimilarity(
                             minSimilarity: minSimilarity,
                             spanLength: spanLength
+                        )
+                        let minSimilarityForSpan = relaxedSimilarityFloor(
+                            base: baseFloor,
+                            termWeight: term.weight
                         )
                         guard bestSimilarity >= minSimilarityForSpan else { continue }
 
@@ -509,7 +525,8 @@ extension VocabularyRescorer {
                             spanLength: spanLength,
                             spanIndices: spanIndices,
                             spanStartTime: spanStartTime,
-                            spanEndTime: spanEndTime
+                            spanEndTime: spanEndTime,
+                            termWeight: term.weight
                         )
 
                         let result = evaluateCTCMatch(
@@ -653,6 +670,12 @@ extension VocabularyRescorer {
                     if shouldSkipStopword { continue }
                     minSimilarityForSpan = adjustedSimilarity
 
+                    // Per-term floor relaxation for high-boost vocab terms.
+                    minSimilarityForSpan = relaxedSimilarityFloor(
+                        base: minSimilarityForSpan,
+                        termWeight: term.weight
+                    )
+
                     guard bestSimilarity >= minSimilarityForSpan else { continue }
 
                     // Build the original phrase (single word or concatenated span)
@@ -675,7 +698,8 @@ extension VocabularyRescorer {
                         spanLength: matchedSpanLength,
                         spanIndices: spanIndices,
                         spanStartTime: spanStartTime,
-                        spanEndTime: spanEndTime
+                        spanEndTime: spanEndTime,
+                        termWeight: term.weight
                     )
 
                     let result = evaluateCTCMatch(

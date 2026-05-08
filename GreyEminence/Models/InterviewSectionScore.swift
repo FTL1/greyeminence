@@ -149,3 +149,21 @@ final class InterviewSectionScore {
         self.criterionEvaluations = []
     }
 }
+
+extension CriterionStatus {
+    var iconName: String {
+        switch self {
+        case .scored: "checkmark.circle.fill"
+        case .partialEvidence: "circle.dotted"
+        case .notYetDiscussed: "circle"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .scored: .green
+        case .partialEvidence: .yellow
+        case .notYetDiscussed: .gray
+        }
+    }
+}

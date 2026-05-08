@@ -80,8 +80,11 @@ extension VocabularyRescorer {
             searchEndFrame: searchEnd
         )
 
-        // Apply adaptive context-biasing weight
-        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: candidate.vocabTokens.count)
+        // Per-term weight (when set on CustomVocabularyTerm) overrides the global cbw.
+        // Lets users dial up specific terms (e.g. names) without inflating the
+        // global biasing weight that affects every term.
+        let baseCbw = candidate.termWeight ?? cbw
+        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: baseCbw, tokenCount: candidate.vocabTokens.count)
         let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
 
         // CTC-vs-CTC comparison
