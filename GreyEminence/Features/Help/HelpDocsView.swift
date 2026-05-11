@@ -67,7 +67,9 @@ struct HelpDocsView: View {
 
             Divider()
 
-            if let error = loadError {
+            if doc == .changelog {
+                ChangelogView()
+            } else if let error = loadError {
                 ContentUnavailableView(
                     "Couldn't load \(doc.menuTitle)",
                     systemImage: "exclamationmark.triangle",
@@ -82,8 +84,8 @@ struct HelpDocsView: View {
                 }
             }
         }
-        .frame(minWidth: 640, minHeight: 480)
-        .onAppear { loadDoc() }
+        .frame(minWidth: 680, minHeight: 480)
+        .onAppear { if doc != .changelog { loadDoc() } }
     }
 
     private func loadDoc() {

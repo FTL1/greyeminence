@@ -36,6 +36,11 @@ final class RecordingViewModel {
     var errorMessage: String?
     var micLevel: Float = 0
     var systemLevel: Float = 0
+    /// Wall-clock time of the most recent non-silent system-audio buffer.
+    /// The mic-silence auto-pause consults this so it doesn't trip while the
+    /// user is merely listening to a meeting (mic quiet, system audio flowing) —
+    /// only a genuine device fault (both streams silent) should pause.
+    private var lastSystemAudioActivityAt: Date?
     /// Total write failures for the current recording (mic + system). Exposed
     /// so the recording surface can flag "this recording had write errors"
     /// instead of the previous silent `try?` swallow.
@@ -326,6 +331,7 @@ final class RecordingViewModel {
         completedMeeting = nil
         audioWriteFailures = 0
         lastAudioWriteError = nil
+        lastSystemAudioActivityAt = nil
 
         // Persist active recording ID so we can detect interrupted recordings on restart.
         // Two-layer breadcrumb: UserDefaults for fast lookup, lock file on disk as a
@@ -759,25 +765,32 @@ final class RecordingViewModel {
                             self.log.log("Mic activity: \(bufferCountAtFlush) buffers, avg RMS \(String(format: "%.4f", avg)) over last 30s", category: .audio, level: avg < 0.001 ? .warning : .info)
                         }
 
-                        // After 60 s of all-silent buffers, surface a clear
-                        // errorMessage AND auto-pause. Common causes: mic
-                        // perm revoked in System Settings mid-recording,
-                        // device hardware-mute pressed, system input volume
-                        // at 0, or another app (Teams) holding exclusive
-                        // access. Auto-pausing means we stop writing
-                        // minutes of silent audio while the user is
-                        // unaware. They can resume after fixing the
-                        // underlying issue.
+                        // Auto-pause only when the mic has been silent AND no
+                        // system audio is flowing — that combination means a real
+                        // fault (mic perm revoked, device hardware-muted, input
+                        // volume at 0, another app holding the mic). If system
+                        // audio is active the user is just listening to a meeting;
+                        // pausing would throw away the meeting capture too.
                         if !silenceWarningSurfaced,
                            Date().timeIntervalSince(captureStart) > 60,
                            bufferCountAtFlush > 0,
                            avg < 0.0005 {
-                            silenceWarningSurfaced = true
-                            await MainActor.run {
-                                self.errorMessage = "Mic is silent — recording auto-paused. Check System Settings → Privacy & Security → Microphone, Sound → Input level, and any conferencing app holding the mic, then resume."
-                                self.log.log("Mic silent over the last 30s (avg RMS \(String(format: "%.4f", avg)) < 0.0005). Auto-pausing recording.", category: .audio, level: .error)
-                                if self.state == .recording {
-                                    self.pauseRecording()
+                            let systemRecentlyActive = await MainActor.run {
+                                guard let last = self.lastSystemAudioActivityAt else { return false }
+                                return Date().timeIntervalSince(last) < 45
+                            }
+                            if systemRecentlyActive {
+                                await MainActor.run {
+                                    self.log.log("Mic silent (avg RMS \(String(format: "%.4f", avg))) but system audio active — keeping recording.", category: .audio)
+                                }
+                            } else {
+                                silenceWarningSurfaced = true
+                                await MainActor.run {
+                                    self.errorMessage = "Mic is silent — recording auto-paused. Check System Settings → Privacy & Security → Microphone, Sound → Input level, and any conferencing app holding the mic, then resume."
+                                    self.log.log("Mic + system audio silent over the last 30s (mic avg RMS \(String(format: "%.4f", avg)) < 0.0005). Auto-pausing recording.", category: .audio, level: .error)
+                                    if self.state == .recording {
+                                        self.pauseRecording()
+                                    }
                                 }
                             }
                         }
@@ -861,6 +874,9 @@ final class RecordingViewModel {
                     let level = self.calculateRMS(taggedBuffer.buffer)
                     await MainActor.run {
                         self.systemLevel = level
+                        if level > 0.0005 {
+                            self.lastSystemAudioActivityAt = Date()
+                        }
                     }
 
                     // Feed to transcription coordinator
