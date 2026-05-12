@@ -206,14 +206,20 @@ actor InterviewIntelligenceService {
         let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !nonEmpty.isEmpty else { return nil }
 
-        guard !previousScoresJSON.isEmpty else {
-            return try await analyzeAgainstRubric(segments: segments)
-        }
+        // Always run the full-scoring prompt. When no live evaluation
+        // accumulated (short interview, AI configured late, etc.) we still
+        // score every section directly from the transcript — delegating to
+        // the rolling analyzer here would hit its intro/conclusion branch
+        // and return an empty `section_scores` array, leaving the scorecard
+        // with no AI grades at all.
+        let accumulated = previousScoresJSON.isEmpty
+            ? "(No live evaluation was recorded — score every section directly from the transcript.)"
+            : previousScoresJSON
 
         let fullTranscript = AIPromptTemplates.formatSegments(nonEmpty)
         let userPrompt = InterviewPromptTemplates.finalAnalysisPrompt(
             rubric: rubricContext,
-            accumulatedScores: previousScoresJSON,
+            accumulatedScores: accumulated,
             fullTranscript: fullTranscript,
             impressionTraits: impressionTraits,
             candidateContext: candidateContext
@@ -267,14 +273,47 @@ actor InterviewIntelligenceService {
 
         LogManager.send("Section scoring '\(section.title)': response \(response.count) chars", category: .ai, meetingID: meetingID)
 
-        let result = try parseResponse(response)
+        let parsed = try parseResponse(response)
+        let result = normalizeSingleSection(parsed, to: section)
         if let matched = result.sectionScores.first(where: { $0.sectionID == section.id }) {
             LogManager.send("Section scoring '\(section.title)': grade=\(matched.grade ?? "nil"), confidence=\(matched.confidence), criteria=\(matched.criterionEvaluations.count), strengths=\(result.strengths.count), weaknesses=\(result.weaknesses.count)", category: .ai, meetingID: meetingID)
         } else {
-            LogManager.send("Section scoring '\(section.title)': no matching score in response (got \(result.sectionScores.map(\.sectionTitle)))", category: .ai, level: .warning, meetingID: meetingID)
+            LogManager.send("Section scoring '\(section.title)': no score in response", category: .ai, level: .warning, meetingID: meetingID)
         }
 
         return result
+    }
+
+    /// The single-section prompt asks for exactly one section, but the model
+    /// occasionally echoes back a garbled / different `section_id`. If there's
+    /// no exact match, attribute the first returned score to the section we
+    /// actually asked about so the caller can apply it.
+    private func normalizeSingleSection(
+        _ result: InterviewAnalysisResult,
+        to section: RubricSectionSnapshot
+    ) -> InterviewAnalysisResult {
+        guard !result.sectionScores.contains(where: { $0.sectionID == section.id }),
+              let first = result.sectionScores.first else {
+            return result
+        }
+        let remapped = SectionScoreSnapshot(
+            sectionID: section.id,
+            sectionTitle: section.title,
+            grade: first.grade,
+            confidence: first.confidence,
+            evidence: first.evidence,
+            rationale: first.rationale,
+            bonusSignals: first.bonusSignals,
+            criterionEvaluations: first.criterionEvaluations
+        )
+        return InterviewAnalysisResult(
+            sectionScores: [remapped],
+            impressions: result.impressions,
+            strengths: result.strengths,
+            weaknesses: result.weaknesses,
+            redFlags: result.redFlags,
+            overallAssessment: result.overallAssessment
+        )
     }
 
     // MARK: - Parsing

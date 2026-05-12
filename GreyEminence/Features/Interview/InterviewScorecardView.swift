@@ -198,6 +198,17 @@ struct InterviewScorecardView: View {
 
                 Spacer()
 
+                if scorecardTab == .scorecard, let scoredAt = interview.lastScoredAt {
+                    HStack(spacing: 3) {
+                        Image(systemName: "brain")
+                            .font(.system(size: 9))
+                        Text("Scored \(scoredAt.formatted(.relative(presentation: .named)))")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                    .help("AI last scored this interview on \(scoredAt.formatted(date: .abbreviated, time: .shortened))")
+                }
+
                 startInterviewButton
 
                 // Score-all only makes sense when the user is looking at
@@ -386,6 +397,10 @@ struct InterviewScorecardView: View {
                     .padding(.horizontal)
                 }
 
+                // Overall assessment — surfaced first; it's the headline.
+                overallAssessmentSection
+                    .padding(.horizontal)
+
                 // Overall score
                 overallScoreSection
                     .padding(.horizontal)
@@ -394,7 +409,7 @@ struct InterviewScorecardView: View {
                 recommendationSection
                     .padding(.horizontal)
 
-                // Impression sliders (read-only display with values)
+                // Impression dots — editable; tap a dot to set the value.
                 impressionSection
                     .padding(.horizontal)
 
@@ -432,18 +447,6 @@ struct InterviewScorecardView: View {
                 }
                 if !interview.redFlags.isEmpty {
                     signalSection("Red Flags", items: interview.redFlags, icon: "flag.fill", color: .red)
-                }
-
-                // Overall Assessment
-                if let assessment = interview.overallAssessment, !assessment.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Overall Assessment")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(assessment)
-                            .font(.caption)
-                    }
-                    .padding(.horizontal)
                 }
 
                 // Interviewer notes
@@ -544,6 +547,31 @@ struct InterviewScorecardView: View {
             site: "InterviewScorecardView.tagSegment",
             meetingID: interview.meeting?.id
         )
+    }
+
+    // MARK: - Overall Assessment
+
+    @ViewBuilder
+    private var overallAssessmentSection: some View {
+        if let assessment = interview.overallAssessment?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !assessment.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Overall Assessment")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    CopyButton(content: assessment, label: "Copy")
+                }
+                Text(assessment)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(12)
+            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+        }
     }
 
     // MARK: - Overall Score
@@ -663,7 +691,7 @@ struct InterviewScorecardView: View {
             Text(trait.name)
                 .font(.caption.weight(.semibold))
 
-            // Interviewer row
+            // Interviewer row — editable: tap a dot to set the value.
             HStack(spacing: 6) {
                 Text("You")
                     .font(.system(size: 9, weight: .bold))
@@ -672,9 +700,16 @@ struct InterviewScorecardView: View {
                     .lineLimit(1)
                     .fixedSize()
                 ForEach(1...5, id: \.self) { value in
-                    Circle()
-                        .fill(value <= impression.value ? dotColor(impression.value) : .secondary.opacity(0.2))
-                        .frame(width: 10, height: 10)
+                    Button {
+                        impression.value = value
+                    } label: {
+                        Circle()
+                            .fill(value <= impression.value ? dotColor(impression.value) : .secondary.opacity(0.2))
+                            .frame(width: 12, height: 12)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Set to \(value): \(trait.label(for: value))")
                 }
                 Text(trait.label(for: impression.value))
                     .font(.caption2)
@@ -705,9 +740,13 @@ struct InterviewScorecardView: View {
 
     private func signalSection(_ title: String, items: [String], icon: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: icon)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(color)
+            HStack {
+                Label(title, systemImage: icon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color)
+                Spacer()
+                CopyButton(content: items.map { "• \($0)" }.joined(separator: "\n"), label: "Copy")
+            }
             ForEach(items, id: \.self) { item in
                 HStack(alignment: .top, spacing: 6) {
                     Circle()
@@ -716,6 +755,7 @@ struct InterviewScorecardView: View {
                         .padding(.top, 4)
                     Text(item)
                         .font(.caption)
+                        .textSelection(.enabled)
                 }
             }
         }
@@ -866,6 +906,20 @@ struct InterviewScorecardView: View {
         interview.weaknesses = allWeaknesses
         interview.redFlags = allRedFlags
         interview.overallAssessment = assessments.joined(separator: " ")
+
+        // Any section the AI couldn't grade (no transcript coverage) and the
+        // interviewer hasn't graded counts as a failure — an undiscussed
+        // rubric area is a missed signal, not a neutral blank.
+        for score in interview.sectionScores where !score.isDeleted {
+            guard score.aiGrade == nil, score.interviewerGrade == nil else { continue }
+            score.aiGrade = .f
+            score.aiConfidence = 1.0
+            score.aiRationale = (score.phase?.startedAt == nil)
+                ? "This phase was not conducted during the interview."
+                : "Not discussed during the interview — no evidence to evaluate."
+        }
+
+        interview.lastScoredAt = .now
 
         PersistenceGate.save(
             modelContext,

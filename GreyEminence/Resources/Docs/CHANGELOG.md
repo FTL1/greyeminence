@@ -4,6 +4,37 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.14.0 — 2026-05-11
+
+**Interview scorecard**
+- Overall assessment now sits at the top of the scorecard — it's the
+  headline, so it leads.
+- Copy buttons on the assessment, strengths, weaknesses, and red-flags
+  sections (and the text is selectable). One click to drop the AI's
+  write-up into your notes / ATS / email.
+- "Scored …" indicator in the scorecard header shows when the AI last
+  ran (relative, with the exact timestamp on hover).
+- Impressions are editable from the scorecard — tap a dot on the "You"
+  row to set a trait you forgot to rate during the interview.
+
+**Interview scoring**
+- AI section scoring at interview end actually produces grades now. The
+  end-of-interview pass was falling through to the live analyzer's
+  intro/conclusion branch, which returns an empty score set — so a short
+  interview (or one where the live loop never got a turn) finished with
+  every AI grade blank. The final pass now scores every section directly
+  from the transcript regardless of what the live loop accumulated.
+- Sections that weren't covered are graded **F**, not left blank. A phase
+  that was skipped or never reached, or a section the transcript never
+  touched, now shows an F with a rationale ("This phase was not conducted
+  …" / "Not discussed …") instead of an empty "—". An interviewer grade
+  always wins; this only fills in genuinely ungraded sections.
+- "Score All Sections" is more robust to the model echoing back a wrong
+  `section_id` — the single-section pass now attributes the result to the
+  section it asked about instead of dropping it on the floor.
+- Phases that were planned but never started no longer get scored against
+  the whole transcript — they're marked incomplete instead.
+
 ## 0.12.0 — 2026-05-11
 
 **Recording**

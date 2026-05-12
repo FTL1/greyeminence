@@ -67,6 +67,11 @@ final class Interview {
     var overallAssessment: String?
     var createdAt: Date
 
+    /// When the AI last scored this interview — set by the end-of-interview
+    /// final analysis and by a manual "Score All Sections" run. Nil until
+    /// the first scoring pass. Surfaced in the scorecard header.
+    var lastScoredAt: Date?
+
     var candidate: Candidate?
     var rubric: Rubric?
 

@@ -192,9 +192,18 @@ enum SchemaV9: VersionedSchema {
     }
 }
 
+/// SchemaV12 adds `Interview.lastScoredAt` — timestamp of the most recent
+/// AI scoring pass (end-of-interview final analysis or a manual "Score All
+/// Sections" run), surfaced in the scorecard header. Optional date —
+/// purely additive, lightweight migration.
+enum SchemaV12: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(12, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV11.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self]
     }
 
     static var stages: [MigrationStage] {
@@ -208,7 +217,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV7.self, toVersion: SchemaV8.self),
             .lightweight(fromVersion: SchemaV8.self, toVersion: SchemaV9.self),
             .lightweight(fromVersion: SchemaV9.self, toVersion: SchemaV10.self),
-            .lightweight(fromVersion: SchemaV10.self, toVersion: SchemaV11.self)
+            .lightweight(fromVersion: SchemaV10.self, toVersion: SchemaV11.self),
+            .lightweight(fromVersion: SchemaV11.self, toVersion: SchemaV12.self)
         ]
     }
 }

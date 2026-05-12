@@ -504,6 +504,11 @@ final class InterviewRecordingViewModel {
         let candidateRole = interview?.candidate?.role
         let jobs: [PhaseJob] = interview?.phases.compactMap { phase in
             guard let rubric = phase.rubric else { return nil }
+            // A phase that was never activated has no time window — feeding
+            // it the whole transcript would score it against unrelated
+            // discussion. Skipped / never-reached phases are handled by
+            // `markUnscoredSectionsAsFailing()` instead.
+            guard phase.startedAt != nil else { return nil }
             let segments = filterSegments(allSegments, between: phase.startedAt, and: phase.endedAt)
             guard !segments.isEmpty else { return nil }
             return PhaseJob(
@@ -519,6 +524,14 @@ final class InterviewRecordingViewModel {
         recordingViewModel.stopRecording(in: modelContext)
 
         guard !jobs.isEmpty else {
+            markUnscoredSectionsAsFailing()
+            interview?.lastScoredAt = .now
+            PersistenceGate.save(
+                modelContext,
+                site: "InterviewRecordingViewModel.stopInterview/noScoring",
+                critical: true,
+                meetingID: meetingID
+            )
             rubricAnalysisState = .idle
             return
         }
@@ -561,16 +574,35 @@ final class InterviewRecordingViewModel {
             for (phaseID, result) in results {
                 self.applyAnalysisResult(result, toPhaseID: phaseID)
             }
-            if !results.isEmpty {
-                PersistenceGate.save(
-                    modelContext,
-                    site: "InterviewRecordingViewModel.runFinalRubricAnalysis/parallel",
-                    critical: true,
-                    meetingID: meetingID
-                )
-                LogManager.shared.log("Final rubric analysis complete (\(results.count) phase(s))", category: .ai)
-            }
+            self.markUnscoredSectionsAsFailing()
+            self.interview?.lastScoredAt = .now
+            PersistenceGate.save(
+                modelContext,
+                site: "InterviewRecordingViewModel.runFinalRubricAnalysis/parallel",
+                critical: true,
+                meetingID: meetingID
+            )
+            LogManager.shared.log("Final rubric analysis complete (\(results.count) phase(s))", category: .ai)
             self.rubricAnalysisState = .idle
+        }
+    }
+
+    /// After final scoring, any scored section the AI couldn't grade and the
+    /// interviewer hasn't graded counts as a failure — an undiscussed rubric
+    /// area is a missed signal, not a neutral blank. Phases that were planned
+    /// but never run (skipped, or never reached) land here wholesale.
+    private func markUnscoredSectionsAsFailing() {
+        guard let interview else { return }
+        for phase in interview.phases where phase.rubric != nil {
+            let neverRan = phase.startedAt == nil
+            for score in phase.sectionScores
+            where score.aiGrade == nil && score.interviewerGrade == nil {
+                score.aiGrade = .f
+                score.aiConfidence = 1.0
+                score.aiRationale = neverRan
+                    ? "This phase was not conducted during the interview."
+                    : "Not discussed during the interview — no evidence to evaluate."
+            }
         }
     }
 
