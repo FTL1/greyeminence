@@ -128,6 +128,23 @@ extension EvidenceSnapshot {
     }
 }
 
+extension SectionScoreSnapshot {
+    /// Same score attributed to a different section — used when the model
+    /// echoes back the wrong `section_id` for a single-section prompt.
+    func reattributed(toSectionID id: UUID, title: String) -> SectionScoreSnapshot {
+        SectionScoreSnapshot(
+            sectionID: id,
+            sectionTitle: title,
+            grade: grade,
+            confidence: confidence,
+            evidence: evidence,
+            rationale: rationale,
+            bonusSignals: bonusSignals,
+            criterionEvaluations: criterionEvaluations
+        )
+    }
+}
+
 // MARK: - Intelligence Service
 
 actor InterviewIntelligenceService {
@@ -296,18 +313,8 @@ actor InterviewIntelligenceService {
               let first = result.sectionScores.first else {
             return result
         }
-        let remapped = SectionScoreSnapshot(
-            sectionID: section.id,
-            sectionTitle: section.title,
-            grade: first.grade,
-            confidence: first.confidence,
-            evidence: first.evidence,
-            rationale: first.rationale,
-            bonusSignals: first.bonusSignals,
-            criterionEvaluations: first.criterionEvaluations
-        )
         return InterviewAnalysisResult(
-            sectionScores: [remapped],
+            sectionScores: [first.reattributed(toSectionID: section.id, title: section.title)],
             impressions: result.impressions,
             strengths: result.strengths,
             weaknesses: result.weaknesses,

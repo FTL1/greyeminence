@@ -157,4 +157,20 @@ final class Interview {
         guard totalWeight > 0 else { return nil }
         return scored.reduce(0.0) { $0 + $1.0 * $1.1 } / totalWeight
     }
+
+    /// After a scoring pass, any section with no grade at all (AI couldn't
+    /// grade it, interviewer didn't either) counts as a failure — an
+    /// undiscussed rubric area is a missed signal, not a neutral blank.
+    /// Phases that were planned but never run land here wholesale. An
+    /// interviewer grade always wins; an existing AI grade is left alone.
+    func markUncoveredSectionsAsFailing() {
+        for score in sectionScores where !score.isDeleted && score.effectiveGrade == nil {
+            let phaseNeverRan = score.phase.map { $0.startedAt == nil } ?? false
+            score.aiGrade = .f
+            score.aiConfidence = nil
+            score.aiRationale = phaseNeverRan
+                ? "This phase was not conducted during the interview."
+                : "Not discussed during the interview — no evidence to evaluate."
+        }
+    }
 }

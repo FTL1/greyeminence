@@ -907,18 +907,7 @@ struct InterviewScorecardView: View {
         interview.redFlags = allRedFlags
         interview.overallAssessment = assessments.joined(separator: " ")
 
-        // Any section the AI couldn't grade (no transcript coverage) and the
-        // interviewer hasn't graded counts as a failure — an undiscussed
-        // rubric area is a missed signal, not a neutral blank.
-        for score in interview.sectionScores where !score.isDeleted {
-            guard score.aiGrade == nil, score.interviewerGrade == nil else { continue }
-            score.aiGrade = .f
-            score.aiConfidence = 1.0
-            score.aiRationale = (score.phase?.startedAt == nil)
-                ? "This phase was not conducted during the interview."
-                : "Not discussed during the interview — no evidence to evaluate."
-        }
-
+        interview.markUncoveredSectionsAsFailing()
         interview.lastScoredAt = .now
 
         PersistenceGate.save(

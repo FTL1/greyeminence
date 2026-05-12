@@ -1318,7 +1318,7 @@
 				CODE_SIGN_ENTITLEMENTS = GreyEminence/GreyEminence.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20260511235500;
+				CURRENT_PROJECT_VERSION = 20260512004500;
 				INFOPLIST_FILE = GreyEminence/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1340,7 +1340,7 @@
 				CODE_SIGN_ENTITLEMENTS = GreyEminence/GreyEminence.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20260511235500;
+				CURRENT_PROJECT_VERSION = 20260512004500;
 				INFOPLIST_FILE = GreyEminence/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
