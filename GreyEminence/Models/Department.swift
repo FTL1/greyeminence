@@ -11,6 +11,10 @@ final class Department {
     @Relationship(deleteRule: .cascade, inverse: \Team.department)
     var teams: [Team]
 
+    var sortedTeams: [Team] {
+        teams.sorted { $0.sortOrder < $1.sortOrder }
+    }
+
     init(name: String, sortOrder: Int = 0) {
         self.id = UUID()
         self.name = name

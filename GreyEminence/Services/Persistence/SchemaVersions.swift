@@ -201,9 +201,18 @@ enum SchemaV12: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV11.models }
 }
 
+/// SchemaV13 adds `InterviewRole.templateRoleLinks` — the inverse of
+/// `TemplateRoleLink.role`, mirroring `roleRubricLinks`. Lets a role
+/// enumerate its linked templates without a full-table scan. Purely
+/// additive, lightweight migration.
+enum SchemaV13: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(13, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV12.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self]
     }
 
     static var stages: [MigrationStage] {
@@ -218,7 +227,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV8.self, toVersion: SchemaV9.self),
             .lightweight(fromVersion: SchemaV9.self, toVersion: SchemaV10.self),
             .lightweight(fromVersion: SchemaV10.self, toVersion: SchemaV11.self),
-            .lightweight(fromVersion: SchemaV11.self, toVersion: SchemaV12.self)
+            .lightweight(fromVersion: SchemaV11.self, toVersion: SchemaV12.self),
+            .lightweight(fromVersion: SchemaV12.self, toVersion: SchemaV13.self)
         ]
     }
 }

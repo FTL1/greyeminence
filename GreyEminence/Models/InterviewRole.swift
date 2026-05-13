@@ -20,6 +20,12 @@ final class InterviewRole {
     @Relationship(deleteRule: .cascade, inverse: \RoleRubricLink.role)
     var roleRubricLinks: [RoleRubricLink]
 
+    /// Many-to-many links to interview templates that apply to this role.
+    /// Mirrors `roleRubricLinks` (and `TemplateRoleLink` mirrors
+    /// `RoleRubricLink`'s shape).
+    @Relationship(deleteRule: .cascade, inverse: \TemplateRoleLink.role)
+    var templateRoleLinks: [TemplateRoleLink]
+
     init(level: RoleLevel? = nil, department: Department? = nil, team: Team? = nil, customTitle: String? = nil) {
         self.id = UUID()
         self.level = level
@@ -29,6 +35,7 @@ final class InterviewRole {
         self.createdAt = .now
         self.rubrics = []
         self.roleRubricLinks = []
+        self.templateRoleLinks = []
     }
 
     var displayTitle: String {

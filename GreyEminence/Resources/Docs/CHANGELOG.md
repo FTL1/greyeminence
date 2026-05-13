@@ -4,6 +4,23 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.15.0 — 2026-05-12
+
+**Organization settings — Roles**
+- The Roles list is now a browsable hierarchy instead of a flat list:
+  roles group under their Department, and within a department under their
+  Team (with a "— no team —" group, and a "No department" group for
+  unassigned roles). Each department is a collapsible section with a
+  role-count badge.
+- A filter field at the top searches role titles, levels, teams, and
+  departments — matching groups auto-expand. "Expand all" / "Collapse
+  all" for bulk control.
+- Click a role to expand an inline detail card: change its
+  department / team / level / custom title in place, and see which
+  rubrics (with their strictness) and templates are linked to it. Delete
+  is in there too. Newly-added roles auto-expand and select so you land
+  right on them.
+
 ## 0.14.0 — 2026-05-11
 
 **Interview scorecard**
