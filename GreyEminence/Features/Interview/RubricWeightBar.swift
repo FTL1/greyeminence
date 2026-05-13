@@ -138,36 +138,50 @@ struct RubricWeightBar: View {
         barWidth: CGFloat,
         total: Double
     ) -> some View {
-        // Wider invisible hit area centered on the divider, with a thin
-        // visible bar drawn on top via overlay.
-        Color.clear
+        // Wider hit area centered on the divider, with a thin visible bar
+        // drawn on top via overlay.
+        //
+        // Three things matter here:
+        //   1. `Rectangle().fill(Color.white.opacity(0.001))` not
+        //      `Color.clear` — fully-clear views are not reliably
+        //      hit-testable on macOS even with `.contentShape`.
+        //   2. `.offset` not `.position`. `.position` makes the view
+        //      claim its parent's full size and then draws the content at
+        //      the given point, so every handle ends up sized to the
+        //      entire bar and they fight each other for hit-tests.
+        //      `.offset` keeps the 16×28 frame and just shifts where it
+        //      draws.
+        //   3. `.highPriorityGesture` so the enclosing Form's ScrollView
+        //      doesn't intercept the drag's first event.
+        Rectangle()
+            .fill(Color.white.opacity(0.001))
             .frame(width: Self.handleHitWidth, height: Self.barHeight)
-            .contentShape(Rectangle())
             .overlay(
                 Rectangle()
                     .fill(.white.opacity(0.6))
                     .frame(width: 2, height: Self.barHeight - 8)
             )
-            .position(x: dividerX, y: Self.barHeight / 2)
-        .onHover { hovering in
-            if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-        }
-        .gesture(
-            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordSpaceName))
-                .onChanged { value in
-                    handleDrag(
-                        location: value.location,
-                        leftSection: leftSection,
-                        rightSection: rightSection,
-                        dividerX: dividerX,
-                        barWidth: barWidth,
-                        total: total
-                    )
-                }
-                .onEnded { _ in
-                    dragBaseline = nil
-                }
-        )
+            .contentShape(Rectangle())
+            .offset(x: dividerX - Self.handleHitWidth / 2)
+            .onHover { hovering in
+                if hovering { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            }
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.coordSpaceName))
+                    .onChanged { value in
+                        handleDrag(
+                            location: value.location,
+                            leftSection: leftSection,
+                            rightSection: rightSection,
+                            dividerX: dividerX,
+                            barWidth: barWidth,
+                            total: total
+                        )
+                    }
+                    .onEnded { _ in
+                        dragBaseline = nil
+                    }
+            )
     }
 
     /// Called on every drag-change event. Captures the baseline once at

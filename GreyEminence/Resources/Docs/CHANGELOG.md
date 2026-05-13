@@ -4,6 +4,17 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.15.1 — 2026-05-13
+
+**Rubric editor**
+- Section-weight dividers are draggable again. The handles were rendered
+  with `.position`, which silently makes a view claim its parent's full
+  size — every handle was secretly sized to the whole bar, fighting for
+  hit-tests, and the Form's ScrollView was eating the first drag event
+  anyway. Switched to `.offset`, gave the hit area a non-transparent
+  fill (clear views aren't reliably hit-testable on macOS), and bumped
+  to `.highPriorityGesture` so the Form can't intercept.
+
 ## 0.15.0 — 2026-05-12
 
 **Organization settings — Roles**
