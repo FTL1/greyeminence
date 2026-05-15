@@ -232,7 +232,8 @@ private struct RolesTab: View {
     @State private var customTitle = ""
 
     // Browser. `expandedDepartments` keys on `Department.id`, with `nil`
-    // standing in for the "No department" group.
+    // standing in for the "All Departments" group (roles not scoped to
+    // any specific department).
     @State private var roleSearch = ""
     @State private var expandedDepartments: Set<UUID?> = []
     @State private var selectedRoleID: UUID?
@@ -256,7 +257,7 @@ private struct RolesTab: View {
         Section {
             HStack(spacing: 8) {
                 Picker("Department", selection: $selectedDepartment) {
-                    Text("None").tag(nil as Department?)
+                    Text("All").tag(nil as Department?)
                     ForEach(departments) { dept in
                         Text(dept.name).tag(dept as Department?)
                     }
@@ -265,7 +266,7 @@ private struct RolesTab: View {
 
                 if !availableTeams.isEmpty {
                     Picker("Team", selection: $selectedTeam) {
-                        Text("None").tag(nil as Team?)
+                        Text("All Teams").tag(nil as Team?)
                         ForEach(availableTeams) { team in
                             Text(team.name).tag(team as Team?)
                         }
@@ -383,7 +384,7 @@ private struct RolesTab: View {
             HStack(spacing: 6) {
                 Image(systemName: group.department == nil ? "questionmark.folder" : "building.2")
                     .foregroundStyle(group.department == nil ? Color.secondary : Color.cyan)
-                Text(group.department?.name ?? "No department")
+                Text(group.department?.name ?? "All Departments")
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(group.roleCount)")
@@ -410,7 +411,7 @@ private struct RolesTab: View {
     private func teamSubsection(_ tg: TeamGroup) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Text(tg.team?.name ?? "— no team —")
+                Text(tg.team?.name ?? "All Teams")
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
@@ -486,13 +487,13 @@ private struct RolesTab: View {
     // MARK: Grouping
 
     private struct TeamGroup: Identifiable {
-        let team: Team?          // nil → "— no team —"
+        let team: Team?          // nil → "All Teams"
         let roles: [InterviewRole]
         var id: UUID? { team?.id }
     }
 
     private struct DeptGroup: Identifiable {
-        let department: Department?   // nil → "No department"
+        let department: Department?   // nil → "All Departments"
         let teamGroups: [TeamGroup]
         var roleCount: Int { teamGroups.reduce(0) { $0 + $1.roles.count } }
         var id: UUID? { department?.id }
@@ -588,7 +589,7 @@ private struct RoleDetailInline: View {
         VStack(alignment: .leading, spacing: 8) {
             pickerRow("Department") {
                 Picker("", selection: $role.department) {
-                    Text("None").tag(nil as Department?)
+                    Text("All").tag(nil as Department?)
                     ForEach(departments) { Text($0.name).tag($0 as Department?) }
                 }
                 .labelsHidden()
@@ -596,7 +597,7 @@ private struct RoleDetailInline: View {
             if !availableTeams.isEmpty {
                 pickerRow("Team") {
                     Picker("", selection: $role.team) {
-                        Text("None").tag(nil as Team?)
+                        Text("All Teams").tag(nil as Team?)
                         ForEach(availableTeams) { Text($0.name).tag($0 as Team?) }
                     }
                     .labelsHidden()

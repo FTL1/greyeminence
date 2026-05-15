@@ -18,6 +18,17 @@ final class InterviewCreationViewModel {
     var editablePhases: [PlannedPhase] = []
     var selectedInterviewers: Set<UUID> = []
     var preNotes: String = ""
+    /// Planned slot. Defaults to the top of the next hour so the user
+    /// usually only needs to confirm.
+    var scheduledAt: Date = InterviewCreationViewModel.defaultScheduledAt()
+
+    private static func defaultScheduledAt() -> Date {
+        let cal = Calendar.current
+        let now = Date()
+        let oneHourLater = cal.date(byAdding: .hour, value: 1, to: now) ?? now
+        let comps = cal.dateComponents([.year, .month, .day, .hour], from: oneHourLater)
+        return cal.date(from: comps) ?? oneHourLater
+    }
 
     /// Role at the moment the template was chosen — kept as a snapshot
     /// (not derivable from `selectedTemplate`) so the role-change banner
@@ -221,6 +232,7 @@ final class InterviewCreationViewModel {
             plannedPhases: editablePhases,
             interviewers: contacts,
             notes: preNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : preNotes,
+            scheduledAt: scheduledAt,
             in: modelContext
         )
         if let template = selectedTemplate {
@@ -809,9 +821,10 @@ struct InterviewCreationSheet: View {
     // MARK: Footer
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 12) {
             statusLabel
             Spacer()
+            scheduledForPicker
             templateActionsMenu
             Button {
                 schedule()
@@ -882,6 +895,27 @@ struct InterviewCreationSheet: View {
         case .matches: "Template ✓"
         case .diverges: "Template •"
         }
+    }
+
+    private var scheduledForPicker: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "calendar")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Scheduled for")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            DatePicker(
+                "",
+                selection: $vm.scheduledAt,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .datePickerStyle(.compact)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.08), in: Capsule())
     }
 
     @ViewBuilder

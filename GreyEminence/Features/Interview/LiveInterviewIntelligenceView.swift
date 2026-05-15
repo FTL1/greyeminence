@@ -24,6 +24,8 @@ struct LiveInterviewIntelligenceView: View {
     @Query(sort: \InterviewImpressionTrait.sortOrder) private var traits: [InterviewImpressionTrait]
     @Query(sort: \Rubric.createdAt, order: .reverse) private var allRubrics: [Rubric]
 
+    @State private var phaseTimer = PhaseTimerService()
+
     private var recordingVM: RecordingViewModel {
         interviewViewModel.recordingViewModel
     }
@@ -44,18 +46,36 @@ struct LiveInterviewIntelligenceView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if interviewViewModel.isRubricPhase,
-                       let phase = interviewViewModel.interview?.activePhase {
-                        PhaseRubricBoard(phase: phase, viewModel: interviewViewModel)
-                    } else {
-                        phaseOverview
+            ZStack(alignment: .top) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if interviewViewModel.isRubricPhase,
+                           let phase = interviewViewModel.interview?.activePhase {
+                            PhaseRubricBoard(phase: phase, viewModel: interviewViewModel)
+                        } else {
+                            phaseOverview
+                        }
+                        PhaseSignalsStrip(viewModel: interviewViewModel)
                     }
-                    PhaseSignalsStrip(viewModel: interviewViewModel)
+                    .padding(.vertical)
                 }
-                .padding(.vertical)
+
+                if let alert = phaseTimer.currentAlert {
+                    PhaseTimerBanner(alert: alert) {
+                        phaseTimer.dismissCurrentAlert()
+                    }
+                    .padding(.top, 8)
+                    .padding(.horizontal, 12)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: phaseTimer.currentAlert)
+        }
+        .onAppear {
+            phaseTimer.bind(to: interviewViewModel.interview?.activePhase)
+        }
+        .onChange(of: interviewViewModel.interview?.activePhase?.id) {
+            phaseTimer.bind(to: interviewViewModel.interview?.activePhase)
         }
     }
 
@@ -387,7 +407,6 @@ private struct PhaseRubricBoard: View {
     let phase: InterviewPhase
     var viewModel: InterviewRecordingViewModel
 
-    @State private var briefCollapsed = false
     @State private var expandedCriteria: Set<CriterionKey> = []
 
     private var sortedScores: [InterviewSectionScore] {
@@ -396,7 +415,12 @@ private struct PhaseRubricBoard: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            BriefHeader(rubric: phase.rubric, isCollapsed: $briefCollapsed)
+            phaseHeader
+            if let rubric = phase.rubric,
+               let md = rubric.candidateInstructions,
+               !md.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                CandidateInstructionsPanel(sectionTitle: rubric.name, markdown: md)
+            }
             ForEach(sortedScores) { score in
                 PhaseSectionCard(
                     score: score,
@@ -407,38 +431,149 @@ private struct PhaseRubricBoard: View {
         }
         .padding(.horizontal, 12)
     }
+
+    @ViewBuilder
+    private var phaseHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: phase.resolvedIconName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.cyan)
+            Text(phase.title)
+                .font(.headline)
+            if phase.targetMinutes != nil, phase.startedAt != nil {
+                PhaseTimerPill(phase: phase)
+            }
+            if let minutes = phase.targetMinutes {
+                Text("\(minutes) min target")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+    }
 }
 
-// MARK: - Brief Header (collapsible candidate brief)
+// MARK: - Phase Timer Pill
 
-private struct BriefHeader: View {
-    let rubric: Rubric?
-    @Binding var isCollapsed: Bool
+/// Inline pill that counts down per-phase remaining time, then counts up
+/// with flashing red treatment once the budget is blown. Self-refreshing
+/// via `TimelineView(.periodic)` — no Timer ownership.
+private struct PhaseTimerPill: View {
+    let phase: InterviewPhase
 
     var body: some View {
-        if let rubric, let md = rubric.candidateInstructions,
-           !md.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            VStack(alignment: .leading, spacing: 0) {
-                Button { isCollapsed.toggle() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                        Text(isCollapsed ? "Show candidate brief" : "Hide candidate brief")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
-                    .padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
+        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+            content(at: context.date)
+        }
+    }
 
-                if !isCollapsed {
-                    CandidateInstructionsPanel(sectionTitle: rubric.name, markdown: md)
-                }
+    @ViewBuilder
+    private func content(at now: Date) -> some View {
+        if let target = phase.targetMinutes, let startedAt = phase.startedAt {
+            pill(target: target, startedAt: startedAt, now: now)
+        }
+    }
+
+    private func pill(target: Int, startedAt: Date, now: Date) -> some View {
+        let elapsed = now.timeIntervalSince(startedAt)
+        let targetSeconds = TimeInterval(target * 60)
+        let remaining = targetSeconds - elapsed
+        let isOver = remaining <= 0
+        let label = isOver ? "+" + formatMMSS(-remaining) + " over" : formatMMSS(remaining) + " left"
+        let icon = isOver ? "exclamationmark.triangle.fill" : "clock"
+        // Flash every ~half-second when over — the periodic refresh drives the swap.
+        let flashOn = isOver ? (Int(-remaining * 2) % 2 == 0) : true
+        let tint = tintColor(remaining: remaining, total: targetSeconds)
+
+        return HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text(label).font(.caption.monospacedDigit().weight(.semibold))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .foregroundStyle(isOver ? Color.white : tint)
+        .background(
+            isOver
+            ? Color.red.opacity(flashOn ? 0.95 : 0.55)
+            : tint.opacity(0.15),
+            in: Capsule()
+        )
+        .overlay(
+            Capsule().stroke(isOver ? Color.red : tint.opacity(0.4), lineWidth: 0.75)
+        )
+        .animation(.easeInOut(duration: 0.25), value: flashOn)
+    }
+
+    private func tintColor(remaining: TimeInterval, total: TimeInterval) -> Color {
+        let frac = max(0, remaining) / max(total, 1)
+        if frac > 0.33 { return .green }
+        if frac > 0.1 { return .orange }
+        return .red
+    }
+
+    private func formatMMSS(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds.rounded(.down))
+        return String(format: "%02d:%02d", s / 60, s % 60)
+    }
+}
+
+// MARK: - Phase Timer Banner
+
+private struct PhaseTimerBanner: View {
+    let alert: PhaseTimerService.Alert
+    let onDismiss: () -> Void
+
+    @State private var autoDismissTask: Task<Void, Never>?
+
+    private var iconName: String {
+        switch alert.kind {
+        case .warning: return "bell.fill"
+        case .overtime: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch alert.kind {
+        case .warning(let m) where m <= 1: return .orange
+        case .warning: return .yellow
+        case .overtime: return .red
+        }
+    }
+
+    private var message: String {
+        switch alert.kind {
+        case .warning(let m): return "\(m) minute\(m == 1 ? "" : "s") left in \(alert.phaseTitle)"
+        case .overtime:       return "\(alert.phaseTitle) is over its time budget"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .foregroundStyle(.white)
+            Text(message)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(tint.gradient, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        .onAppear {
+            autoDismissTask?.cancel()
+            autoDismissTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(6))
+                if !Task.isCancelled { onDismiss() }
             }
         }
+        .onDisappear { autoDismissTask?.cancel() }
     }
 }
 

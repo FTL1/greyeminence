@@ -137,9 +137,7 @@ private struct InterviewRowView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                    Text(interview.createdAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    rowTimestamp
                 }
 
                 if let gp = interview.compositeGradePoints {
@@ -151,5 +149,25 @@ private struct InterviewRowView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Show the planned slot when one was picked; fall back to the
+    /// creation timestamp for older / ad-hoc interviews. A small "Scheduled"
+    /// prefix disambiguates the two.
+    @ViewBuilder
+    private var rowTimestamp: some View {
+        if let scheduledAt = interview.scheduledAt {
+            HStack(spacing: 3) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 9))
+                Text(scheduledAt.formatted(date: .abbreviated, time: .shortened))
+            }
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        } else {
+            Text(interview.createdAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
     }
 }

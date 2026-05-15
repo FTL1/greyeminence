@@ -234,6 +234,7 @@ final class InterviewRecordingViewModel {
         plannedPhases: [PlannedPhase],
         interviewers: [Contact],
         notes: String?,
+        scheduledAt: Date? = nil,
         in modelContext: ModelContext
     ) -> Interview {
         let firstScoredRubric = plannedPhases.compactMap(\.rubric).first
@@ -241,6 +242,7 @@ final class InterviewRecordingViewModel {
         interview.status = .scheduled
         interview.interviewerNotes = notes
         interview.interviewers = interviewers
+        interview.scheduledAt = scheduledAt
         modelContext.insert(interview)
 
         for (idx, planned) in plannedPhases.enumerated() {

@@ -8,6 +8,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case ask
     case vocabulary
     case organization
+    case interview
     case obsidian
     case developer
 
@@ -21,6 +22,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .ask: "Ask"
         case .vocabulary: "Vocabulary"
         case .organization: "Organization"
+        case .interview: "Interview"
         case .obsidian: "Obsidian"
         case .developer: "Developer"
         }
@@ -34,6 +36,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .ask: "sparkles.square.filled.on.square"
         case .vocabulary: "textformat.abc"
         case .organization: "building.2"
+        case .interview: "person.badge.shield.checkmark"
         case .obsidian: "doc.text"
         case .developer: "hammer"
         }
@@ -47,6 +50,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .ask: .pink
         case .vocabulary: .teal
         case .organization: .cyan
+        case .interview: .orange
         case .obsidian: .indigo
         case .developer: .brown
         }
@@ -91,6 +95,8 @@ struct SettingsView: View {
                 VocabularySettingsView()
             case .organization:
                 OrganizationSettingsView()
+            case .interview:
+                InterviewSettingsView()
             case .obsidian:
                 ObsidianSettingsView()
             case .developer:

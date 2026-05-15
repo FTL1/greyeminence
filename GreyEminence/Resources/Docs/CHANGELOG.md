@@ -4,6 +4,45 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.16.0 — 2026-05-15
+
+**Phase time-box alerts**
+- Per-phase countdown pill in the live interview view — shows
+  `MM:SS left` at the top of the active phase, tinted green → orange →
+  red as you burn through the budget. Once the clock runs out, the pill
+  flips to `+MM:SS over` and flashes red so it can't be missed while
+  you're focused on the candidate.
+- Threshold alerts fire at 5 min remaining, 1 min remaining, and at
+  overtime. Each one shows an in-app banner at the top of the live view,
+  plays a system sound (`Tink` / `Hero` / `Funk`), and writes an entry
+  to the Activity Log. Phases without a `targetMinutes` budget (intro,
+  ad-hoc discussion) stay silent — no pill, no alerts.
+- New **Interview** tab in Settings: toggle each alert independently,
+  customize the lead-time minutes (1–30 for the first warning, 1–10 for
+  the second), and silence the sound entirely.
+
+**Interview scheduling**
+- The interview-creation modal now has a "Scheduled for" date+time picker
+  in the footer next to the Schedule button — defaults to the top of the
+  next hour. Backed by a new `Interview.scheduledAt` field (SchemaV14,
+  lightweight additive migration).
+- The Interview list now shows the planned slot (with a 📅 glyph) when
+  one was picked; older / ad-hoc interviews keep showing their creation
+  timestamp.
+
+**Candidate brief**
+- The brief panel is now collapsed by default everywhere it appears
+  (live phase board, scorecard phase plan). The header still shows
+  Copy and Export-PDF buttons even when collapsed — so you can hand the
+  prompt to the candidate mid-interview without having to expand and
+  scroll past it first.
+
+**Roles UI wording**
+- Department / Team pickers say "All" / "All Teams" instead of "None" for
+  the nil option — matches what the value actually means (the role isn't
+  scoped to a specific department / team). The Roles browser's group
+  headers follow suit: "All Departments" / "All Teams".
+
 ## 0.15.1 — 2026-05-13
 
 **Rubric editor**

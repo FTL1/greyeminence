@@ -72,6 +72,12 @@ final class Interview {
     /// the first scoring pass. Surfaced in the scorecard header.
     var lastScoredAt: Date?
 
+    /// When the interview is planned to happen — chosen at scheduling time.
+    /// Optional so historical interviews (created before this field
+    /// existed) and ad-hoc "start now" sessions don't need a value. Falls
+    /// back to `createdAt` in the list display.
+    var scheduledAt: Date?
+
     var candidate: Candidate?
     var rubric: Rubric?
 
