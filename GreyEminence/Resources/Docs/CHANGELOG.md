@@ -4,6 +4,27 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.16.4 — 2026-05-19
+
+**Crash fix (the actual one — sorry)**
+- v0.16.1's resumable re-processing introduced a Swift exclusivity
+  violation in `HighQualityTranscriber.transcribe(...)`. The
+  checkpoint-emit closure captured local vars (`completedMic`,
+  `accumulatedMic`, `segments`, ...) by reference, and those same vars
+  were then passed `inout` to `runChunks`. When `runChunks` invoked
+  the closure mid-loop, Swift's law of exclusivity tripped — two
+  active accesses to the same storage — and aborted the process.
+- Refactored to bundle all mutable progress into a single
+  `TranscriptionProgress` struct passed once as `inout`. The
+  checkpoint emission reads from the inout binding directly, no
+  outer capture, no overlapping access.
+- Any user with a Meeting stuck in `reProcessingState` from a prior
+  session hit this on every launch, 4-9 seconds in, with no UI feedback
+  — the queue auto-resumes orphaned jobs at startup, fires the
+  buggy code path, dies before painting a window. v0.16.2's
+  NLEmbedding lock and v0.16.3's eager Sparkle check were both
+  misdiagnoses on my part; the actual race was never NLEmbedding.
+
 ## 0.16.3 — 2026-05-19
 
 **Update reliability**
