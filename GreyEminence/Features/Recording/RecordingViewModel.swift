@@ -270,7 +270,7 @@ final class RecordingViewModel {
         }
     }
 
-    func startRecording(in modelContext: ModelContext, autoDetected: Bool = false) {
+    func startRecording(in modelContext: ModelContext, autoDetected: Bool = false, resuming existing: Meeting? = nil) {
         // Guard against rapid double-click / stale UI triggering two starts in
         // a row. If we're already recording or paused, ignore silently and log
         // — creating a second meeting on top of a live one corrupts segment
@@ -283,36 +283,42 @@ final class RecordingViewModel {
         meetingDetector.noteStart(autoDetected ? .auto : .manual)
         autoDetectedRecordingStart = autoDetected
 
-        let meeting = Meeting(title: "Meeting \(DateFormatter.shortDate.string(from: .now))")
+        let meeting: Meeting
+        if let existing {
+            meeting = existing
+            log.log("Recording resumed into existing meeting \(existing.id)", category: .audio)
+        } else {
+            meeting = Meeting(title: "Meeting \(DateFormatter.shortDate.string(from: .now))")
 
-        // Calendar integration: auto-set title and match attendees
-        let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
-        if calendarEnabled, let event = calendarService.currentOrUpcomingEvent() {
-            applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "auto")
-        }
-
-        // Always add "me" as an attendee — the user must be present to record.
-        let myContactIDString = UserDefaults.standard.string(forKey: "myContactID") ?? ""
-        if let myID = UUID(uuidString: myContactIDString),
-           !meeting.attendees.contains(where: { $0.id == myID }) {
-            let descriptor = FetchDescriptor<Contact>(predicate: #Predicate { $0.id == myID })
-            if let me = try? modelContext.fetch(descriptor).first {
-                meeting.attendees.append(me)
+            // Calendar integration: auto-set title and match attendees
+            let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
+            if calendarEnabled, let event = calendarService.currentOrUpcomingEvent() {
+                applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "auto")
             }
-        }
 
-        modelContext.insert(meeting)
-        // Persist the meeting row immediately so a crash within the first 10s
-        // (before the periodic save fires) doesn't leave audio on disk with
-        // no SwiftData row to claim it. The lock file below is the second
-        // safety net, but only the row guarantees the audio won't be purged
-        // as orphan on next launch.
-        PersistenceGate.save(
-            modelContext,
-            site: "startRecording/insert",
-            critical: true,
-            meetingID: meeting.id
-        )
+            // Always add "me" as an attendee — the user must be present to record.
+            let myContactIDString = UserDefaults.standard.string(forKey: "myContactID") ?? ""
+            if let myID = UUID(uuidString: myContactIDString),
+               !meeting.attendees.contains(where: { $0.id == myID }) {
+                let descriptor = FetchDescriptor<Contact>(predicate: #Predicate { $0.id == myID })
+                if let me = try? modelContext.fetch(descriptor).first {
+                    meeting.attendees.append(me)
+                }
+            }
+
+            modelContext.insert(meeting)
+            // Persist the meeting row immediately so a crash within the first 10s
+            // (before the periodic save fires) doesn't leave audio on disk with
+            // no SwiftData row to claim it. The lock file below is the second
+            // safety net, but only the row guarantees the audio won't be purged
+            // as orphan on next launch.
+            PersistenceGate.save(
+                modelContext,
+                site: "startRecording/insert",
+                critical: true,
+                meetingID: meeting.id
+            )
+        }
         self.modelContext = modelContext
         currentMeeting = meeting
         state = .recording
@@ -320,9 +326,15 @@ final class RecordingViewModel {
         recordingStartDate = Date()
         accumulatedPauseDuration = 0
         pauseStartDate = nil
-        lastPersistedSegmentCount = 0
+        if existing != nil {
+            let saved = meeting.segments.sorted { $0.startTime < $1.startTime }
+            segments = saved
+            lastPersistedSegmentCount = saved.count
+        } else {
+            lastPersistedSegmentCount = 0
+            segments = []
+        }
         segmentSectionTags = [:]
-        segments = []
         actionItems = []
         followUpQuestions = []
         topics = []

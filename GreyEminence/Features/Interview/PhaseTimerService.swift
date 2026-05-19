@@ -2,22 +2,30 @@ import Foundation
 import SwiftUI
 import AppKit
 
-/// Per-phase time-box tracking and alerting for the live interview view.
-///
-/// Watches the active phase's `targetMinutes` against wall-clock elapsed
-/// since `startedAt`, fires one-shot alerts when the configured thresholds
-/// are crossed (defaults: 5 min before, 1 min before, overtime), and
-/// exposes a `currentAlert` the live view renders as a banner.
-///
-/// Thresholds reset every time a new phase activates — switching phases
-/// gives the interviewer a fresh budget. Phases with no `targetMinutes`
-/// (intro, unscored discussion) silently no-op.
+/// `@AppStorage` keys + defaults shared between `PhaseTimerService` and
+/// `InterviewSettingsView`. Centralized so a rename in one place can't
+/// silently desync the picker UI from the timer's reads.
+enum PhaseAlertSettings {
+    static let warn1MinutesKey = "phaseAlertWarn1Minutes"
+    static let warn2MinutesKey = "phaseAlertWarn2Minutes"
+    static let warn1EnabledKey = "phaseAlert5MinEnabled"
+    static let warn2EnabledKey = "phaseAlert1MinEnabled"
+    static let overtimeEnabledKey = "phaseAlertOvertimeEnabled"
+    static let soundEnabledKey = "phaseAlertSoundEnabled"
+    static let sound1MinKey = "phaseAlertSound1Min"
+    static let sound5MinKey = "phaseAlertSound5Min"
+    static let soundOvertimeKey = "phaseAlertSoundOvertime"
+
+    static let defaultWarn1Minutes = 5
+    static let defaultWarn2Minutes = 1
+    static let defaultSound1Min = "Hero"
+    static let defaultSound5Min = "Tink"
+    static let defaultSoundOvertime = "Funk"
+}
+
 @Observable
 @MainActor
 final class PhaseTimerService {
-    /// The kind of threshold that fired. `.warning` minutes is the lead
-    /// time (5 = "5 minutes left"); `.overtime` is the single moment the
-    /// budget hit zero.
     enum AlertKind: Hashable {
         case warning(minutesLeft: Int)
         case overtime
@@ -30,20 +38,16 @@ final class PhaseTimerService {
         let firedAt: Date
     }
 
-    /// Last alert that fired for the current phase. The live view shows a
-    /// banner while this is non-nil; clearing dismisses the banner.
     private(set) var currentAlert: Alert?
 
     private weak var activePhase: InterviewPhase?
     private var firedThresholds: Set<AlertKind> = []
     private var tickTimer: Timer?
 
-    /// Bind the service to a new active phase. Pass `nil` when the
-    /// interview ends or an unscored phase activates — the service stops
-    /// ticking and clears any visible alert.
+    /// Pass `nil` to detach (interview ended, unscored phase active).
     func bind(to phase: InterviewPhase?) {
-        // Same phase rebinding (e.g. re-render) is a no-op so we don't
-        // wipe alert state mid-flight.
+        // Rebinding to the same phase preserves fired-threshold state so a
+        // re-render doesn't re-fire alerts.
         if phase?.id == activePhase?.id { return }
 
         activePhase = phase
@@ -87,31 +91,30 @@ final class PhaseTimerService {
             return
         }
 
+        let defaults = UserDefaults.standard
+        let warn1Minutes = defaults.integer(forKey: PhaseAlertSettings.warn1MinutesKey)
+            .nonZeroOrDefault(PhaseAlertSettings.defaultWarn1Minutes)
+        let warn2Minutes = defaults.integer(forKey: PhaseAlertSettings.warn2MinutesKey)
+            .nonZeroOrDefault(PhaseAlertSettings.defaultWarn2Minutes)
         let elapsed = Date().timeIntervalSince(startedAt)
-        let targetSeconds = TimeInterval(target * 60)
-        let remaining = targetSeconds - elapsed
+        let remaining = TimeInterval(target * 60) - elapsed
+        let warn1 = TimeInterval(warn1Minutes * 60)
+        let warn2 = TimeInterval(warn2Minutes * 60)
+        let warn1Kind: AlertKind = .warning(minutesLeft: warn1Minutes)
+        let warn2Kind: AlertKind = .warning(minutesLeft: warn2Minutes)
 
-        let warn1 = TimeInterval(UserDefaults.standard.integer(forKey: "phaseAlertWarn1Minutes")
-            .nonZeroOrDefault(5) * 60)
-        let warn2 = TimeInterval(UserDefaults.standard.integer(forKey: "phaseAlertWarn2Minutes")
-            .nonZeroOrDefault(1) * 60)
-
-        let warn1Enabled = UserDefaults.standard.boolOrTrue(forKey: "phaseAlert5MinEnabled")
-        let warn2Enabled = UserDefaults.standard.boolOrTrue(forKey: "phaseAlert1MinEnabled")
-        let overtimeEnabled = UserDefaults.standard.boolOrTrue(forKey: "phaseAlertOvertimeEnabled")
-
-        // Order matters: crossing 1m also crosses 5m, but we fire each
-        // threshold at most once, and only when remaining drops past it.
-        let warn1Kind: AlertKind = .warning(minutesLeft: UserDefaults.standard.integer(forKey: "phaseAlertWarn1Minutes").nonZeroOrDefault(5))
-        let warn2Kind: AlertKind = .warning(minutesLeft: UserDefaults.standard.integer(forKey: "phaseAlertWarn2Minutes").nonZeroOrDefault(1))
-
-        if warn1Enabled, remaining <= warn1, remaining > warn2, !firedThresholds.contains(warn1Kind) {
+        // Order matters: crossing 1m also crosses 5m. Each threshold fires
+        // at most once per phase activation.
+        if defaults.boolOrTrue(forKey: PhaseAlertSettings.warn1EnabledKey),
+           remaining <= warn1, remaining > warn2, !firedThresholds.contains(warn1Kind) {
             fire(warn1Kind, phaseTitle: phase.title)
         }
-        if warn2Enabled, remaining <= warn2, remaining > 0, !firedThresholds.contains(warn2Kind) {
+        if defaults.boolOrTrue(forKey: PhaseAlertSettings.warn2EnabledKey),
+           remaining <= warn2, remaining > 0, !firedThresholds.contains(warn2Kind) {
             fire(warn2Kind, phaseTitle: phase.title)
         }
-        if overtimeEnabled, remaining <= 0, !firedThresholds.contains(.overtime) {
+        if defaults.boolOrTrue(forKey: PhaseAlertSettings.overtimeEnabledKey),
+           remaining <= 0, !firedThresholds.contains(.overtime) {
             fire(.overtime, phaseTitle: phase.title)
         }
     }
@@ -120,18 +123,23 @@ final class PhaseTimerService {
         firedThresholds.insert(kind)
         currentAlert = Alert(kind: kind, phaseTitle: phaseTitle, firedAt: .now)
 
-        if UserDefaults.standard.boolOrTrue(forKey: "phaseAlertSoundEnabled") {
+        if UserDefaults.standard.boolOrTrue(forKey: PhaseAlertSettings.soundEnabledKey) {
             playSound(for: kind)
         }
         LogManager.shared.log(logMessage(for: kind, phaseTitle: phaseTitle), category: .ai, level: .info)
     }
 
     private func playSound(for kind: AlertKind) {
+        let defaults = UserDefaults.standard
+        guard defaults.boolOrTrue(forKey: PhaseAlertSettings.soundEnabledKey) else { return }
         let name: String
         switch kind {
-        case .warning(let minutes) where minutes <= 1: name = "Hero"
-        case .warning:                                 name = "Tink"
-        case .overtime:                                name = "Funk"
+        case .warning(let minutes) where minutes <= 1:
+            name = defaults.string(forKey: PhaseAlertSettings.sound1MinKey) ?? PhaseAlertSettings.defaultSound1Min
+        case .warning:
+            name = defaults.string(forKey: PhaseAlertSettings.sound5MinKey) ?? PhaseAlertSettings.defaultSound5Min
+        case .overtime:
+            name = defaults.string(forKey: PhaseAlertSettings.soundOvertimeKey) ?? PhaseAlertSettings.defaultSoundOvertime
         }
         NSSound(named: name)?.play()
     }

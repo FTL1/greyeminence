@@ -36,6 +36,31 @@ final class StorageManager: Sendable {
         recordingDirectory(for: meetingID).appendingPathComponent("system.m4a")
     }
 
+    /// Sidecar file used by the re-processing pipeline to checkpoint
+    /// progress between chunks so an interrupted job (live-recording
+    /// yield, app restart) can resume instead of restarting from chunk 0.
+    func reProcessCheckpointURL(for meetingID: UUID) -> URL {
+        recordingDirectory(for: meetingID).appendingPathComponent("reprocess-checkpoint.json")
+    }
+
+    func loadReProcessCheckpoint(for meetingID: UUID) -> ReProcessingCheckpoint? {
+        let url = reProcessCheckpointURL(for: meetingID)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let cp = try? JSONDecoder().decode(ReProcessingCheckpoint.self, from: data) else { return nil }
+        guard cp.version == ReProcessingCheckpoint.currentVersion else { return nil }
+        return cp
+    }
+
+    func saveReProcessCheckpoint(_ checkpoint: ReProcessingCheckpoint, for meetingID: UUID) {
+        let url = reProcessCheckpointURL(for: meetingID)
+        guard let data = try? JSONEncoder().encode(checkpoint) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    func deleteReProcessCheckpoint(for meetingID: UUID) {
+        try? FileManager.default.removeItem(at: reProcessCheckpointURL(for: meetingID))
+    }
+
     /// Remove the entire recording directory for a meeting (mic + system
     /// chunks, plus any sidecar files). Returns true if something was
     /// actually removed. Missing-file is not an error.

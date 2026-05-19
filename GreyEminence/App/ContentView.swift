@@ -128,6 +128,7 @@ struct ContentView: View {
         }
         .onAppear {
             checkForInterruptedRecording()
+            recoverOrphanedInterviews()
             // Prompt for profile if not configured (with slight delay so window settles)
             if myContactIDString.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -169,6 +170,31 @@ struct ContentView: View {
                 Text("\"\(meeting.title)\" was interrupted. Resume recording or discard it?\n\(meeting.segments.count) segments, \(meeting.formattedDuration) elapsed")
             }
         }
+    }
+
+    /// Revert any Interview rows stuck in `.recording` back to `.scheduled`.
+    /// The recording engine is process-local — if the app was restarted or
+    /// crashed mid-interview, the status persists but no audio is being
+    /// captured. `checkForInterruptedRecording` already declines to resume
+    /// interview meetings (they're too complex to restore), so without this
+    /// the row's Start button stays hidden forever and the user is stuck
+    /// looking at a "In Progress" badge they can't act on. Reverting to
+    /// `.scheduled` restores the Start button so they can re-enter cleanly.
+    private func recoverOrphanedInterviews() {
+        let descriptor = FetchDescriptor<Interview>()
+        let interviews = (try? modelContext.fetch(descriptor)) ?? []
+        var reverted = 0
+        for interview in interviews where interview.status == .recording {
+            interview.status = .scheduled
+            reverted += 1
+        }
+        guard reverted > 0 else { return }
+        PersistenceGate.save(
+            modelContext,
+            site: "ContentView.recoverOrphanedInterviews",
+            critical: true
+        )
+        LogManager.send("Recovered \(reverted) orphaned interview row(s) — reverted to scheduled", category: .general)
     }
 
     /// Check if there's an interrupted recording from a previous session.

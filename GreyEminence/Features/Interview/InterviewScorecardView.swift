@@ -23,9 +23,9 @@ struct InterviewScorecardView: View {
         case failed(String)
     }
 
-    /// Start / In-Progress button to the left of "Score All Sections".
-    /// Hidden once the interview is completed or archived — by that point
-    /// recording is moot and the scorecard is in review mode.
+    /// Resume covers `.recording` rows whose audio engine isn't running —
+    /// otherwise the user is stuck (Start is gated on `.scheduled`, the
+    /// live phase board on `isInterviewActive`).
     @ViewBuilder
     private var startInterviewButton: some View {
         switch interview.status {
@@ -40,18 +40,31 @@ struct InterviewScorecardView: View {
             .tint(.red)
             .controlSize(.small)
         case .recording:
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(.red)
-                    .frame(width: 7, height: 7)
-                    .modifier(PulsingModifier())
-                Text("In Progress")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.red)
+            if interviewViewModel.isInterviewActive {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(.red)
+                        .frame(width: 7, height: 7)
+                        .modifier(PulsingModifier())
+                    Text("In Progress")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.red.opacity(0.1), in: Capsule())
+            } else {
+                Button {
+                    interviewViewModel.beginRecording(interview, in: modelContext)
+                } label: {
+                    Label("Resume Interview", systemImage: "play.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.small)
+                .help("This interview was interrupted. Click to resume recording and the AI scoring loop.")
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(.red.opacity(0.1), in: Capsule())
         case .completed, .archived:
             EmptyView()
         }
@@ -210,6 +223,18 @@ struct InterviewScorecardView: View {
                 }
 
                 startInterviewButton
+
+                if interview.status == .recording {
+                    Button {
+                        interviewViewModel.markInterviewComplete(interview, in: modelContext)
+                    } label: {
+                        Label("End Interview", systemImage: "stop.circle.fill")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Mark this interview complete. If recording is active, this stops capture and triggers final AI scoring.")
+                }
 
                 // Score-all only makes sense when the user is looking at
                 // the scorecard. Hide it on the Transcript tab so that
@@ -794,9 +819,15 @@ struct InterviewScorecardView: View {
             LogManager.send("Scoring aborted: no meeting", category: .ai, level: .error)
             return
         }
-        guard let rubric = interview.rubric else {
-            reanalysisError = "No rubric linked to this interview."
-            LogManager.send("Scoring aborted: no rubric", category: .ai, level: .error)
+
+        // Multi-phase interviews carry their rubrics on each InterviewPhase
+        // (interview.rubric is the legacy single-rubric field, often nil).
+        // Iterate phases; each scored phase contributes its rubric's sections
+        // to the parallel scoring pass.
+        let scoredPhases = interview.orderedPhases.filter { $0.rubric != nil }
+        guard !scoredPhases.isEmpty else {
+            reanalysisError = "No scored phases on this interview."
+            LogManager.send("Scoring aborted: no scored phases", category: .ai, level: .error)
             return
         }
 
@@ -821,53 +852,57 @@ struct InterviewScorecardView: View {
             return
         }
 
-        // Build segment snapshots per section (using section tags)
+        // Segment tag IDs on captured segments are phase IDs (set by
+        // `activatePhase`). Group segments by phase so each phase scores
+        // only the parts of the transcript that happened during it.
         let allSnapshots: [SegmentSnapshot] = sortedSegments
             .map { SegmentSnapshot(speaker: $0.speaker, text: $0.text, formattedTimestamp: $0.formattedTimestamp, isFinal: $0.isFinal) }
 
-        var segmentsBySection: [UUID: [SegmentSnapshot]] = [:]
+        var segmentsByPhase: [UUID: [SegmentSnapshot]] = [:]
         for segment in sortedSegments {
-            if let tagID = segment.sectionTagID {
-                segmentsBySection[tagID, default: []].append(
+            if let phaseID = segment.sectionTagID {
+                segmentsByPhase[phaseID, default: []].append(
                     SegmentSnapshot(speaker: segment.speaker, text: segment.text, formattedTimestamp: segment.formattedTimestamp, isFinal: segment.isFinal)
                 )
             }
         }
 
-        let rubricSnapshot = rubric.toSnapshot(strictnessFor: interview.candidate?.role)
-
-        // Initialize all sections as pending
-        for section in rubricSnapshot.sections {
-            sectionScoringStatus[section.id] = .pending
+        // Per-phase rubric snapshots + section initialization for the UI.
+        let role = interview.candidate?.role
+        let phasePlans: [(phaseID: UUID, snapshot: RubricSnapshot, segments: [SegmentSnapshot])] = scoredPhases.compactMap { phase in
+            guard let rubric = phase.rubric else { return nil }
+            let snapshot = rubric.toSnapshot(strictnessFor: role)
+            let phaseSegs = segmentsByPhase[phase.id] ?? allSnapshots
+            for section in snapshot.sections {
+                sectionScoringStatus[section.id] = .pending
+            }
+            return (phase.id, snapshot, phaseSegs)
         }
 
-        // Score all sections in parallel — send only relevant transcript segments
         let meetingID = meeting.id
-        let sections = rubricSnapshot.sections
 
-        LogManager.send("Starting parallel scoring: \(sections.count) sections, \(allSnapshots.count) total segments", category: .ai)
-        for section in sections {
-            let tagged = segmentsBySection[section.id]?.count ?? 0
-            LogManager.send("  \(section.title): \(tagged) tagged segments (fallback: \(tagged == 0 ? "full transcript" : "tagged only"))", category: .ai)
-        }
+        let totalSections = phasePlans.reduce(0) { $0 + $1.snapshot.sections.count }
+        LogManager.send("Starting parallel scoring: \(scoredPhases.count) phase(s), \(totalSections) section(s), \(allSnapshots.count) total segments", category: .ai)
 
         var tasks: [UUID: Task<InterviewAnalysisResult?, Error>] = [:]
-        for section in sections {
-            sectionScoringStatus[section.id] = .scoring
-            let sectionCopy = section
-            let rubricCopy = rubricSnapshot
-            // Use tagged segments for this section if available, otherwise full transcript
-            let sectionSegments = segmentsBySection[section.id] ?? allSnapshots
-            tasks[section.id] = Task.detached {
-                let service = InterviewIntelligenceService(
-                    client: client,
-                    rubricContext: rubricCopy,
-                    meetingID: meetingID
-                )
-                return try await service.scoreSingleSection(
-                    section: sectionCopy,
-                    segments: sectionSegments
-                )
+        for plan in phasePlans {
+            LogManager.send("  Phase \(plan.snapshot.name): \(plan.segments.count) segment(s)", category: .ai)
+            for section in plan.snapshot.sections {
+                sectionScoringStatus[section.id] = .scoring
+                let sectionCopy = section
+                let rubricCopy = plan.snapshot
+                let sectionSegments = plan.segments
+                tasks[section.id] = Task.detached {
+                    let service = InterviewIntelligenceService(
+                        client: client,
+                        rubricContext: rubricCopy,
+                        meetingID: meetingID
+                    )
+                    return try await service.scoreSingleSection(
+                        section: sectionCopy,
+                        segments: sectionSegments
+                    )
+                }
             }
         }
 

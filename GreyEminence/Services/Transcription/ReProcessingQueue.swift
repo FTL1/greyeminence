@@ -245,29 +245,49 @@ final class ReProcessingQueue {
 
         setPhase(.transcribing, for: meeting, in: context)
         phaseStart = Date()
+        let checkpoint = StorageManager.shared.loadReProcessCheckpoint(for: meetingID)
         let upgraded: [HighQualityTranscriber.Segment]
         do {
             upgraded = try await transcriber.transcribe(
                 micChunks: micChunks,
                 systemChunks: sysChunks,
+                resumeFrom: checkpoint,
                 onProgress: { [weak self] progress in
                     Task { @MainActor [weak self] in
                         self?.updateTranscriptionProgress(progress)
                     }
+                },
+                onCheckpoint: { cp in
+                    // Sendable closure — writes the sidecar atomically from
+                    // the transcriber actor without bouncing to main.
+                    StorageManager.shared.saveReProcessCheckpoint(cp, for: meetingID)
                 }
             )
             transcribeDuration = Date().timeIntervalSince(phaseStart)
         } catch is CancellationError {
-            LogManager.send("Re-transcription cancelled for \"\(title)\"", category: .transcription)
+            // User-initiated cancel (state == .cancelling) deletes the
+            // checkpoint so the next run starts fresh. Yield-to-recording
+            // (state == .queued, set by yieldToLiveRecording before cancel)
+            // keeps the checkpoint so the work resumes when audio frees up.
+            let userCancelled = meeting.reProcessingState == ReProcessingState.cancelling.rawValue
+            if userCancelled {
+                StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
+            }
+            LogManager.send("Re-transcription cancelled for \"\(title)\" — checkpoint \(userCancelled ? "discarded" : "kept for resume")", category: .transcription)
             markState(meeting: meeting, state: nil, in: context)
             return
         } catch {
+            StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
             LogManager.send("Re-transcription failed for \(meetingID): \(error.localizedDescription)", category: .transcription, level: .error)
             markState(meeting: meeting, state: .failed, error: error.localizedDescription, in: context)
             return
         }
 
         if Task.isCancelled {
+            let userCancelled = meeting.reProcessingState == ReProcessingState.cancelling.rawValue
+            if userCancelled {
+                StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
+            }
             LogManager.send("Re-transcription cancelled for \"\(title)\"", category: .transcription)
             markState(meeting: meeting, state: nil, in: context)
             return
@@ -277,6 +297,7 @@ final class ReProcessingQueue {
         // zero segments, DON'T replace the existing transcript — we'd wipe
         // the user's live transcription data in exchange for nothing.
         guard !upgraded.isEmpty else {
+            StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
             LogManager.send("Re-transcription produced 0 segments for \(meetingID) — keeping original transcript", category: .transcription, level: .warning)
             markState(meeting: meeting, state: .failed, error: "Transcription produced no segments (all chunks failed inference)", in: context)
             return
@@ -290,6 +311,11 @@ final class ReProcessingQueue {
             markState(meeting: meeting, state: .queued, in: context)
             return
         }
+
+        // Past this point we've got a full transcript — the checkpoint has
+        // served its purpose. Subsequent analyze + reindex are cheap to
+        // redo if interrupted, so no further checkpointing is needed.
+        StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
 
         let (segmentSnapshots, audioRanges) = swapSegments(meeting: meeting, upgraded: upgraded, in: context)
 

@@ -4,6 +4,58 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.16.1 — 2026-05-18
+
+**Re-processing resumes after interruption**
+- The high-accuracy re-transcription pass now checkpoints after every
+  chunk. If a job is interrupted — a new recording starts (yield), the
+  app is restarted, or the user cancels and re-enqueues — it picks up
+  from the next un-done chunk instead of restarting from zero. Progress
+  is persisted to a sidecar `reprocess-checkpoint.json` in the meeting's
+  recording directory; gets cleaned up automatically on success, user
+  cancel, or meeting deletion.
+
+**Interview lifecycle / recovery**
+- **End Interview** button on the scorecard toolbar. Previously the only
+  End control lived in the live header — unreachable when status was
+  stuck at `.recording` with no live recording. Routes through a new
+  `markInterviewComplete(_:)` that handles both the live path and the
+  zombie-row path.
+- **Resume Interview** button replaces the misleading "In Progress"
+  badge when status is `.recording` but the audio engine is idle (post
+  app-restart or crash). Without it the live phase board was
+  unreachable and there was no path forward.
+- App-launch orphan cleanup reverts any Interview row stuck in
+  `.recording` back to `.scheduled`, so the regular Start button comes
+  back naturally.
+- Resume reuses `interview.meeting` instead of creating a fresh one —
+  prevents the original audio + segments from being orphaned and stops
+  foreign transcripts from landing on the interview's now-empty meeting.
+
+**Multi-phase rescore**
+- "Score All Sections" now actually scores all phases. The old path
+  hard-gated on `interview.rubric` (the legacy single-rubric field,
+  typically nil for multi-phase interviews) and would only ever score
+  one phase. Rewritten to iterate `interview.orderedPhases` and score
+  each phase's sections against the segments tagged with that phase.
+
+**UI regressions fixed**
+- Rubrics / Templates / Candidates / Test tabs stay reachable during a
+  live interview. The full tab picker was previously hidden the moment
+  recording started, with the Interviews tab being the only one that
+  swaps to the live layout.
+- Settings sidebar (General, Audio, AI, Ask, Vocabulary, Organization,
+  Interview, Obsidian, Developer) is now always visible. The nested
+  NavigationSplitView was collapsing its inner sidebar in some layouts,
+  hiding Developer behind a chevron toggle most users wouldn't think
+  to click.
+
+**Phase-alert sounds**
+- Per-threshold sound pickers (First warning / Second warning /
+  Overtime) in the Interview settings tab, with a preview button for
+  each. Choose from the 14 macOS system sounds. Defaults unchanged
+  (Tink / Hero / Funk).
+
 ## 0.16.0 — 2026-05-15
 
 **Phase time-box alerts**

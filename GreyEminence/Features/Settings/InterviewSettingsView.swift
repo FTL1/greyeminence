@@ -1,46 +1,52 @@
 import SwiftUI
+import AppKit
 
-/// Interview-flow preferences. Currently scoped to per-phase time-box
-/// alerts; this is the natural home for future interview-runtime
-/// settings (auto-advance, sound choice, transcript display tweaks, ...).
 struct InterviewSettingsView: View {
-    @AppStorage("phaseAlert5MinEnabled") private var firstWarnEnabled = true
-    @AppStorage("phaseAlert1MinEnabled") private var secondWarnEnabled = true
-    @AppStorage("phaseAlertOvertimeEnabled") private var overtimeEnabled = true
-    @AppStorage("phaseAlertWarn1Minutes") private var firstWarnMinutes = 5
-    @AppStorage("phaseAlertWarn2Minutes") private var secondWarnMinutes = 1
-    @AppStorage("phaseAlertSoundEnabled") private var soundEnabled = true
+    @AppStorage(PhaseAlertSettings.warn1EnabledKey) private var firstWarnEnabled = true
+    @AppStorage(PhaseAlertSettings.warn2EnabledKey) private var secondWarnEnabled = true
+    @AppStorage(PhaseAlertSettings.overtimeEnabledKey) private var overtimeEnabled = true
+    @AppStorage(PhaseAlertSettings.warn1MinutesKey) private var firstWarnMinutes = PhaseAlertSettings.defaultWarn1Minutes
+    @AppStorage(PhaseAlertSettings.warn2MinutesKey) private var secondWarnMinutes = PhaseAlertSettings.defaultWarn2Minutes
+    @AppStorage(PhaseAlertSettings.soundEnabledKey) private var soundEnabled = true
+    @AppStorage(PhaseAlertSettings.sound5MinKey) private var firstWarnSound = PhaseAlertSettings.defaultSound5Min
+    @AppStorage(PhaseAlertSettings.sound1MinKey) private var secondWarnSound = PhaseAlertSettings.defaultSound1Min
+    @AppStorage(PhaseAlertSettings.soundOvertimeKey) private var overtimeSound = PhaseAlertSettings.defaultSoundOvertime
+
+    /// macOS bundled alert sounds at `/System/Library/Sounds/`. All play
+    /// reliably via `NSSound(named:)` without any extra entitlements.
+    private static let soundCatalog = [
+        "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero",
+        "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink"
+    ]
 
     var body: some View {
         Form {
             Section {
                 Toggle("Play sound on alerts", isOn: $soundEnabled)
 
-                HStack {
-                    Toggle("First warning", isOn: $firstWarnEnabled)
-                    Spacer()
-                    Stepper(value: $firstWarnMinutes, in: 1...30) {
-                        Text("\(firstWarnMinutes) min before")
-                            .monospacedDigit()
-                            .foregroundStyle(firstWarnEnabled ? .primary : .secondary)
-                    }
-                    .disabled(!firstWarnEnabled)
-                    .frame(width: 200)
-                }
+                alertRow(
+                    title: "First warning",
+                    enabled: $firstWarnEnabled,
+                    minutes: $firstWarnMinutes,
+                    minutesRange: 1...30,
+                    sound: $firstWarnSound
+                )
 
-                HStack {
-                    Toggle("Second warning", isOn: $secondWarnEnabled)
-                    Spacer()
-                    Stepper(value: $secondWarnMinutes, in: 1...10) {
-                        Text("\(secondWarnMinutes) min before")
-                            .monospacedDigit()
-                            .foregroundStyle(secondWarnEnabled ? .primary : .secondary)
-                    }
-                    .disabled(!secondWarnEnabled)
-                    .frame(width: 200)
-                }
+                alertRow(
+                    title: "Second warning",
+                    enabled: $secondWarnEnabled,
+                    minutes: $secondWarnMinutes,
+                    minutesRange: 1...10,
+                    sound: $secondWarnSound
+                )
 
-                Toggle("Overtime alert", isOn: $overtimeEnabled)
+                alertRow(
+                    title: "Overtime alert",
+                    enabled: $overtimeEnabled,
+                    minutes: nil,
+                    minutesRange: nil,
+                    sound: $overtimeSound
+                )
 
                 Text("Per-phase alerts fire when an interview phase has the configured time remaining. Set a phase's target minutes in its template or the interview-creation modal — phases without a target are silent.")
                     .font(.caption)
@@ -53,5 +59,50 @@ struct InterviewSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func alertRow(
+        title: String,
+        enabled: Binding<Bool>,
+        minutes: Binding<Int>?,
+        minutesRange: ClosedRange<Int>?,
+        sound: Binding<String>
+    ) -> some View {
+        HStack {
+            Toggle(title, isOn: enabled)
+            Spacer()
+            if let minutes, let minutesRange {
+                Stepper(value: minutes, in: minutesRange) {
+                    Text("\(minutes.wrappedValue) min before")
+                        .monospacedDigit()
+                        .foregroundStyle(enabled.wrappedValue ? .primary : .secondary)
+                }
+                .disabled(!enabled.wrappedValue)
+                .frame(width: 180)
+            }
+            soundPicker(selection: sound)
+                .disabled(!enabled.wrappedValue || !soundEnabled)
+        }
+    }
+
+    private func soundPicker(selection: Binding<String>) -> some View {
+        HStack(spacing: 4) {
+            Picker("", selection: selection) {
+                ForEach(Self.soundCatalog, id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 120)
+
+            Button {
+                NSSound(named: selection.wrappedValue)?.play()
+            } label: {
+                Image(systemName: "play.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Preview")
+        }
     }
 }

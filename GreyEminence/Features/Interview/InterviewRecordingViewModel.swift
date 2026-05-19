@@ -305,10 +305,16 @@ final class InterviewRecordingViewModel {
         self.redFlags = []
         self.overallAssessment = ""
 
-        recordingViewModel.startRecording(in: modelContext)
+        // Reuse the interview's existing meeting on resume — a fresh Meeting
+        // would orphan the prior session's audio + segments and (because
+        // unrelated recordings could later land on the new empty row) leak
+        // foreign transcripts into this interview.
+        recordingViewModel.startRecording(in: modelContext, resuming: interview.meeting)
         if let meeting = recordingViewModel.currentMeeting {
             meeting.isInterviewMeeting = true
-            interview.meeting = meeting
+            if interview.meeting?.id != meeting.id {
+                interview.meeting = meeting
+            }
 
             for contact in interview.interviewers {
                 if !meeting.attendees.contains(where: { $0.id == contact.id }) {
@@ -466,6 +472,25 @@ final class InterviewRecordingViewModel {
             phase.sectionScores.append(score)
             interview.sectionScores.append(score)
         }
+    }
+
+    /// End an interview row the VM isn't actively running (crash/restart
+    /// recovery). Delegates to `stopInterview` when the VM owns this interview.
+    func markInterviewComplete(_ interview: Interview, in modelContext: ModelContext) {
+        if self.interview?.id == interview.id, isInterviewActive {
+            stopInterview(in: modelContext)
+            return
+        }
+        interview.status = .completed
+        if let active = interview.activePhase {
+            active.status = .completed
+            active.endedAt = .now
+        }
+        PersistenceGate.save(
+            modelContext,
+            site: "InterviewRecordingViewModel.markInterviewComplete",
+            critical: true
+        )
     }
 
     func stopInterview(in modelContext: ModelContext) {

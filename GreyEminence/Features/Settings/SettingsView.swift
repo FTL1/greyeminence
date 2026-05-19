@@ -70,7 +70,12 @@ struct SettingsView: View {
     @State private var selectedPane: SettingsPane = .general
 
     var body: some View {
-        NavigationSplitView {
+        // Manual HStack instead of a nested NavigationSplitView: macOS
+        // auto-collapses inner split views in some layouts, which made
+        // the pane list (including Developer) invisible until the user
+        // happened to click the chevron. A fixed-width sidebar matches
+        // the main-app pattern in ContentView and stays put.
+        HStack(spacing: 0) {
             List(SettingsPane.allCases, selection: $selectedPane) { pane in
                 Label {
                     Text(pane.title)
@@ -80,41 +85,36 @@ struct SettingsView: View {
                 .tag(pane)
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(190)
-        } detail: {
-            switch selectedPane {
-            case .general:
-                GeneralSettingsView(updater: updater)
-            case .audio:
-                AudioSettingsView()
-            case .ai:
-                APIKeySettingsView()
-            case .ask:
-                AskSettingsView()
-            case .vocabulary:
-                VocabularySettingsView()
-            case .organization:
-                OrganizationSettingsView()
-            case .interview:
-                InterviewSettingsView()
-            case .obsidian:
-                ObsidianSettingsView()
-            case .developer:
-                DeveloperSettingsView()
-            }
-        }
-        .modifier(SettingsToolbarModifier())
-    }
-}
+            .frame(width: 190)
 
-private struct SettingsToolbarModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 15.0, *) {
-            content
-                .toolbar(removing: .title)
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-        } else {
-            content
+            Divider()
+
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch selectedPane {
+        case .general:
+            GeneralSettingsView(updater: updater)
+        case .audio:
+            AudioSettingsView()
+        case .ai:
+            APIKeySettingsView()
+        case .ask:
+            AskSettingsView()
+        case .vocabulary:
+            VocabularySettingsView()
+        case .organization:
+            OrganizationSettingsView()
+        case .interview:
+            InterviewSettingsView()
+        case .obsidian:
+            ObsidianSettingsView()
+        case .developer:
+            DeveloperSettingsView()
         }
     }
 }

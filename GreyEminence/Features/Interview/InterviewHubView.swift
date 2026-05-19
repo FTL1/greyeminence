@@ -20,22 +20,27 @@ struct InterviewHubView: View {
     }
 
     var body: some View {
-        if interviewViewModel.isInterviewActive {
-            liveInterviewLayout
-        } else {
-            VStack(spacing: 0) {
-                Picker("", selection: $activeTab) {
-                    ForEach(InterviewHubTab.allCases, id: \.self) { tab in
-                        Text(tab.rawValue).tag(tab)
-                    }
+        VStack(spacing: 0) {
+            Picker("", selection: $activeTab) {
+                ForEach(InterviewHubTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
 
-                Group {
-                    switch activeTab {
-                    case .interviews:
+            Group {
+                switch activeTab {
+                case .interviews:
+                    // The Interviews tab is the only one that swaps to the
+                    // live layout while an interview is in progress — Rubrics
+                    // / Templates / Candidates / Test stay reachable so the
+                    // interviewer can peek at a rubric mid-interview without
+                    // losing the active session.
+                    if interviewViewModel.isInterviewActive {
+                        liveInterviewLayout
+                    } else {
                         InterviewListView(
                             interviewViewModel: interviewViewModel,
                             selectedInterview: $selectedInterview,
@@ -43,22 +48,22 @@ struct InterviewHubView: View {
                             inspectorWidth: $inspectorWidth
                         )
                         .id("interviewList")
-                    case .candidates:
-                        CandidateListView(interviewViewModel: interviewViewModel)
-                    case .rubrics:
-                        RubricListView()
-                    case .templates:
-                        TemplateLibraryView()
-                    case .test:
-                        TranscriptTestView()
                     }
+                case .candidates:
+                    CandidateListView(interviewViewModel: interviewViewModel)
+                case .rubrics:
+                    RubricListView()
+                case .templates:
+                    TemplateLibraryView()
+                case .test:
+                    TranscriptTestView()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .onChange(of: selectedInterview) { _, interview in
-                if interview != nil {
-                    activeTab = .interviews
-                }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onChange(of: selectedInterview) { _, interview in
+            if interview != nil {
+                activeTab = .interviews
             }
         }
     }
