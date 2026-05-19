@@ -15,6 +15,16 @@ final class NLEmbeddingService: EmbeddingService, @unchecked Sendable {
 
     private let embedding: NLEmbedding?
 
+    /// Process-wide serialization for `NLEmbedding.vector(for:)`.
+    /// `NLEmbedding.sentenceEmbedding(for:)` returns a cached singleton
+    /// shared across every `NLEmbeddingService` instance, and the
+    /// framework's `vector(for:)` internally fans out via `libBNNS`'s
+    /// `dispatch_apply`. Two concurrent Tasks calling it simultaneously
+    /// trip Swift's exclusive-access check inside CoreNLP and abort the
+    /// process. Holding this lock across each call serializes at the
+    /// framework boundary; the work is CPU-bound and short.
+    private static let embeddingLock = NSLock()
+
     init() {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
     }
@@ -25,8 +35,16 @@ final class NLEmbeddingService: EmbeddingService, @unchecked Sendable {
         guard let embedding else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        guard let vec = embedding.vector(for: trimmed) else { return nil }
+        guard let vec = Self.synchronizedVector(embedding: embedding, text: trimmed) else { return nil }
         return vec.map { Float($0) }
+    }
+
+    /// Synchronous helper so the lock acquisition stays out of the async
+    /// frame — Swift 6 prohibits `NSLock.lock()` directly in async code.
+    private static func synchronizedVector(embedding: NLEmbedding, text: String) -> [Double]? {
+        embeddingLock.lock()
+        defer { embeddingLock.unlock() }
+        return embedding.vector(for: text)
     }
 }
 

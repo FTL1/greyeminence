@@ -4,6 +4,17 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.16.2 — 2026-05-19
+
+**Crash fix**
+- App could abort mid-flight when two embedding consumers ran at the
+  same time — typically the post-recording indexer and the
+  re-processing re-index, or Ask + re-index. Apple's
+  `NLEmbedding.vector(for:)` shares a cached singleton internally and
+  isn't thread-safe; concurrent calls trip Swift's exclusive-access
+  check inside CoreNLP / BNNS and `abort()` the process. Serialized at
+  the framework boundary with a process-wide lock.
+
 ## 0.16.1 — 2026-05-18
 
 **Re-processing resumes after interruption**
