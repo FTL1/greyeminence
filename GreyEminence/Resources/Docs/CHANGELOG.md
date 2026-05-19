@@ -4,6 +4,16 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.16.3 — 2026-05-19
+
+**Update reliability**
+- Force a Sparkle background appcast fetch on every launch. The default
+  schedule defers the first check by a few minutes and then waits 24 h
+  between checks — long enough that a user who relaunches a buggy build
+  several times in a row might never see the update prompt. Now the
+  prompt fires the moment a fix is available, even if the previous
+  check was minutes ago. Silent when there's nothing to install.
+
 ## 0.16.2 — 2026-05-19
 
 **Crash fix**

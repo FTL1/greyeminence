@@ -33,6 +33,21 @@ struct GreyEminenceApp: App {
             updaterDelegate: delegate,
             userDriverDelegate: delegate
         )
+        // Force an immediate appcast fetch on every launch. Sparkle's default
+        // schedule waits "a few minutes" after launch for its first check and
+        // then defers further checks by `updateCheckInterval` (24 h) — so a
+        // user who relaunches inside that 24 h window may never see an
+        // auto-prompt. If a launch-time bug ships, that's the difference
+        // between the user getting rescued and the app being a doorstop.
+        // checkForUpdatesInBackground is silent on "up to date" and only
+        // surfaces UI when an update is genuinely available.
+        Self.kickOffStartupUpdateCheck(controller: updaterController)
+    }
+
+    private static func kickOffStartupUpdateCheck(controller: SPUStandardUpdaterController) {
+        DispatchQueue.main.async {
+            controller.updater.checkForUpdatesInBackground()
+        }
     }
 
     var sharedModelContainer: ModelContainer? = {

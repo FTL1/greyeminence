@@ -39,8 +39,9 @@ final class NLEmbeddingService: EmbeddingService, @unchecked Sendable {
         return vec.map { Float($0) }
     }
 
-    /// Synchronous helper so the lock acquisition stays out of the async
-    /// frame — Swift 6 prohibits `NSLock.lock()` directly in async code.
+    /// Sync wrapper — `NSLock.lock()` isn't callable from an async frame
+    /// under Swift 6, but the body is short and CPU-bound so a static
+    /// helper is the simpler fix than refactoring to actor isolation.
     private static func synchronizedVector(embedding: NLEmbedding, text: String) -> [Double]? {
         embeddingLock.lock()
         defer { embeddingLock.unlock() }
