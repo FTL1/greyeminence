@@ -577,7 +577,7 @@ struct InterviewScorecardView: View {
                                     // and re-scoring keys per-phase off `sectionTagID`.
                                     // Listing rubric sub-sections here would mis-tag
                                     // segments against the rescorer's grouping.
-                                    Section("Tags this segment and onwards until the next tag") {
+                                    Section("Tags this segment and every segment after") {
                                         ForEach(Array(interview.orderedPhases.enumerated()), id: \.element.id) { idx, phase in
                                             Button(phase.title) {
                                                 tagSegment(segment, tag: phase.title, id: phase.id)
@@ -589,7 +589,7 @@ struct InterviewScorecardView: View {
                                     Button("Clear Tag (this segment only)") {
                                         clearTagSingle(segment)
                                     }
-                                    Button("Clear Tag From Here Onward") {
+                                    Button("Clear All Tags From Here Onward") {
                                         tagSegment(segment, tag: nil, id: nil)
                                     }
                                 }
@@ -611,16 +611,15 @@ struct InterviewScorecardView: View {
         )
     }
 
-    /// Tag from this segment forward until the next segment that already has a different tag.
+    /// Tag from this segment forward to the end of the transcript, overwriting
+    /// any prior tag boundaries in the trailing range. Tagging a later segment
+    /// re-creates the next boundary, so users add tags by walking the transcript
+    /// top-to-bottom without leaving stale ones behind.
     private func tagSegment(_ segment: TranscriptSegment, tag: String?, id: UUID?) {
         guard let startIndex = transcriptSegments.firstIndex(where: { $0.id == segment.id }) else { return }
 
         for i in startIndex..<transcriptSegments.count {
             let seg = transcriptSegments[i]
-            // Stop at the next segment that already has a different tag (unless it's the one we're starting from)
-            if i > startIndex, let existingTag = seg.sectionTag, existingTag != segment.sectionTag {
-                break
-            }
             seg.sectionTag = tag
             seg.sectionTagID = id
         }

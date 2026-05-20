@@ -4,6 +4,17 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.17.2 — 2026-05-20
+
+**Transcript section tagging**
+- Tagging a phase on a transcript segment now extends to the end of the
+  transcript instead of stopping at the next existing boundary. Walking
+  the transcript top-to-bottom and tagging at each phase transition just
+  works — later tags overwrite earlier ones in their range, so stale
+  boundaries can't strand themselves mid-transcript.
+- "Clear Tag From Here Onward" → "Clear All Tags From Here Onward" and
+  actually clears every following segment, not just the first run.
+
 ## 0.17.1 — 2026-05-20
 
 **Tasks: Won't Do status**
