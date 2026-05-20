@@ -227,9 +227,17 @@ enum SchemaV15: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV14.models }
 }
 
+/// SchemaV16 adds `ActionItem.dismissedAt` — distinguishes "won't do" from
+/// "done" and from "still pending". Lightweight migration; pre-existing
+/// items keep `nil` and stay pending.
+enum SchemaV16: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(16, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV15.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self]
     }
 
     static var stages: [MigrationStage] {
@@ -247,7 +255,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV11.self, toVersion: SchemaV12.self),
             .lightweight(fromVersion: SchemaV12.self, toVersion: SchemaV13.self),
             .lightweight(fromVersion: SchemaV13.self, toVersion: SchemaV14.self),
-            .lightweight(fromVersion: SchemaV14.self, toVersion: SchemaV15.self)
+            .lightweight(fromVersion: SchemaV14.self, toVersion: SchemaV15.self),
+            .lightweight(fromVersion: SchemaV15.self, toVersion: SchemaV16.self)
         ]
     }
 }

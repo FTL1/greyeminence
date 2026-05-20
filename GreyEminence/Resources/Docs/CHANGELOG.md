@@ -4,6 +4,22 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.17.1 — 2026-05-20
+
+**Tasks: Won't Do status**
+- Tasks now have a "Won't Do" state separate from "Completed". Right-click
+  any task → Mark as Won't Do. Strikes the row through (like completed
+  but in secondary tone) and drops it out of Pending + Stalled. Restore
+  from the Won't Do section's context menu.
+- New bulk action in the Tasks options menu: "Mark Stalled as Won't Do
+  (N)" with confirmation. Affects whichever tasks are currently visible
+  under the Mine + Unassigned / All filter, so the scope matches what
+  you see on screen.
+- New "Show Won't Do" toggle in the same options menu, off by default
+  so the dismissed pile doesn't clutter the list.
+- SchemaV16 adds `ActionItem.dismissedAt`. Lightweight migration; existing
+  items keep `nil` and stay Pending.
+
 ## 0.17.0 — 2026-05-19
 
 **Recovery & safety**

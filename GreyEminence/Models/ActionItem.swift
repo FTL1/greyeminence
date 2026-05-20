@@ -13,6 +13,12 @@ final class ActionItem {
     var dueDate: Date?
     var sourceSegmentID: UUID?
 
+    /// Set when the user explicitly marks this item as "won't do". Distinct
+    /// from `isCompleted` (done) — a dismissed item drops out of pending +
+    /// stalled but isn't counted as accomplished. Nil for pending and
+    /// completed items.
+    var dismissedAt: Date?
+
     var meeting: Meeting?
     var assignedContact: Contact?
 
@@ -23,6 +29,8 @@ final class ActionItem {
         self.isCompleted = isCompleted
         self.createdAt = .now
     }
+
+    var isDismissed: Bool { dismissedAt != nil }
 
     /// Build an action item from an AI-parsed result and resolve its source
     /// segment from the supplied transcript. The caller still owns attaching

@@ -24,7 +24,7 @@ final class CommitmentTrackingService {
     /// Find incomplete action items from meetings older than a threshold.
     func stalledCommitments(in context: ModelContext, threshold: Int = 7) -> [StalledCommitment] {
         let descriptor = FetchDescriptor<ActionItem>(
-            predicate: #Predicate<ActionItem> { !$0.isCompleted }
+            predicate: #Predicate<ActionItem> { !$0.isCompleted && $0.dismissedAt == nil }
         )
         guard let items = try? context.fetch(descriptor) else { return [] }
 
@@ -50,7 +50,7 @@ final class CommitmentTrackingService {
         let calendar = Calendar.current
 
         return contact.assignedActionItems
-            .filter { !$0.isCompleted }
+            .filter { !$0.isCompleted && $0.dismissedAt == nil }
             .compactMap { item in
                 let days = calendar.dateComponents([.day], from: item.createdAt, to: now).day ?? 0
                 guard days >= threshold else { return nil }

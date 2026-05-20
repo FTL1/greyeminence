@@ -550,15 +550,20 @@ struct AllTasksView: View {
     @AppStorage("taskSort") private var sortRaw = TaskSort.created.rawValue
     @AppStorage("taskSortDirection") private var sortDirectionRaw = TaskSortDirection.descending.rawValue
     @AppStorage("taskShowCompleted") private var showCompleted = true
-    @Query(filter: #Predicate<ActionItem> { !$0.isCompleted })
+    @AppStorage("taskShowDismissed") private var showDismissed = false
+    @Query(filter: #Predicate<ActionItem> { !$0.isCompleted && $0.dismissedAt == nil })
     private var pendingItems: [ActionItem]
 
     @Query(filter: #Predicate<ActionItem> { $0.isCompleted })
     private var completedItems: [ActionItem]
 
+    @Query(filter: #Predicate<ActionItem> { $0.dismissedAt != nil })
+    private var dismissedItems: [ActionItem]
+
     @Query private var allContacts: [Contact]
 
     @State private var detailTask: ActionItem?
+    @State private var showBulkDismissConfirmation = false
 
     private var filter: TaskFilter {
         TaskFilter(rawValue: filterRaw) ?? .mine
@@ -660,9 +665,24 @@ struct AllTasksView: View {
         showCompleted ? sorted(completedItems.filter(isVisible)) : []
     }
 
+    private var visibleDismissed: [ActionItem] {
+        showDismissed ? sorted(dismissedItems.filter(isVisible)) : []
+    }
+
     private var nonStalledPending: [ActionItem] {
         let stalledIDs = Set(stalledItems.map(\.id))
         return visiblePending.filter { !stalledIDs.contains($0.id) }
+    }
+
+    private func bulkDismissStalled() {
+        for stalled in stalledItems {
+            stalled.actionItem.dismissedAt = .now
+        }
+        PersistenceGate.save(
+            modelContext,
+            site: "AllTasksView.bulkDismissStalled"
+        )
+        LogManager.send("Marked \(stalledItems.count) stalled task(s) as Won't Do (filter: \(filter.rawValue))", category: .general)
     }
 
     var body: some View {
@@ -716,6 +736,19 @@ struct AllTasksView: View {
                         .textCase(nil)
                 }
             }
+
+            if !visibleDismissed.isEmpty {
+                Section {
+                    ForEach(visibleDismissed) { item in
+                        ActionItemRow(item: item, onShowDetails: { detailTask = $0 })
+                    }
+                } header: {
+                    Label("Won't Do (\(visibleDismissed.count))", systemImage: "nosign")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(nil)
+                }
+            }
         }
         .navigationTitle("All Tasks")
         .toolbar {
@@ -752,12 +785,34 @@ struct AllTasksView: View {
                     }
                     Section {
                         Toggle("Show Completed", isOn: $showCompleted)
+                        Toggle("Show Won't Do", isOn: $showDismissed)
+                    }
+                    if !stalledItems.isEmpty {
+                        Section {
+                            Button(role: .destructive) {
+                                showBulkDismissConfirmation = true
+                            } label: {
+                                Label("Mark Stalled as Won't Do (\(stalledItems.count))", systemImage: "nosign")
+                            }
+                        }
                     }
                 } label: {
                     Label("Options", systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .help("Sort and display options")
             }
+        }
+        .confirmationDialog(
+            "Mark \(stalledItems.count) stalled task\(stalledItems.count == 1 ? "" : "s") as Won't Do?",
+            isPresented: $showBulkDismissConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Mark as Won't Do", role: .destructive) {
+                bulkDismissStalled()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Affects the current \(filter.rawValue) filter. Items can be restored from the Won't Do section.")
         }
         .overlay {
             if visiblePending.isEmpty && visibleCompleted.isEmpty {
@@ -811,8 +866,8 @@ struct ActionItemRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text)
-                    .strikethrough(item.isCompleted)
-                    .foregroundStyle(item.isCompleted ? .secondary : .primary)
+                    .strikethrough(item.isCompleted || item.isDismissed)
+                    .foregroundStyle(item.isCompleted || item.isDismissed ? .secondary : .primary)
                     .textSelection(.enabled)
                 HStack(spacing: 4) {
                     if let contact = item.assignedContact {
@@ -875,6 +930,18 @@ struct ActionItemRow: View {
                 Button("Unlink Contact") {
                     item.assignedContact = nil
                     persist("unlinkContact")
+                }
+            }
+            Divider()
+            if item.isDismissed {
+                Button("Restore (mark Pending)") {
+                    item.dismissedAt = nil
+                    persist("restoreFromDismissed")
+                }
+            } else if !item.isCompleted {
+                Button("Mark as Won't Do") {
+                    item.dismissedAt = .now
+                    persist("dismiss")
                 }
             }
             if let onDelete {
