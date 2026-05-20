@@ -107,14 +107,6 @@ actor HighQualityTranscriber {
         onCheckpoint: CheckpointCallback? = nil
     ) async throws -> [Segment] {
         let kit = try await loadWhisperKit()
-
-        // Mutable progress state bundled into a single struct so the
-        // checkpoint-emit closure can read it from the inout binding inside
-        // `runChunks` *without* re-capturing the caller's locals. Capturing
-        // the caller's vars by reference AND passing them as inout to a
-        // function that invokes the closure mid-loop trips Swift's law of
-        // exclusivity (every checkpoint emission reads the same storage
-        // that runChunks is exclusively holding) and aborts the process.
         var progress = TranscriptionProgress(checkpoint: resumeFrom)
 
         let totalChunks = micChunks.count + systemChunks.count
@@ -142,19 +134,23 @@ actor HighQualityTranscriber {
             onCheckpoint: onCheckpoint
         )
 
-        var sorted = progress.segments
-        sorted.sort { $0.startTime < $1.startTime }
-        return sorted
+        // Final flush so any chunks accumulated since the last debounced
+        // emission are durable in the sidecar.
+        onCheckpoint?(progress.makeCheckpoint())
+
+        progress.segments.sort { $0.startTime < $1.startTime }
+        return progress.segments
     }
 
-    /// Bundles every mutable piece of transcription progress so we can pass
-    /// a single `inout` binding into `runChunks` and emit checkpoints from
-    /// that binding's storage — no second capture of the caller's locals.
+    /// Mutable transcription state. Bundled (rather than separate locals)
+    /// so it can travel as a single `inout` — capturing the locals AND
+    /// passing them as inout to a function that invokes a closure mid-loop
+    /// trips Swift exclusivity at runtime.
     private struct TranscriptionProgress {
-        var completedMicChunkNames: [String]
-        var completedSystemChunkNames: [String]
-        var accumulatedMicOffset: TimeInterval
-        var accumulatedSystemOffset: TimeInterval
+        private var completedMicChunkNames: [String]
+        private var completedSystemChunkNames: [String]
+        private var accumulatedMicOffset: TimeInterval
+        private var accumulatedSystemOffset: TimeInterval
         var segments: [Segment]
 
         init(checkpoint: ReProcessingCheckpoint?) {
@@ -162,18 +158,36 @@ actor HighQualityTranscriber {
             self.completedSystemChunkNames = checkpoint?.completedSystemChunkNames ?? []
             self.accumulatedMicOffset = checkpoint?.accumulatedMicOffset ?? 0
             self.accumulatedSystemOffset = checkpoint?.accumulatedSystemOffset ?? 0
-            self.segments = (checkpoint?.segments ?? []).map { ps in
-                Segment(
-                    source: ps.source == .mic ? .mic : .system,
-                    text: ps.text,
-                    startTime: ps.startTime,
-                    endTime: ps.endTime
-                )
-            }
+            self.segments = (checkpoint?.segments ?? []).map { $0.toSegment() }
         }
 
         var completedCount: Int {
             completedMicChunkNames.count + completedSystemChunkNames.count
+        }
+
+        func alreadyDone(for source: Source) -> Set<String> {
+            switch source {
+            case .mic: Set(completedMicChunkNames)
+            case .system: Set(completedSystemChunkNames)
+            }
+        }
+
+        func currentOffset(for source: Source) -> TimeInterval {
+            switch source {
+            case .mic: accumulatedMicOffset
+            case .system: accumulatedSystemOffset
+            }
+        }
+
+        mutating func markComplete(name: String, addOffset: TimeInterval, source: Source) {
+            switch source {
+            case .mic:
+                accumulatedMicOffset += addOffset
+                completedMicChunkNames.append(name)
+            case .system:
+                accumulatedSystemOffset += addOffset
+                completedSystemChunkNames.append(name)
+            }
         }
 
         func makeCheckpoint() -> ReProcessingCheckpoint {
@@ -182,17 +196,17 @@ actor HighQualityTranscriber {
                 completedSystemChunkNames: completedSystemChunkNames,
                 accumulatedMicOffset: accumulatedMicOffset,
                 accumulatedSystemOffset: accumulatedSystemOffset,
-                segments: segments.map {
-                    ReProcessingCheckpoint.PersistedSegment(
-                        source: $0.source == .mic ? .mic : .system,
-                        text: $0.text,
-                        startTime: $0.startTime,
-                        endTime: $0.endTime
-                    )
-                }
+                segments: segments.map(ReProcessingCheckpoint.PersistedSegment.init)
             )
         }
     }
+
+    /// Persist a checkpoint roughly every N completed chunks. JSON-encoding
+    /// the full segments-so-far on every chunk would be O(N²) over a long
+    /// re-process; this caps re-work after a crash to ~N chunks (~2.5 min
+    /// at 30 s/chunk) while keeping the per-chunk hot path cheap. The end
+    /// of each `runChunks` call also force-flushes, so the bound is tight.
+    private static let checkpointEveryNChunks = 5
 
     private func runChunks(
         _ chunks: [URL],
@@ -203,9 +217,8 @@ actor HighQualityTranscriber {
         onProgress: ProgressCallback?,
         onCheckpoint: CheckpointCallback?
     ) async throws {
-        let alreadyDone: Set<String> = source == .mic
-            ? Set(progress.completedMicChunkNames)
-            : Set(progress.completedSystemChunkNames)
+        let alreadyDone = progress.alreadyDone(for: source)
+        var sinceLastCheckpoint = 0
 
         for (chunkIdx, chunk) in chunks.enumerated() {
             if alreadyDone.contains(chunk.lastPathComponent) { continue }
@@ -214,30 +227,30 @@ actor HighQualityTranscriber {
                 samples = try Self.decodeTo16kFloatMono(url: chunk)
             } catch {
                 LogManager.send("Skipping chunk \(chunkIdx) (\(source)) — decode failed: \(error.localizedDescription)", category: .transcription, level: .warning)
-                markChunkComplete(chunk: chunk, source: source, addOffset: 0, progress: &progress)
-                emitProgress(progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
+                progress.markComplete(name: chunk.lastPathComponent, addOffset: 0, source: source)
+                emitProgress(&sinceLastCheckpoint, progress: progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
                 continue
             }
 
             let chunkDuration = TimeInterval(samples.count) / 16000.0
             if samples.count < Self.minChunkSamples {
                 LogManager.send("Skipping chunk \(chunkIdx) (\(source), \(samples.count) samples, \(String(format: "%.2f", chunkDuration))s) — below minimum length", category: .transcription, level: .info)
-                markChunkComplete(chunk: chunk, source: source, addOffset: chunkDuration, progress: &progress)
-                emitProgress(progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
+                progress.markComplete(name: chunk.lastPathComponent, addOffset: chunkDuration, source: source)
+                emitProgress(&sinceLastCheckpoint, progress: progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
                 continue
             }
 
             let rms = Self.rms(samples)
             if rms < Self.silenceRMSThreshold {
                 LogManager.send("Skipping chunk \(chunkIdx) (\(source)) — silence (RMS \(String(format: "%.5f", rms)))", category: .transcription, level: .info)
-                markChunkComplete(chunk: chunk, source: source, addOffset: chunkDuration, progress: &progress)
-                emitProgress(progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
+                progress.markComplete(name: chunk.lastPathComponent, addOffset: chunkDuration, source: source)
+                emitProgress(&sinceLastCheckpoint, progress: progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
                 continue
             }
 
             // Slice into sub-chunks so cancel can break out within ~15 s
             // instead of waiting for the whole 30+ s chunk to finish.
-            let chunkBaseOffset = source == .mic ? progress.accumulatedMicOffset : progress.accumulatedSystemOffset
+            let chunkBaseOffset = progress.currentOffset(for: source)
             let subChunks = stride(from: 0, to: samples.count, by: Self.maxSamplesPerInference)
             for subStart in subChunks {
                 if Task.isCancelled { throw CancellationError() }
@@ -273,26 +286,25 @@ actor HighQualityTranscriber {
                 }
             }
 
-            markChunkComplete(chunk: chunk, source: source, addOffset: chunkDuration, progress: &progress)
-            emitProgress(progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
+            progress.markComplete(name: chunk.lastPathComponent, addOffset: chunkDuration, source: source)
+            emitProgress(&sinceLastCheckpoint, progress: progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
             if Task.isCancelled { throw CancellationError() }
         }
-    }
 
-    private func markChunkComplete(chunk: URL, source: Source, addOffset: TimeInterval, progress: inout TranscriptionProgress) {
-        switch source {
-        case .mic:
-            progress.accumulatedMicOffset += addOffset
-            progress.completedMicChunkNames.append(chunk.lastPathComponent)
-        case .system:
-            progress.accumulatedSystemOffset += addOffset
-            progress.completedSystemChunkNames.append(chunk.lastPathComponent)
+        // Force a final checkpoint for this source so the cross-source boundary
+        // and the post-loop tail are durable even if the debounce hasn't ticked.
+        if sinceLastCheckpoint > 0 {
+            onCheckpoint?(progress.makeCheckpoint())
         }
     }
 
-    private func emitProgress(_ progress: TranscriptionProgress, total: Int, onProgress: ProgressCallback?, onCheckpoint: CheckpointCallback?) {
+    private func emitProgress(_ sinceLastCheckpoint: inout Int, progress: TranscriptionProgress, total: Int, onProgress: ProgressCallback?, onCheckpoint: CheckpointCallback?) {
         onProgress?(Progress(chunksDone: progress.completedCount, chunksTotal: total))
-        onCheckpoint?(progress.makeCheckpoint())
+        sinceLastCheckpoint += 1
+        if sinceLastCheckpoint >= Self.checkpointEveryNChunks {
+            onCheckpoint?(progress.makeCheckpoint())
+            sinceLastCheckpoint = 0
+        }
     }
 
     /// Strip Whisper's special tokens (`<|startoftranscript|>`, `<|en|>`,

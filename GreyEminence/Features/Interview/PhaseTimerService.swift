@@ -40,6 +40,12 @@ final class PhaseTimerService {
 
     private(set) var currentAlert: Alert?
 
+    /// True when the user has muted alerts for the *currently bound* phase.
+    /// Lives on the service rather than the phase model so the choice doesn't
+    /// persist across interviews — it's a "I know I'm running long here,
+    /// stop bugging me for THIS phase" toggle. Reset on every phase change.
+    private(set) var isMutedForCurrentPhase = false
+
     private weak var activePhase: InterviewPhase?
     private var firedThresholds: Set<AlertKind> = []
     private var tickTimer: Timer?
@@ -53,6 +59,7 @@ final class PhaseTimerService {
         activePhase = phase
         firedThresholds.removeAll()
         currentAlert = nil
+        isMutedForCurrentPhase = false
         stopTimer()
 
         guard let phase, phase.targetMinutes != nil, phase.startedAt != nil else { return }
@@ -61,6 +68,13 @@ final class PhaseTimerService {
 
     func dismissCurrentAlert() {
         currentAlert = nil
+    }
+
+    func toggleMute() {
+        isMutedForCurrentPhase.toggle()
+        if isMutedForCurrentPhase {
+            currentAlert = nil
+        }
     }
 
     // MARK: - Tick loop
@@ -121,6 +135,10 @@ final class PhaseTimerService {
 
     private func fire(_ kind: AlertKind, phaseTitle: String) {
         firedThresholds.insert(kind)
+        guard !isMutedForCurrentPhase else {
+            LogManager.shared.log("Suppressed (muted): \(logMessage(for: kind, phaseTitle: phaseTitle))", category: .ai, level: .info)
+            return
+        }
         currentAlert = Alert(kind: kind, phaseTitle: phaseTitle, firedAt: .now)
 
         if UserDefaults.standard.boolOrTrue(forKey: PhaseAlertSettings.soundEnabledKey) {

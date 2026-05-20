@@ -58,35 +58,36 @@ final class ReProcessingQueue {
         startWorker()
     }
 
-    /// On launch, any meeting still showing a re-processing state from a prior
-    /// session represents work the user asked for that the app didn't finish.
-    /// Re-enqueue the ones that were actively in progress so the work resumes
-    /// instead of silently disappearing. Failed jobs stay failed (the user
-    /// already saw the error and gets to decide whether to retry); cancelling
-    /// means the user explicitly asked to stop, so we honor that.
+    /// On launch, mark any meeting still showing an in-progress
+    /// re-processing state as `.failed` with an "interrupted" reason.
+    /// Auto-resuming used to happen here, but a single misbehaving job
+    /// would crash the app, relaunch into auto-resume, and crash again
+    /// in a loop with the user locked out. Opt-in via the meeting's
+    /// Retry control instead: the failed badge tells them where to go.
     private func clearOrphanedStates() {
         guard let context = modelContainer?.mainContext else { return }
         let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.reProcessingState != nil })
         guard let stuck = try? context.fetch(descriptor), !stuck.isEmpty else { return }
 
-        var resumed: [UUID] = []
-        var cleared = 0
+        var interrupted = 0
         for meeting in stuck {
             let priorState = meeting.reProcessingState.flatMap(ReProcessingState.init(rawValue:))
-            meeting.reProcessingState = nil
-            meeting.reProcessingError = nil
-            cleared += 1
             switch priorState {
             case .queued, .transcribing, .analyzing, .reindexing:
-                resumed.append(meeting.id)
-            case .cancelling, .failed, nil:
+                meeting.reProcessingState = ReProcessingState.failed.rawValue
+                meeting.reProcessingError = "Interrupted on previous session — click Retry to resume"
+                interrupted += 1
+            case .cancelling:
+                meeting.reProcessingState = nil
+                meeting.reProcessingError = nil
+            case .failed, nil:
                 break
             }
         }
         PersistenceGate.save(context, site: "reProcess/clearOrphaned")
-        LogManager.send("Cleared orphaned re-processing state on \(cleared) meeting(s); auto-resuming \(resumed.count)", category: .transcription)
-        for meetingID in resumed {
-            enqueue(meetingID: meetingID)
+        LogManager.send("Marked \(interrupted) interrupted re-processing job(s) as failed", category: .transcription)
+        if interrupted > 0 {
+            TransientActivityCoordinator.shared.flash("\(interrupted) re-processing job\(interrupted == 1 ? "" : "s") interrupted — open meeting to retry")
         }
     }
 

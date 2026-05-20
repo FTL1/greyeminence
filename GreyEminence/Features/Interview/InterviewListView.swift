@@ -25,7 +25,7 @@ struct InterviewListView: View {
     var body: some View {
         NavigationSplitView {
             List(filteredInterviews, selection: $selectedInterview) { interview in
-                InterviewRowView(interview: interview)
+                InterviewRowView(interview: interview, interviewViewModel: interviewViewModel)
                     .tag(interview)
                     .contextMenu {
                         if interview.status == .completed {
@@ -98,6 +98,16 @@ struct InterviewListView: View {
 
 private struct InterviewRowView: View {
     let interview: Interview
+    var interviewViewModel: InterviewRecordingViewModel
+
+    /// The active phase when *this row's* interview is the one actively
+    /// recording — used to drive the inline timer pill. Nil for every
+    /// other row (and for completed/scheduled interviews).
+    private var liveActivePhase: InterviewPhase? {
+        guard interviewViewModel.isInterviewActive,
+              interviewViewModel.interview?.id == interview.id else { return nil }
+        return interview.activePhase
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -129,6 +139,16 @@ private struct InterviewRowView: View {
                             .background(rec.color.opacity(0.2), in: Capsule())
                             .foregroundStyle(rec.color)
                     }
+
+                    if interview.interruptedAt != nil, interview.status == .scheduled {
+                        Text("Interrupted")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.18), in: Capsule())
+                            .foregroundStyle(.orange)
+                            .help("This interview was interrupted on a previous launch. Click Start to resume.")
+                    }
                 }
 
                 HStack(spacing: 6) {
@@ -138,6 +158,10 @@ private struct InterviewRowView: View {
                             .foregroundStyle(.secondary)
                     }
                     rowTimestamp
+                    if let phase = liveActivePhase,
+                       phase.targetMinutes != nil, phase.startedAt != nil {
+                        InterviewListPhaseTimerPill(phase: phase)
+                    }
                 }
 
                 if let gp = interview.compositeGradePoints {
@@ -149,6 +173,46 @@ private struct InterviewRowView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Compact "Coding · 02:15 left" / "+01:30 over" pill for the row of
+    /// whichever interview is currently recording. Lets you glance at the
+    /// list without opening the live view to know if the active phase is
+    /// running long.
+    private struct InterviewListPhaseTimerPill: View {
+        let phase: InterviewPhase
+
+        var body: some View {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let target = phase.targetMinutes, let startedAt = phase.startedAt {
+                    let remaining = TimeInterval(target * 60) - context.date.timeIntervalSince(startedAt)
+                    let isOver = remaining <= 0
+                    let label: String = isOver
+                        ? "+" + Self.mmss(-remaining) + " over"
+                        : Self.mmss(remaining) + " left"
+                    HStack(spacing: 3) {
+                        Image(systemName: isOver ? "exclamationmark.triangle.fill" : "clock")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text(phase.title)
+                            .font(.caption2.weight(.semibold))
+                        Text(label)
+                            .font(.caption2.monospacedDigit())
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .foregroundStyle(isOver ? Color.white : Color.cyan)
+                    .background(
+                        isOver ? Color.red.opacity(0.85) : Color.cyan.opacity(0.12),
+                        in: Capsule()
+                    )
+                }
+            }
+        }
+
+        private static func mmss(_ seconds: TimeInterval) -> String {
+            let s = Int(seconds.rounded(.down))
+            return String(format: "%02d:%02d", s / 60, s % 60)
+        }
     }
 
     /// Show the planned slot when one was picked; fall back to the

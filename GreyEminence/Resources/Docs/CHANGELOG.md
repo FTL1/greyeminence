@@ -4,6 +4,48 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.17.0 — 2026-05-19
+
+**Recovery & safety**
+- Re-processing jobs interrupted by a crash or restart are no longer
+  auto-resumed on next launch — they're marked failed with an
+  "interrupted — click Retry to resume" reason. Auto-resume of a
+  misbehaving job had been creating crash loops.
+- Interviews left stuck in `.recording` and recovered to `.scheduled`
+  on launch now carry an `interruptedAt` timestamp (SchemaV15) and
+  show an orange "Interrupted" badge on the list, so a recovered
+  session is visually distinct from a never-started one.
+- End Interview now asks for confirmation before flipping status to
+  complete. The previous one-click destructive action had no undo.
+
+**Score All Sections gating**
+- Hidden when there's no transcript (status `.scheduled` or zero
+  segments). Click used to error.
+
+**Phase timer**
+- Per-phase mute button next to the timer pill on the live phase
+  header. The pill stays visible; the banner + sound are silenced
+  for the current phase only. Resets on the next phase.
+- Phase timer pill also surfaces inline on the active row in the
+  Interviews list — glance at the list to see if the current phase
+  is running long without opening the live view.
+
+**Tagging the transcript**
+- Tag Phase context menu now offers "Clear Tag From Here Onward"
+  alongside the single-segment clear, so the cascading-clear is
+  symmetric with the cascading-tag.
+- ⌘1 / ⌘2 / ⌘3 … shortcuts inside the open menu select the matching
+  phase. Faster than aiming with the mouse over a long phase list.
+
+**Activity Log**
+- Search field added; filters by message and detail-payload text in
+  addition to the existing category + level pickers.
+
+**Transient activity surface**
+- Two new launch-time flashes: "N re-processing job(s) interrupted —
+  open meeting to retry" and "Restored N interrupted interview(s) —
+  click Start to resume" so silent recovery isn't silent anymore.
+
 ## 0.16.4 — 2026-05-19
 
 **Crash fix (the actual one — sorry)**

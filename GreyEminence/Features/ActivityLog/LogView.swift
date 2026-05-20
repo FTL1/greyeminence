@@ -6,11 +6,18 @@ struct LogView: View {
 
     @State private var selectedCategory: LogEntry.Category?
     @State private var selectedLevel: LogEntry.Level?
+    @State private var searchText = ""
 
     private var filteredEntries: [LogEntry] {
-        logManager.entries.filter { entry in
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        return logManager.entries.filter { entry in
             if let cat = selectedCategory, entry.category != cat { return false }
             if let lvl = selectedLevel, entry.level != lvl { return false }
+            if !query.isEmpty {
+                let matchesMessage = entry.message.lowercased().contains(query)
+                let matchesDetail = entry.detail?.lowercased().contains(query) ?? false
+                if !matchesMessage && !matchesDetail { return false }
+            }
             return true
         }
     }
@@ -56,6 +63,26 @@ struct LogView: View {
                 }
             }
             .frame(width: 130)
+
+            HStack(spacing: 4) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search messages & payloads", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 5))
+            .frame(maxWidth: 280)
 
             Spacer()
 

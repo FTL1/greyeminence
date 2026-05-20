@@ -186,6 +186,7 @@ struct ContentView: View {
         var reverted = 0
         for interview in interviews where interview.status == .recording {
             interview.status = .scheduled
+            interview.interruptedAt = .now
             reverted += 1
         }
         guard reverted > 0 else { return }
@@ -195,6 +196,9 @@ struct ContentView: View {
             critical: true
         )
         LogManager.send("Recovered \(reverted) orphaned interview row(s) — reverted to scheduled", category: .general)
+        TransientActivityCoordinator.shared.flash(
+            "Restored \(reverted) interrupted interview\(reverted == 1 ? "" : "s") — click Start to resume"
+        )
     }
 
     /// Check if there's an interrupted recording from a previous session.

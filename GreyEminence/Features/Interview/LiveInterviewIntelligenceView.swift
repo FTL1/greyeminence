@@ -51,7 +51,7 @@ struct LiveInterviewIntelligenceView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if interviewViewModel.isRubricPhase,
                            let phase = interviewViewModel.interview?.activePhase {
-                            PhaseRubricBoard(phase: phase, viewModel: interviewViewModel)
+                            PhaseRubricBoard(phase: phase, viewModel: interviewViewModel, phaseTimer: phaseTimer)
                         } else {
                             phaseOverview
                         }
@@ -406,6 +406,7 @@ private struct CriterionKey: Hashable {
 private struct PhaseRubricBoard: View {
     let phase: InterviewPhase
     var viewModel: InterviewRecordingViewModel
+    var phaseTimer: PhaseTimerService
 
     @State private var expandedCriteria: Set<CriterionKey> = []
 
@@ -442,6 +443,17 @@ private struct PhaseRubricBoard: View {
                 .font(.headline)
             if phase.targetMinutes != nil, phase.startedAt != nil {
                 PhaseTimerPill(phase: phase)
+                Button {
+                    phaseTimer.toggleMute()
+                } label: {
+                    Image(systemName: phaseTimer.isMutedForCurrentPhase ? "bell.slash.fill" : "bell")
+                        .font(.system(size: 11))
+                        .foregroundStyle(phaseTimer.isMutedForCurrentPhase ? .orange : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(phaseTimer.isMutedForCurrentPhase
+                      ? "Alerts muted for this phase — click to re-enable"
+                      : "Mute alerts for this phase (the timer pill stays visible)")
             }
             if let minutes = phase.targetMinutes {
                 Text("\(minutes) min target")

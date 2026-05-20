@@ -35,6 +35,22 @@ struct ReProcessingCheckpoint: Codable, Sendable {
         var text: String
         var startTime: TimeInterval
         var endTime: TimeInterval
+
+        init(_ segment: HighQualityTranscriber.Segment) {
+            self.source = segment.source == .mic ? .mic : .system
+            self.text = segment.text
+            self.startTime = segment.startTime
+            self.endTime = segment.endTime
+        }
+
+        func toSegment() -> HighQualityTranscriber.Segment {
+            HighQualityTranscriber.Segment(
+                source: source == .mic ? .mic : .system,
+                text: text,
+                startTime: startTime,
+                endTime: endTime
+            )
+        }
     }
 
     enum PersistedSource: String, Codable, Sendable {

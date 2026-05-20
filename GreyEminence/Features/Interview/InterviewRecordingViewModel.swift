@@ -286,6 +286,7 @@ final class InterviewRecordingViewModel {
     func beginRecording(_ interview: Interview, in modelContext: ModelContext) {
         self.interview = interview
         interview.status = .recording
+        interview.interruptedAt = nil
 
         // Refresh trait snapshots — they may have changed since the
         // interview was scheduled (admin tweaked the trait library).

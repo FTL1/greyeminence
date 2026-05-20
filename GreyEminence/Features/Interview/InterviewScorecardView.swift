@@ -1,6 +1,20 @@
 import SwiftUI
 import SwiftData
 
+/// Attaches a ⌘<n> shortcut (n = index+1) when index is 0–8. Keeps the
+/// context-menu items aligned with phase order so the interviewer can tag
+/// without precision-aiming the mouse.
+private struct NumericMenuShortcut: ViewModifier {
+    let index: Int
+    func body(content: Content) -> some View {
+        if index < 9, let key = Character("\(index + 1)").asciiValue {
+            content.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(key))), modifiers: .command)
+        } else {
+            content
+        }
+    }
+}
+
 struct InterviewScorecardView: View {
     @Bindable var interview: Interview
     var interviewViewModel: InterviewRecordingViewModel
@@ -10,6 +24,7 @@ struct InterviewScorecardView: View {
     @State private var reanalysisError: String?
     @State private var sectionScoringStatus: [UUID: SectionScoringState] = [:]
     @State private var scorecardTab: ScorecardTab = .scorecard
+    @State private var showEndConfirmation = false
 
     enum ScorecardTab: String, CaseIterable {
         case scorecard = "Scorecard"
@@ -75,6 +90,10 @@ struct InterviewScorecardView: View {
         interview.sectionScores
             .filter { !$0.isDeleted }
             .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private var hasTranscript: Bool {
+        !(interview.meeting?.segments.isEmpty ?? true)
     }
 
     /// Phase groups for the scorecard. One entry per phase that has at
@@ -226,7 +245,7 @@ struct InterviewScorecardView: View {
 
                 if interview.status == .recording {
                     Button {
-                        interviewViewModel.markInterviewComplete(interview, in: modelContext)
+                        showEndConfirmation = true
                     } label: {
                         Label("End Interview", systemImage: "stop.circle.fill")
                             .font(.caption)
@@ -234,13 +253,30 @@ struct InterviewScorecardView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .help("Mark this interview complete. If recording is active, this stops capture and triggers final AI scoring.")
+                    .confirmationDialog(
+                        "End this interview?",
+                        isPresented: $showEndConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("End Interview", role: .destructive) {
+                            interviewViewModel.markInterviewComplete(interview, in: modelContext)
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text(interviewViewModel.isInterviewActive
+                             ? "Recording will stop and final AI scoring will run. Notes and impressions are preserved."
+                             : "The interview will be marked complete. Notes and impressions are preserved.")
+                    }
                 }
 
                 // Score-all only makes sense when the user is looking at
                 // the scorecard. Hide it on the Transcript tab so that
                 // tab's header has only the picker + (when relevant) the
                 // Start Interview button.
-                if scorecardTab == .scorecard {
+                // Only show "Score All Sections" once a transcript exists.
+                // Pre-interview (`.scheduled`) or zero-segment meetings have
+                // nothing to score; click would error.
+                if scorecardTab == .scorecard, hasTranscript {
                     if isReanalyzing {
                         ProgressView()
                             .controlSize(.small)
@@ -535,16 +571,27 @@ struct InterviewScorecardView: View {
                         }
                         TranscriptSegmentRow(segment: segment)
                             .contextMenu {
-                                Menu("Tag Section") {
-                                    Button("Intro") { tagSegment(segment, tag: "Intro", id: InterviewRecordingViewModel.introID) }
-                                    ForEach(sortedScores) { score in
-                                        Button(score.rubricSectionTitle) {
-                                            tagSegment(segment, tag: score.rubricSectionTitle, id: score.rubricSectionID)
+                                Menu("Tag Phase") {
+                                    // Phases are the tag granularity live segments get
+                                    // (`activatePhase` writes phase.id + phase.title),
+                                    // and re-scoring keys per-phase off `sectionTagID`.
+                                    // Listing rubric sub-sections here would mis-tag
+                                    // segments against the rescorer's grouping.
+                                    Section("Tags this segment and onwards until the next tag") {
+                                        ForEach(Array(interview.orderedPhases.enumerated()), id: \.element.id) { idx, phase in
+                                            Button(phase.title) {
+                                                tagSegment(segment, tag: phase.title, id: phase.id)
+                                            }
+                                            .modifier(NumericMenuShortcut(index: idx))
                                         }
                                     }
-                                    Button("Conclusion") { tagSegment(segment, tag: "Conclusion", id: InterviewRecordingViewModel.conclusionID) }
                                     Divider()
-                                    Button("Clear Tag") { tagSegment(segment, tag: nil, id: nil) }
+                                    Button("Clear Tag (this segment only)") {
+                                        clearTagSingle(segment)
+                                    }
+                                    Button("Clear Tag From Here Onward") {
+                                        tagSegment(segment, tag: nil, id: nil)
+                                    }
                                 }
                             }
                     }
@@ -552,6 +599,16 @@ struct InterviewScorecardView: View {
                 .padding()
             }
         }
+    }
+
+    private func clearTagSingle(_ segment: TranscriptSegment) {
+        segment.sectionTag = nil
+        segment.sectionTagID = nil
+        PersistenceGate.save(
+            modelContext,
+            site: "InterviewScorecardView.clearTagSingle",
+            meetingID: interview.meeting?.id
+        )
     }
 
     /// Tag from this segment forward until the next segment that already has a different tag.

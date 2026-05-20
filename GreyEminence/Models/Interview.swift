@@ -78,6 +78,14 @@ final class Interview {
     /// back to `createdAt` in the list display.
     var scheduledAt: Date?
 
+    /// Set by app-launch orphan recovery when a `.recording` row had to be
+    /// reverted to `.scheduled` because the audio engine wasn't actually
+    /// running (crash / app restart mid-interview). Surfaces a badge on
+    /// the list so the user can spot interrupted sessions amongst the
+    /// regular scheduled ones. Cleared when the interview is started or
+    /// completed cleanly.
+    var interruptedAt: Date?
+
     var candidate: Candidate?
     var rubric: Rubric?
 
