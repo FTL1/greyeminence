@@ -14,6 +14,17 @@ struct RecordingView: View {
         VStack(spacing: 0) {
             RecordingToolbar(viewModel: viewModel, modelContext: modelContext)
 
+            if viewModel.state != .idle, let meeting = viewModel.currentMeeting {
+                Divider()
+                MeetingAttendeesRow(meeting: meeting)
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+                    .background(.bar)
+                    .onChange(of: meeting.attendees.count) { _, _ in
+                        viewModel.speakerContactMapper.prepopulate(from: meeting.attendees)
+                    }
+            }
+
             Divider()
 
             if viewModel.state == .idle {

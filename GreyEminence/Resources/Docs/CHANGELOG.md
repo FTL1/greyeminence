@@ -4,6 +4,17 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.17.3 — 2026-05-21
+
+**Add attendees while recording**
+- The recording view now has an attendee strip below the toolbar showing
+  the current meeting's attendees with a + button to add more via the
+  same contact picker used elsewhere. Attendees can be added or removed
+  mid-recording.
+- Newly added attendees are pushed into the speaker-contact mapper
+  immediately so their aliases participate in auto-matching diarized
+  speakers for the rest of the session.
+
 ## 0.17.2 — 2026-05-20
 
 **Transcript section tagging**
