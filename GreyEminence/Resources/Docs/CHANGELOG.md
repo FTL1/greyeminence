@@ -4,6 +4,27 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.17.4 — 2026-05-26
+
+**Re-processing robustness**
+- AI response parsing now salvages prose-wrapped JSON by clipping to the
+  outermost `{…}` pair before decoding, instead of failing with
+  Foundation's opaque "data couldn't be read because it is in the wrong
+  format". Granular reasons (empty response / top-level not an object /
+  underlying decode error) now flow into the meeting's re-processing
+  error.
+- Failed re-processing pills now show an info icon with the underlying
+  error message as a tooltip, so you can see why a job failed without
+  digging through the activity log.
+
+**Follow-up questions: blockers, not paraphrases**
+- The analysis prompt now requires follow-ups to be questions about
+  blockers, missing information, or dependencies for the listed action
+  items — or genuine gaps the meeting didn't resolve. Restating an
+  action item as a question (e.g. action: "Investigate X" + follow-up:
+  "Why does X happen?") is explicitly forbidden. Empty array if there
+  are no real blockers.
+
 ## 0.17.3 — 2026-05-21
 
 **Add attendees while recording**

@@ -326,21 +326,12 @@ actor InterviewIntelligenceService {
     // MARK: - Parsing
 
     private func parseResponse(_ raw: String) throws -> InterviewAnalysisResult {
-        var cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") {
-            cleaned = String(cleaned.dropFirst(7))
-        } else if cleaned.hasPrefix("```") {
-            cleaned = String(cleaned.dropFirst(3))
-        }
-        if cleaned.hasSuffix("```") {
-            cleaned = String(cleaned.dropLast(3))
-        }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let data = cleaned.data(using: .utf8),
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            LogManager.send("Interview AI parse failed: \(cleaned.prefix(500))", category: .ai, level: .error, meetingID: meetingID)
-            throw AIParseError.invalidJSON
+        let json: [String: Any]
+        do {
+            json = try AIResponseDecoder.objectFrom(raw)
+        } catch {
+            LogManager.send("Interview AI parse failed (\(error.localizedDescription)): \(raw.prefix(500))", category: .ai, level: .error, meetingID: meetingID)
+            throw error
         }
 
         var sectionScores: [SectionScoreSnapshot] = []

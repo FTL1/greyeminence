@@ -201,22 +201,12 @@ actor AIIntelligenceService {
     // MARK: - Private
 
     private func parseResponse(_ response: String, raw: String) throws -> AnalysisResult {
-        // Strip markdown fences if present
-        var cleaned = response.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") {
-            cleaned = String(cleaned.dropFirst(7))
-        } else if cleaned.hasPrefix("```") {
-            cleaned = String(cleaned.dropFirst(3))
-        }
-        if cleaned.hasSuffix("```") {
-            cleaned = String(cleaned.dropLast(3))
-        }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let data = cleaned.data(using: .utf8),
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            LogManager.send("AI parse failed — raw response: \(cleaned.prefix(1000))", category: .ai, level: .error, meetingID: meetingID)
-            throw AIParseError.invalidJSON
+        let json: [String: Any]
+        do {
+            json = try AIResponseDecoder.objectFrom(response)
+        } catch {
+            LogManager.send("AI parse failed (\(error.localizedDescription)) — raw response: \(response.prefix(1000))", category: .ai, level: .error, meetingID: meetingID)
+            throw error
         }
 
         let title = json["title"] as? String
@@ -258,12 +248,12 @@ actor AIIntelligenceService {
 }
 
 enum AIParseError: LocalizedError {
-    case invalidJSON
+    case invalidJSON(reason: String)
 
     var errorDescription: String? {
         switch self {
-        case .invalidJSON:
-            "Failed to parse AI response as JSON"
+        case .invalidJSON(let reason):
+            "AI response was not valid JSON (\(reason))"
         }
     }
 }

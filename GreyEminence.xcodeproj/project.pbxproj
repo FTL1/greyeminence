@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		002B9FD55A3EA8C2DAD95187 /* CriterionEvaluation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0364AF825A0A158818A2C86D /* CriterionEvaluation.swift */; };
 		010A701DA859882F23D02586 /* AudioFileWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46CD3C11445ADB010BAFCF7 /* AudioFileWriter.swift */; };
+		020FD20C6991036F7EF6A145 /* AIResponseDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAC44B8273F73F89106E1626 /* AIResponseDecoder.swift */; };
 		077B50C616B12DC34082F605 /* CharacterSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E4A14EBE4E82FF3649CD5F5 /* CharacterSheetView.swift */; };
 		0822C1F8DEC3B3C33FA40140 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = E73B3D65573E84BFDA22E0FA /* FluidAudio */; };
 		0962CE60D8CA562FED69C778 /* ModelDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00113CB03ECCACD1B6516101 /* ModelDownloadManager.swift */; };
@@ -398,6 +399,7 @@
 		E750BB3E0037D9160A228F10 /* ForceSimulation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForceSimulation.swift; sourceTree = "<group>"; };
 		EA282F9DB6AE4DA53A6FFDDF /* TranscriptFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptFile.swift; sourceTree = "<group>"; };
 		EAAE2A31F9F164242D15B47A /* OrganizationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationSettingsView.swift; sourceTree = "<group>"; };
+		EAC44B8273F73F89106E1626 /* AIResponseDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIResponseDecoder.swift; sourceTree = "<group>"; };
 		ECAA2B67E2F9C56248D6FF9C /* TemplateRoleLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateRoleLink.swift; sourceTree = "<group>"; };
 		F02E7B6743C5DE21C7E30951 /* StalledNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StalledNotificationService.swift; sourceTree = "<group>"; };
 		F296FDF7EC19DD5EE43B83C1 /* ResumeAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeAnalyzer.swift; sourceTree = "<group>"; };
@@ -545,6 +547,7 @@
 				8D5C025F672896B9EBCD995D /* AIClientProtocol.swift */,
 				B66D41A4DDC8876D46E90AD7 /* AIIntelligenceService.swift */,
 				69AB1E3DF6577FB00871B539 /* AIPromptTemplates.swift */,
+				EAC44B8273F73F89106E1626 /* AIResponseDecoder.swift */,
 				57C7DDBDF9E04C8AA890F062 /* AIRetry.swift */,
 				CD9733020AF86912380852E7 /* AWSCredentialLoader.swift */,
 				FFD2D7925AB625EBABBFC976 /* AWSSSOLoginService.swift */,
@@ -1055,6 +1058,7 @@
 				EDF38D93C1682EED3F51100C /* AIClientProtocol.swift in Sources */,
 				818879FDFE90846E3A165E26 /* AIIntelligenceService.swift in Sources */,
 				CA4D93E6FAEA9C013721DD8D /* AIPromptTemplates.swift in Sources */,
+				020FD20C6991036F7EF6A145 /* AIResponseDecoder.swift in Sources */,
 				4DB26F82C595B647ABF40EE6 /* AIRetry.swift in Sources */,
 				DFD5D83CB62AE26B8D30DEFA /* AISummarySection.swift in Sources */,
 				55A5B3B4215E63B6E5107C20 /* APIKeySettingsView.swift in Sources */,
@@ -1330,13 +1334,13 @@
 				CODE_SIGN_ENTITLEMENTS = GreyEminence/GreyEminence.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20260521133000;
+				CURRENT_PROJECT_VERSION = 20260526131500;
 				INFOPLIST_FILE = GreyEminence/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.17.3;
+				MARKETING_VERSION = 0.17.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;
@@ -1352,13 +1356,13 @@
 				CODE_SIGN_ENTITLEMENTS = GreyEminence/GreyEminence.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 20260521133000;
+				CURRENT_PROJECT_VERSION = 20260526131500;
 				INFOPLIST_FILE = GreyEminence/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.17.3;
+				MARKETING_VERSION = 0.17.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;

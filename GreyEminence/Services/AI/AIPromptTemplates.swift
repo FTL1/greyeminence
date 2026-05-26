@@ -200,7 +200,14 @@ enum AIPromptTemplates {
         the transcript that triggered this action — the exact words a speaker said, not your \
         paraphrase. This anchors the task to a specific moment in the conversation. Pick the \
         single most direct sentence; do not concatenate multiple turns.
-        - "follow_ups" are open questions or unresolved points that need attention after the meeting.
+        - "follow_ups" are questions about BLOCKERS, MISSING INFORMATION, or DEPENDENCIES \
+        that would prevent the action items above from being completed — or genuine gaps the \
+        meeting didn't resolve (unanswered decisions, missing stakeholders, unclear acceptance \
+        criteria, unspecified deadlines, undefined owners). DO NOT restate an action item as a \
+        question — if a task is "Investigate X", do not also emit "What is X?" as a follow-up. \
+        Every follow-up must ask about something a person would need to know or decide BEFORE \
+        an action item is actionable, or about an unresolved point that didn't make it onto the \
+        action list. If there are no genuine blockers or unresolved gaps, return an empty array.
         - "topics" should include TWO types, merged into one flat array ordered by prominence: \
         (1) Theme topics: broad subjects discussed (e.g. "System Design", "Code Review Process") \
         (2) Key terms: specific proper nouns, acronyms, tools, services, platforms, libraries, \

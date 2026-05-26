@@ -69,6 +69,12 @@ struct MeetingHeaderBar: View {
                        let state = ReProcessingState(rawValue: raw) {
                         HStack(spacing: 4) {
                             StatusPill(label: pillLabel(state: state), tint: state.tint)
+                            if state == .failed, let reason = meeting.reProcessingError, !reason.isEmpty {
+                                Image(systemName: "info.circle")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .help(reason)
+                            }
                             Button {
                                 reProcessingQueue.cancelCurrent(meetingID: meeting.id)
                             } label: {
