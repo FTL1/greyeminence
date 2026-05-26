@@ -75,15 +75,27 @@ struct MeetingHeaderBar: View {
                                     .foregroundStyle(.secondary)
                                     .help(reason)
                             }
-                            Button {
-                                reProcessingQueue.cancelCurrent(meetingID: meeting.id)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                            if state == .failed {
+                                Button {
+                                    reProcessingQueue.enqueue(meetingID: meeting.id)
+                                } label: {
+                                    Label("Retry", systemImage: "arrow.clockwise")
+                                        .font(.caption2)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                                .help("Retry re-transcription with WhisperKit large-v3")
+                            } else {
+                                Button {
+                                    reProcessingQueue.cancelCurrent(meetingID: meeting.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Cancel re-transcription")
                             }
-                            .buttonStyle(.plain)
-                            .help("Cancel re-transcription")
                         }
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -91,6 +103,18 @@ struct MeetingHeaderBar: View {
                         StatusPill(label: "large-v3", tint: .green)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
+                    } else if meeting.status == .completed && !meeting.segments.isEmpty {
+                        Button {
+                            reProcessingQueue.enqueue(meetingID: meeting.id)
+                        } label: {
+                            Label("Upgrade to large-v3", systemImage: "waveform.badge.checkmark")
+                                .font(.caption2)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                        .help("Re-transcribe this meeting with WhisperKit large-v3 for higher accuracy")
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                     Spacer(minLength: 0)
                 }

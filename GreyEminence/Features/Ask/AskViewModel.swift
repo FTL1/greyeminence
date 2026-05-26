@@ -116,7 +116,15 @@ final class AskViewModel {
         defer { isSearching = false }
 
         let search = SemanticSearchService(store: store, service: service)
-        let found = await search.search(trimmed, topK: 40, dateRange: dateFilter.range())
+        // Restrict to raw transcript snippets — including derived artifacts
+        // (questions, tasks, summaries) caused short, generic AI-generated
+        // text to crowd out the actual conversation that answers the query.
+        let found = await search.search(
+            trimmed,
+            topK: 40,
+            dateRange: dateFilter.range(),
+            kinds: [.transcriptSegment]
+        )
         results = found
 
         guard !found.isEmpty else {
