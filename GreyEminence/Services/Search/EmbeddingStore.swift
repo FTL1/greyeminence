@@ -157,4 +157,24 @@ final class EmbeddingStore {
     func count() -> Int {
         (try? context.fetchCount(FetchDescriptor<EmbeddingRecord>())) ?? 0
     }
+
+    /// Quick coverage check used by the header bar to decide whether to show
+    /// the "Index this meeting" affordance, and by the backfill scan.
+    func recordCount(forMeetingID meetingID: UUID) -> Int {
+        let descriptor = FetchDescriptor<EmbeddingRecord>(
+            predicate: #Predicate { $0.meetingID == meetingID }
+        )
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
+    /// Set of meeting IDs that have at least one embedding record for the
+    /// given model. Used by the launch-time backfill to compute the
+    /// complement against the main store's meeting set.
+    func indexedMeetingIDs(for modelIdentifier: String) -> Set<UUID> {
+        let descriptor = FetchDescriptor<EmbeddingRecord>(
+            predicate: #Predicate { $0.modelIdentifier == modelIdentifier }
+        )
+        let recs = (try? context.fetch(descriptor)) ?? []
+        return Set(recs.map(\.meetingID))
+    }
 }

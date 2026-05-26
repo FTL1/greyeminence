@@ -112,6 +112,9 @@ struct GreyEminenceApp: App {
                             modelContainer: container,
                             recordingViewModel: recordingViewModel
                         )
+                        EmbeddingBackfillService.scheduleAtLaunch(
+                            mainContext: container.mainContext
+                        )
                         lifecycle.bind(
                             recordingViewModel: recordingViewModel,
                             modelContextProvider: { container.mainContext }

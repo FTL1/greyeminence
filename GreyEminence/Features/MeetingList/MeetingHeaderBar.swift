@@ -10,6 +10,12 @@ struct MeetingHeaderBar: View {
     @State private var editedTitle: String = ""
     @State private var exportState: ExportState = .idle
     @State private var showTranscriptSavePanel = false
+    /// Coverage of this meeting in the embedding store. `nil` = not yet
+    /// checked (don't render the Index button until we know), `0` = missing,
+    /// `>0` = covered. Refreshed when the meeting changes and after an
+    /// on-demand index pass completes.
+    @State private var indexedRecordCount: Int?
+    @State private var isIndexingForSearch = false
 
     private enum ExportState: Equatable {
         case idle, success, error(String)
@@ -116,6 +122,35 @@ struct MeetingHeaderBar: View {
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                     }
+
+                    // "Index for search" — appears only when this meeting has
+                    // segments but no embedding records. The post-recording
+                    // index pass can fail silently (crash, force quit) and
+                    // leave the meeting invisible to Ask until the user runs
+                    // a full "Reindex all"; this button is the per-meeting
+                    // recovery, paired with the launch-time backfill scan.
+                    if shouldShowIndexButton {
+                        if isIndexingForSearch {
+                            HStack(spacing: 4) {
+                                ProgressView().controlSize(.small)
+                                Text("Indexing…").font(.caption2)
+                            }
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        } else {
+                            Button {
+                                Task { await indexThisMeetingForSearch() }
+                            } label: {
+                                Label("Index for search", systemImage: "magnifyingglass.circle")
+                                    .font(.caption2)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                            .help("Add this meeting's transcript to the Ask search index")
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
                     Spacer(minLength: 0)
                 }
                 .font(.caption)
@@ -141,6 +176,28 @@ struct MeetingHeaderBar: View {
                 saveTranscriptFile()
             }
         }
+        .task(id: meeting.id) {
+            refreshIndexedRecordCount()
+        }
+    }
+
+    private var shouldShowIndexButton: Bool {
+        guard meeting.status == .completed,
+              !meeting.segments.isEmpty,
+              meeting.reProcessingState == nil,
+              let count = indexedRecordCount else { return false }
+        return count == 0
+    }
+
+    private func refreshIndexedRecordCount() {
+        indexedRecordCount = EmbeddingStore.shared?.recordCount(forMeetingID: meeting.id)
+    }
+
+    private func indexThisMeetingForSearch() async {
+        isIndexingForSearch = true
+        defer { isIndexingForSearch = false }
+        let count = await EmbeddingBackfillService.indexSingleMeeting(meeting)
+        indexedRecordCount = count
     }
 
     private var exportHelpText: String {
