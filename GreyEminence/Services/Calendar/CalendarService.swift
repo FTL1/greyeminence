@@ -15,32 +15,89 @@ final class CalendarService {
 
     private nonisolated(unsafe) let store = EKEventStore()
 
+    init() {
+        // Seed from the system's current authorization so MenuBar /
+        // auto-detection startRecording paths (which don't go through the
+        // RecordingView .task that calls requestAccess) don't silently fall
+        // into "not authorized" when the user already granted access in a
+        // prior session.
+        authorizationState = Self.systemAuthorizationState()
+    }
+
+    private static func systemAuthorizationState() -> AuthorizationState {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .fullAccess, .authorized: .authorized
+        case .denied, .restricted, .writeOnly: .denied
+        case .notDetermined: .notDetermined
+        @unknown default: .notDetermined
+        }
+    }
+
     func requestAccess() async {
+        LogManager.shared.log("Calendar: requesting full access", category: .general)
         do {
             let granted = try await store.requestFullAccessToEvents()
             authorizationState = granted ? .authorized : .denied
+            LogManager.shared.log(
+                "Calendar: access \(granted ? "granted" : "denied by user/system")",
+                category: .general,
+                level: granted ? .info : .warning
+            )
         } catch {
             authorizationState = .denied
-            LogManager.send("Calendar access error: \(error.localizedDescription)", category: .general, level: .warning)
+            // Most common cause of a thrown error here: missing
+            // NSCalendarsFullAccessUsageDescription in Info.plist — the system
+            // refuses to even prompt without it.
+            LogManager.shared.log(
+                "Calendar: access request failed — \(error.localizedDescription) (check NSCalendarsFullAccessUsageDescription in Info.plist)",
+                category: .general,
+                level: .warning
+            )
         }
     }
 
     /// Find the current or upcoming calendar event within a time window.
     func currentOrUpcomingEvent(within minutes: TimeInterval = 15) -> EKEvent? {
-        eventsInWindow(minutes: minutes).first
+        let event = eventsInWindow(minutes: minutes).first
+        if let event {
+            LogManager.shared.log(
+                "Calendar: nearest event within ±\(Int(minutes))m is \"\(event.title ?? "untitled")\" starting \(event.startDate)",
+                category: .general
+            )
+        } else {
+            LogManager.shared.log(
+                "Calendar: no event within ±\(Int(minutes))m of now",
+                category: .general
+            )
+        }
+        return event
     }
 
     /// All calendar events within ±`minutes` of now, sorted by proximity to now.
     /// Used by the recording toolbar's manual "Match calendar event" picker so
     /// the user can override an incorrect or missed auto-match.
     func eventsInWindow(minutes: TimeInterval = 60) -> [EKEvent] {
-        guard authorizationState == .authorized else { return [] }
+        guard authorizationState == .authorized else {
+            // .info, not .warning — for users who deliberately denied calendar
+            // access this is steady-state, not an anomaly. Repeated toolbar
+            // mounts shouldn't spam the warnings channel.
+            LogManager.shared.log(
+                "Calendar: eventsInWindow(\(Int(minutes))m) skipped — authorization state is \(authorizationState)",
+                category: .general
+            )
+            return []
+        }
         let now = Date.now
         let start = now.addingTimeInterval(-minutes * 60)
         let end = now.addingTimeInterval(minutes * 60)
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        return store.events(matching: predicate)
+        let events = store.events(matching: predicate)
             .sorted { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
+        LogManager.shared.log(
+            "Calendar: eventsInWindow(±\(Int(minutes))m) found \(events.count) event(s)",
+            category: .general
+        )
+        return events
     }
 
     /// Extract attendee names from an event.

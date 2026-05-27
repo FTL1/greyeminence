@@ -154,16 +154,26 @@ final class RecordingViewModel {
         let descriptor = FetchDescriptor<Contact>()
         let contacts = (try? modelContext.fetch(descriptor)) ?? []
         let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
+        var addedCount = 0
+        var alreadyPresentCount = 0
         for (_, contact) in matched {
-            if let contact, !meeting.attendees.contains(where: { $0.id == contact.id }) {
+            guard let contact else { continue }
+            if meeting.attendees.contains(where: { $0.id == contact.id }) {
+                alreadyPresentCount += 1
+            } else {
                 meeting.attendees.append(contact)
+                addedCount += 1
             }
         }
 
         speakerContactMapper.prepopulate(from: meeting.attendees)
         calendarService.matchToSeries(event: event, meeting: meeting, in: modelContext)
 
-        log.log("Calendar event matched (\(source)): \(event.title ?? "untitled")", category: .general)
+        let unmatchedCount = attendeeNames.count - addedCount - alreadyPresentCount
+        log.log(
+            "Calendar event matched (\(source)): \"\(event.title ?? "untitled")\" — \(attendeeNames.count) attendee(s) on event: \(addedCount) added, \(alreadyPresentCount) already present, \(unmatchedCount) unmatched",
+            category: .general
+        )
     }
 
     /// Manual variant invoked from the recording toolbar. Operates on the
@@ -292,8 +302,14 @@ final class RecordingViewModel {
 
             // Calendar integration: auto-set title and match attendees
             let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
-            if calendarEnabled, let event = calendarService.currentOrUpcomingEvent() {
+            if !calendarEnabled {
+                log.log("Calendar auto-match skipped: calendarIntegration toggle is off", category: .general)
+            } else if calendarService.authorizationState != .authorized {
+                log.log("Calendar auto-match skipped: authorization state is \(calendarService.authorizationState) — grant access in System Settings → Privacy & Security → Calendars, or open the recording view to trigger the prompt", category: .general, level: .warning)
+            } else if let event = calendarService.currentOrUpcomingEvent() {
                 applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "auto")
+            } else {
+                log.log("Calendar auto-match: no event within ±15m of recording start", category: .general)
             }
 
             // Always add "me" as an attendee — the user must be present to record.

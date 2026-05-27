@@ -24,6 +24,8 @@
 	<string>Grey Eminence needs to capture system audio to transcribe meeting participants speaking through your speakers.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Grey Eminence uses on-device speech recognition to provide live transcription of your meetings.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Grey Eminence reads your upcoming calendar events to auto-name recordings and match attendees to your contacts. Calendar data is read locally and never leaves your Mac.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>NSHumanReadableCopyright</key>
