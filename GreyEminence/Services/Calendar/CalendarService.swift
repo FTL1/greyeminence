@@ -57,7 +57,10 @@ final class CalendarService {
     }
 
     /// Find the current or upcoming calendar event within a time window.
-    func currentOrUpcomingEvent(within minutes: TimeInterval = 15) -> EKEvent? {
+    /// Defaults to ±60 min so a meeting already in progress (started up to an
+    /// hour ago) or starting soon is still detected — the previous ±15 min
+    /// window missed long meetings the user joined late.
+    func currentOrUpcomingEvent(within minutes: TimeInterval = 60) -> EKEvent? {
         let event = eventsInWindow(minutes: minutes).first
         if let event {
             LogManager.shared.log(

@@ -14,7 +14,7 @@ struct ClaudeAPIClient: AIClient, Sendable {
     func sendMessage(
         system: String,
         userContent: String,
-        maxTokens: Int = 4096
+        maxTokens: Int = 8192
     ) async throws -> String {
         let body = RequestBody(
             model: model,
@@ -76,9 +76,10 @@ struct ClaudeAPIClient: AIClient, Sendable {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.httpBody = try JSONEncoder().encode(body)
-        // Sized to fit inside the outer 90s withTimeout budget across the
-        // full retry sequence: 25 + 2 + 25 + 6 + 25 = 83s worst case.
-        request.timeoutInterval = 25
+        // Larger max_tokens (8192) means generation can run longer, so the
+        // per-request ceiling is 60s. Still inside the outer 90s withTimeout
+        // that wraps each individual sendMessage attempt.
+        request.timeoutInterval = 60
 
         return request
     }

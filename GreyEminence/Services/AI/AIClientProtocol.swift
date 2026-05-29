@@ -10,6 +10,6 @@ protocol AIClient: Sendable {
 
 extension AIClient {
     func sendMessage(system: String, userContent: String) async throws -> String {
-        try await sendMessage(system: system, userContent: userContent, maxTokens: 4096)
+        try await sendMessage(system: system, userContent: userContent, maxTokens: 8192)
     }
 }

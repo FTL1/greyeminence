@@ -138,9 +138,10 @@ struct RecordingToolbar: View {
     }
 }
 
-/// Toolbar menu for manually matching the in-progress meeting to a calendar
-/// event. Lists events within ±60 min of now; on selection, applies title,
-/// attendees, and recurring-series linkage to the current meeting.
+/// Toolbar control that both shows whether the recording is linked to a
+/// calendar event and lets the user change or remove that link. Lists events
+/// within ±60 min of now; on selection, applies title, attendees, and
+/// recurring-series linkage to the current meeting.
 private struct CalendarMatchMenu: View {
     @Bindable var viewModel: RecordingViewModel
     let modelContext: ModelContext
@@ -150,6 +151,12 @@ private struct CalendarMatchMenu: View {
         viewModel.currentMeeting?.calendarEventID
     }
 
+    /// Title of the linked event, or `nil` when the recording isn't linked.
+    private var linkedTitle: String? {
+        guard let meeting = viewModel.currentMeeting, meeting.isLinkedToCalendar else { return nil }
+        return meeting.calendarEventTitle ?? meeting.title
+    }
+
     var body: some View {
         Menu {
             Section("Nearby calendar events") {
@@ -157,7 +164,7 @@ private struct CalendarMatchMenu: View {
                     Text("No events within ±1 hour")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(nearbyEvents, id: \.eventIdentifier) { event in
+                    ForEach(nearbyEvents, id: \.calendarItemIdentifier) { event in
                         Button {
                             viewModel.matchCalendarEventManually(event, in: modelContext)
                         } label: {
@@ -169,11 +176,18 @@ private struct CalendarMatchMenu: View {
                     }
                 }
             }
+            if linkedTitle != nil {
+                Divider()
+                Button(role: .destructive) {
+                    viewModel.unlinkCalendarEvent(in: modelContext)
+                } label: {
+                    Label("Unlink calendar event", systemImage: "calendar.badge.minus")
+                }
+            }
             Divider()
             Button("Refresh") { refresh() }
         } label: {
-            Image(systemName: "calendar.badge.checkmark")
-                .help("Match to calendar event")
+            CalendarLinkLabel(linkedTitle: linkedTitle)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -187,6 +201,27 @@ private struct CalendarMatchMenu: View {
             }
             nearbyEvents = viewModel.calendarService.eventsInWindow(minutes: 60)
         }
+    }
+}
+
+/// Compact connection indicator: green with the event title when linked, neutral
+/// "Link event" prompt when not.
+private struct CalendarLinkLabel: View {
+    let linkedTitle: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: linkedTitle == nil ? "calendar.badge.plus" : "calendar.badge.checkmark")
+            Text(linkedTitle ?? "Link event")
+                .lineLimit(1)
+                .frame(maxWidth: 160)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .font(.caption)
+        .foregroundStyle(linkedTitle == nil ? Color.secondary : Color.green)
+        .help(linkedTitle == nil
+              ? "Link this recording to a calendar event"
+              : "Linked to \"\(linkedTitle ?? "")\" — click to change or unlink")
     }
 }
 

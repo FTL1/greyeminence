@@ -21,6 +21,14 @@ final class RecordingViewModel {
 
     var state: RecordingState = .idle
     var aiActivityState: AIActivityState = .idle
+    /// True while `stopRecording` is tearing down the previous recording's
+    /// audio capture and persisting its transcript. Set synchronously at the
+    /// start of stop and cleared as soon as that fast teardown finishes (before
+    /// the slow final-analysis pass). Blocks a new recording from starting
+    /// during the window when the shared capture/coordinator actors are being
+    /// shut down — starting one then would have both recordings fighting over
+    /// the same `coordinator`/`micCapture`/`systemCapture` instances.
+    private(set) var isFinishing = false
     var elapsedTime: TimeInterval = 0
     var segments: [TranscriptSegment] = []
 
@@ -85,6 +93,12 @@ final class RecordingViewModel {
     // Calendar & Meeting Prep
     let calendarService = CalendarService()
     private let meetingPrepService = MeetingPrepService()
+
+    /// Set at record-start when more than one calendar event sits within the
+    /// match window. The recording view observes this and presents a picker so
+    /// the user can choose which meeting this recording belongs to. Empty means
+    /// no choice is pending (zero or exactly one nearby event).
+    var pendingCalendarChoices: [EKEvent] = []
 
     // Auto-detection of external meeting activity (Teams/Zoom/etc.)
     let meetingDetector = MeetingDetectionService()
@@ -185,6 +199,20 @@ final class RecordingViewModel {
         PersistenceGate.save(
             modelContext,
             site: "matchCalendarEventManually",
+            meetingID: meeting.id
+        )
+    }
+
+    /// Cancel the calendar association on the in-progress recording. Clears the
+    /// event linkage and restores the auto-generated title (or lets the next
+    /// analysis pass generate one).
+    func unlinkCalendarEvent(in modelContext: ModelContext) {
+        guard let meeting = currentMeeting else { return }
+        meeting.unlinkCalendarEvent()
+        log.log("Calendar event unlinked from recording", category: .general)
+        PersistenceGate.save(
+            modelContext,
+            site: "unlinkCalendarEvent",
             meetingID: meeting.id
         )
     }
@@ -290,6 +318,17 @@ final class RecordingViewModel {
             return
         }
 
+        // The previous recording's audio teardown is still in flight. `state` is
+        // already `.idle` during that window, so the check above doesn't catch
+        // it — but starting now would have the new recording and the old
+        // teardown both driving the shared capture/coordinator actors. Refuse
+        // until the (fast) teardown clears the flag.
+        guard !isFinishing else {
+            log.log("startRecording ignored: still finishing the previous recording", category: .audio, level: .warning)
+            errorMessage = "Finishing the previous recording — try again in a moment."
+            return
+        }
+
         meetingDetector.noteStart(autoDetected ? .auto : .manual)
         autoDetectedRecordingStart = autoDetected
 
@@ -300,16 +339,25 @@ final class RecordingViewModel {
         } else {
             meeting = Meeting(title: "Meeting \(DateFormatter.shortDate.string(from: .now))")
 
-            // Calendar integration: auto-set title and match attendees
+            // Calendar integration: link to a calendar event so the recording
+            // adopts its title and attendees. With one nearby event we link
+            // automatically; with several we surface a picker (pendingCalendarChoices)
+            // so the user chooses the right one.
             let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
             if !calendarEnabled {
-                log.log("Calendar auto-match skipped: calendarIntegration toggle is off", category: .general)
+                log.log("Calendar match skipped: calendarIntegration toggle is off", category: .general)
             } else if calendarService.authorizationState != .authorized {
-                log.log("Calendar auto-match skipped: authorization state is \(calendarService.authorizationState) — grant access in System Settings → Privacy & Security → Calendars, or open the recording view to trigger the prompt", category: .general, level: .warning)
-            } else if let event = calendarService.currentOrUpcomingEvent() {
-                applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "auto")
+                log.log("Calendar match skipped: authorization state is \(calendarService.authorizationState) — grant access in System Settings → Privacy & Security → Calendars, or open the recording view to trigger the prompt", category: .general, level: .warning)
             } else {
-                log.log("Calendar auto-match: no event within ±15m of recording start", category: .general)
+                let nearby = calendarService.eventsInWindow(minutes: 60)
+                if nearby.count == 1 {
+                    applyCalendarMatch(event: nearby[0], to: meeting, in: modelContext, source: "auto")
+                } else if nearby.count > 1 {
+                    pendingCalendarChoices = nearby
+                    log.log("Calendar: \(nearby.count) events within ±60m — prompting user to pick", category: .general)
+                } else {
+                    log.log("Calendar match: no event within ±60m of recording start", category: .general)
+                }
             }
 
             // Always add "me" as an attendee — the user must be present to record.
@@ -471,10 +519,21 @@ final class RecordingViewModel {
     }
 
     func stopRecording(in modelContext: ModelContext, autoDetected: Bool = false) {
+        // Re-entrancy guard: a second stop (rapid double-click, or an auto-stop
+        // racing a manual one) would tear down the capture actors twice and
+        // double-persist. Ignore once we've left the recording/paused states.
+        guard state == .recording || state == .paused else {
+            log.log("stopRecording ignored: state is \(state)", category: .audio, level: .warning)
+            return
+        }
+
         meetingDetector.noteStop(autoDetected ? .auto : .manual)
 
         state = .idle
         aiActivityState = .idle
+        // Block a new recording from starting until the audio teardown below
+        // finishes (cleared in the async task / no-meeting path). See `isFinishing`.
+        isFinishing = true
         timer?.invalidate()
         timer = nil
 
@@ -501,12 +560,15 @@ final class RecordingViewModel {
             let sysWriter = systemFileWriter
             micFileWriter = nil
             systemFileWriter = nil
-            Task {
-                await micCapture.stopCapture()
-                await systemCapture.stopCapture()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.micCapture.stopCapture()
+                await self.systemCapture.stopCapture()
                 await micWriter?.stop()
                 await sysWriter?.stop()
-                await coordinator.stop()
+                await self.coordinator.stop()
+                self.resetLiveStateAfterStop()
+                self.isFinishing = false
             }
             return
         }
@@ -536,10 +598,11 @@ final class RecordingViewModel {
 
             // Deduplicate mic echo segments before persisting
             let dedupResult = TranscriptDeduplicator.deduplicate(rawSegments)
-            self.segments = dedupResult.segments
+            let finalSegments = dedupResult.segments
             if dedupResult.removedCount > 0 {
                 self.log.log("Deduplication removed \(dedupResult.removedCount) echo segment(s)", category: .transcription)
             }
+            let confidence = self.segmentConfidence
 
             // Remove any incrementally-persisted segments, then save the final deduped set
             for existing in meeting.segments {
@@ -547,7 +610,7 @@ final class RecordingViewModel {
             }
             meeting.segments.removeAll()
 
-            for segment in self.segments {
+            for segment in finalSegments {
                 let persistedSegment = TranscriptSegment(
                     speaker: segment.speaker,
                     text: segment.text,
@@ -555,7 +618,7 @@ final class RecordingViewModel {
                     endTime: segment.endTime,
                     isFinal: true
                 )
-                persistedSegment.confidence = self.segmentConfidence[segment.id] ?? 1.0
+                persistedSegment.confidence = confidence[segment.id] ?? 1.0
                 persistedSegment.sectionTag = segment.sectionTag
                 persistedSegment.sectionTagID = segment.sectionTagID
                 persistedSegment.meeting = meeting
@@ -571,7 +634,6 @@ final class RecordingViewModel {
             if !finalSegmentsOK {
                 self.errorMessage = "Failed to save final transcript. The recording files are preserved on disk; please check disk space and retry export."
             }
-            self.lastPersistedSegmentCount = 0
 
             // Mark as analyzing before navigating so the UI shows a spinner
             meeting.isAnalyzing = true
@@ -582,23 +644,52 @@ final class RecordingViewModel {
                 meetingID: meeting.id
             )
 
+            // Capture the transcript + rolling-analysis results into locals
+            // BEFORE clearing live state, so the final-analysis pass below runs
+            // entirely off captured values. This decoupling is what lets us
+            // reset the view model now — clearing the stale transcript and
+            // letting a new recording start — without the in-flight analysis
+            // clobbering it.
+            let finalSnapshots = finalSegments.map { seg in
+                SegmentSnapshot(
+                    speaker: seg.speaker,
+                    text: seg.text,
+                    formattedTimestamp: seg.formattedTimestamp,
+                    isFinal: seg.isFinal,
+                    startTime: seg.startTime
+                )
+            }
+            var resultSummary = self.streamingSummary
+            var resultActionItems = self.actionItems
+            var resultFollowUps = self.followUpQuestions
+            var resultTopics = self.topics
+            var resultRaw = self.latestRawResponse
+            let modelID = self.aiModelIdentifier
+
+            // The transcript is durable and the rolling insights are captured,
+            // and the audio actors are stopped — so the live view-model state is
+            // now safe to clear. Releasing the finishing gate lets the user
+            // start a new recording while the (slow) final analysis continues
+            // below on the captured locals.
+            self.resetLiveStateAfterStop()
+            self.isFinishing = false
+
             // Navigate to completed meeting
             self.completedMeeting = meeting
 
             // Try final AI analysis (may fail or return nil — that's OK)
             if let service {
-                let finalSegmentSnapshots = self.snapshotSegments()
                 do {
-                    if let result = try await service.performFinalAnalysis(segments: finalSegmentSnapshots) {
-                        self.streamingSummary = result.summary
-                        self.actionItems = result.actionItems.map { parsed in
+                    if let result = try await service.performFinalAnalysis(segments: finalSnapshots) {
+                        resultSummary = result.summary
+                        resultActionItems = result.actionItems.map { parsed in
                             ActionItem(parsed: parsed, sourceSegments: meeting.segments)
                         }
-                        self.followUpQuestions = result.followUps
-                        self.topics = result.topics
-                        self.latestRawResponse = result.rawResponse
-                        if let title = result.title, !title.isEmpty {
-                            meeting.title = title
+                        resultFollowUps = result.followUps
+                        resultTopics = result.topics
+                        resultRaw = result.rawResponse
+                        if let title = result.title {
+                            meeting.applyGeneratedTitle(title)
                         }
                     }
                 } catch {
@@ -610,21 +701,21 @@ final class RecordingViewModel {
             // Analysis complete
             meeting.isAnalyzing = false
 
-            // Always persist whatever insights we have from rolling analysis
-            let summary = self.streamingSummary
-            if !summary.isEmpty {
+            // Always persist whatever insights we have (final pass, or the
+            // rolling-analysis fallback captured above).
+            if !resultSummary.isEmpty {
                 let insight = MeetingInsight(
-                    summary: summary,
-                    followUpQuestions: self.followUpQuestions,
-                    topics: self.topics,
-                    rawLLMResponse: self.latestRawResponse,
-                    modelIdentifier: self.aiModelIdentifier,
+                    summary: resultSummary,
+                    followUpQuestions: resultFollowUps,
+                    topics: resultTopics,
+                    rawLLMResponse: resultRaw,
+                    modelIdentifier: modelID,
                     promptVersion: AIPromptTemplates.promptVersion
                 )
                 insight.meeting = meeting
                 meeting.insights.append(insight)
 
-                for actionItem in self.actionItems {
+                for actionItem in resultActionItems {
                     actionItem.meeting = meeting
                     meeting.actionItems.append(actionItem)
                 }
@@ -635,8 +726,8 @@ final class RecordingViewModel {
                     critical: true,
                     meetingID: meeting.id
                 )
-                if !insightsOK && self.errorMessage == nil {
-                    self.errorMessage = "Failed to save AI insights — the transcript is still saved, try Reanalyze from the meeting detail view."
+                if !insightsOK {
+                    self.log.log("Failed to save AI insights for \(meeting.id) — transcript is saved; Reanalyze available from the meeting detail view", category: .ai, level: .warning)
                 }
             }
 
@@ -663,6 +754,31 @@ final class RecordingViewModel {
                 ReProcessingQueue.shared.enqueue(meetingID: meeting.id)
             }
         }
+    }
+
+    /// Clear the transient live-recording state once a recording has been
+    /// stopped and its transcript persisted. Leaves the recording screen in a
+    /// clean "ready to record" state (no stale transcript / insights) and
+    /// releases references to the finished meeting. Deliberately does NOT touch
+    /// `errorMessage` (a save failure set during teardown should stay visible)
+    /// or `aiModelIdentifier` (captured into a local before this is called).
+    private func resetLiveStateAfterStop() {
+        segments = []
+        segmentConfidence = [:]
+        segmentSectionTags = [:]
+        streamingSummary = ""
+        actionItems = []
+        followUpQuestions = []
+        topics = []
+        latestRawResponse = nil
+        currentMeeting = nil
+        elapsedTime = 0
+        lastPersistedSegmentCount = 0
+        prepContext = nil
+        pendingCalendarChoices = []
+        currentSectionTag = nil
+        currentSectionTagID = nil
+        aiActivityState = .idle
     }
 
     func addManualNote() {

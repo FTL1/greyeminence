@@ -607,8 +607,8 @@ struct TranscriptPanelView: View {
         do {
             _ = try await service.analyze(segments: snapshots)
             if let result = try await service.performFinalAnalysis(segments: snapshots) {
-                if let title = result.title, !title.isEmpty {
-                    target.title = title
+                if let title = result.title {
+                    target.applyGeneratedTitle(title)
                 }
                 let insight = MeetingInsight(
                     summary: result.summary,

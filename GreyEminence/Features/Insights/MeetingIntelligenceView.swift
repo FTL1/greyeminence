@@ -179,9 +179,10 @@ struct MeetingIntelligenceView: View {
                 rawResponse: rawResult.rawResponse
             )
 
-            // Update meeting title if generated
-            if let title = result.title, !title.isEmpty {
-                meeting.title = title
+            // Update meeting title if generated (kept out of `title` while the
+            // meeting is linked to a calendar event).
+            if let title = result.title {
+                meeting.applyGeneratedTitle(title)
             }
 
             // Persist new insight (append; keep history of prior insights)

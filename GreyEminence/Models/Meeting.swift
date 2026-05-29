@@ -55,9 +55,18 @@ final class Meeting {
     var calendarEventID: String?
     var calendarEventTitle: String?
 
+    /// Title produced by the AI analysis, kept separately from `title` so that
+    /// when a meeting is linked to a calendar event (and `title` shows the event
+    /// name) we can still restore the auto-generated name if the user later
+    /// unlinks the event. `nil` until the first analysis pass returns a title.
+    var generatedTitle: String?
+
     // Recurring meeting tracking
     var seriesID: UUID?
     var seriesTitle: String?
+
+    /// True when this meeting is currently associated with a calendar event.
+    var isLinkedToCalendar: Bool { calendarEventID != nil }
 
     @Relationship(deleteRule: .cascade, inverse: \TranscriptSegment.meeting)
     var segments: [TranscriptSegment]
@@ -107,6 +116,33 @@ final class Meeting {
 
     var latestInsight: MeetingInsight? {
         insights.max(by: { $0.createdAt < $1.createdAt })
+    }
+
+    /// Record an AI-generated title. Always stored in `generatedTitle`; only
+    /// promoted to the visible `title` when the meeting isn't linked to a
+    /// calendar event (a linked meeting keeps the event's name).
+    func applyGeneratedTitle(_ newTitle: String) {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        generatedTitle = trimmed
+        if !isLinkedToCalendar {
+            title = trimmed
+        }
+    }
+
+    /// Cancel the association with a calendar event. Restores the
+    /// auto-generated title if we have one so the recording stops showing the
+    /// (now-irrelevant) event name; otherwise leaves the current title in place
+    /// for the next analysis pass to fill in.
+    func unlinkCalendarEvent() {
+        calendarEventID = nil
+        calendarEventTitle = nil
+        seriesID = nil
+        seriesTitle = nil
+        if let generated = generatedTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !generated.isEmpty {
+            title = generated
+        }
     }
 }
 

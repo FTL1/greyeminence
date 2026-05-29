@@ -438,8 +438,8 @@ struct TopicMapView: View {
                     continue
                 }
 
-                if let title = result.title, !title.isEmpty {
-                    meeting.title = title
+                if let title = result.title {
+                    meeting.applyGeneratedTitle(title)
                 }
 
                 let insight = MeetingInsight(

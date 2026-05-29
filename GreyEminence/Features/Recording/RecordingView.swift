@@ -53,6 +53,19 @@ struct RecordingView: View {
         .task {
             await TranscriptionCoordinator.preloadModels()
         }
+        .sheet(isPresented: Binding(
+            get: { !viewModel.pendingCalendarChoices.isEmpty },
+            set: { if !$0 { viewModel.pendingCalendarChoices = [] } }
+        )) {
+            CalendarEventPickerSheet(
+                events: viewModel.pendingCalendarChoices,
+                onPick: { event in
+                    viewModel.matchCalendarEventManually(event, in: modelContext)
+                    viewModel.pendingCalendarChoices = []
+                },
+                onSkip: { viewModel.pendingCalendarChoices = [] }
+            )
+        }
     }
 
     private var idleState: some View {

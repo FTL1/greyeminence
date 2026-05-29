@@ -466,7 +466,11 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     RecordingView(viewModel: recordingViewModel, showsTranscript: false)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if showInspector {
+                    // Only show the live transcript pane while a recording is
+                    // active. When idle (e.g. returning here to start a new one)
+                    // there's nothing live to show, and rendering it would
+                    // surface the previous recording's transcript.
+                    if showInspector && recordingViewModel.state != .idle {
                         inspectorDragHandle(containerWidth: geo.size.width)
                         LiveTranscriptView(
                             segments: recordingViewModel.segments,
