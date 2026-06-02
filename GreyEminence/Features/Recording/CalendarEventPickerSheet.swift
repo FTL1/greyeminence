@@ -1,13 +1,25 @@
 import SwiftUI
-import EventKit
+
+/// Destructive menu button that cancels a meeting's calendar-event association.
+/// Shared by the recording toolbar and the meeting detail header so the label
+/// and icon stay in sync; the caller supplies how to perform the unlink.
+struct UnlinkCalendarButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: .destructive, action: action) {
+            Label("Unlink calendar event", systemImage: "calendar.badge.minus")
+        }
+    }
+}
 
 /// Presented at record-start when more than one calendar event falls within the
 /// match window. Lets the user pick which meeting this recording belongs to (or
 /// skip linking entirely). On selection the chosen event's title and attendees
 /// are applied to the in-progress recording.
 struct CalendarEventPickerSheet: View {
-    let events: [EKEvent]
-    let onPick: (EKEvent) -> Void
+    let events: [CalendarEvent]
+    let onPick: (CalendarEvent) -> Void
     let onSkip: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -29,9 +41,9 @@ struct CalendarEventPickerSheet: View {
 
             ScrollView {
                 VStack(spacing: 6) {
-                    ForEach(events, id: \.calendarItemIdentifier) { event in
+                    ForEach(events) { event in
                         row(
-                            id: event.calendarItemIdentifier,
+                            id: event.id,
                             title: event.title ?? "Untitled event",
                             subtitle: event.startDate.formatted(date: .omitted, time: .shortened),
                             systemImage: "calendar"
@@ -58,7 +70,7 @@ struct CalendarEventPickerSheet: View {
                 Button("Link") {
                     if let id = selectedID,
                        id != noneTag,
-                       let event = events.first(where: { $0.calendarItemIdentifier == id }) {
+                       let event = events.first(where: { $0.id == id }) {
                         onPick(event)
                     } else {
                         onSkip()
@@ -74,7 +86,7 @@ struct CalendarEventPickerSheet: View {
         .frame(width: 440)
         .onAppear {
             // Pre-select the event nearest to now (events arrive sorted by proximity).
-            selectedID = events.first?.calendarItemIdentifier
+            selectedID = events.first?.id
         }
     }
 

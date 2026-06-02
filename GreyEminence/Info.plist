@@ -36,5 +36,16 @@
 	<string>https://github.com/mpurdon/greyeminence/releases/latest/download/appcast.xml</string>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>Microsoft Graph OAuth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>msauth.com.greyeminence.app</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

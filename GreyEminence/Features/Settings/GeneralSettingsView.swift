@@ -9,7 +9,6 @@ struct GeneralSettingsView: View {
     @AppStorage("autoStartRecording") private var autoStart = false
     @AppStorage("showMenuBarIcon") private var showMenuBar = true
     @AppStorage("launchAtLogin") private var launchAtLogin = false
-    @AppStorage("calendarIntegration") private var calendarIntegration = true
     @AppStorage("stalledThresholdDays") private var stalledThresholdDays = 7
     @AppStorage("appFontSize") private var appFontSize = "medium"
     @AppStorage("myContactID") private var myContactIDString = ""
@@ -96,7 +95,6 @@ struct GeneralSettingsView: View {
 
             Section {
                 Toggle("Auto-start recording when meeting app detected", isOn: $autoStart)
-                Toggle("Auto-detect calendar events", isOn: $calendarIntegration)
 
                 Divider()
 

@@ -130,16 +130,19 @@ final class Meeting {
         }
     }
 
-    /// Cancel the association with a calendar event. Restores the
-    /// auto-generated title if we have one so the recording stops showing the
-    /// (now-irrelevant) event name; otherwise leaves the current title in place
-    /// for the next analysis pass to fill in.
+    /// Cancel the association with a calendar event. If the title is still the
+    /// event-derived name, restore the auto-generated title so the recording
+    /// stops showing the (now-irrelevant) event name. But if the user manually
+    /// renamed the meeting (title no longer matches the event title), keep their
+    /// name — don't clobber a deliberate edit.
     func unlinkCalendarEvent() {
+        let titleIsEventDerived = (title == calendarEventTitle)
         calendarEventID = nil
         calendarEventTitle = nil
         seriesID = nil
         seriesTitle = nil
-        if let generated = generatedTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if titleIsEventDerived,
+           let generated = generatedTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
            !generated.isEmpty {
             title = generated
         }

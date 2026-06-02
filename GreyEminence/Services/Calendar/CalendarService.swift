@@ -11,9 +11,21 @@ final class CalendarService {
     }
 
     private(set) var authorizationState: AuthorizationState = .notDetermined
-    private(set) var currentEvent: EKEvent?
+    private(set) var currentEvent: CalendarEvent?
 
     private nonisolated(unsafe) let store = EKEventStore()
+    /// Microsoft Graph provider — only fetches when the user has connected an
+    /// account and enabled it. Best-effort: failures never block EventKit results.
+    private let graph = GraphCalendarProvider()
+
+    // Short-lived cache so the two fetches that fire at record-start
+    // (matchCalendarAtStart + the toolbar menu's onAppear) and rapid menu
+    // re-opens share one network round-trip instead of each hitting Graph.
+    private struct EventsCache { let minutes: TimeInterval; let events: [CalendarEvent]; let at: Date }
+    private var eventsCache: EventsCache?
+    private var inFlightFetch: Task<[CalendarEvent], Never>?
+    private var inFlightMinutes: TimeInterval?
+    private let eventsCacheTTL: TimeInterval = 30
 
     init() {
         // Seed from the system's current authorization so MenuBar /
@@ -43,6 +55,13 @@ final class CalendarService {
                 category: .general,
                 level: granted ? .info : .warning
             )
+            if granted {
+                // Pull the latest from each account (Exchange/Office365 sync lazily)
+                // and log what EventKit can actually see, so a missing work/Teams
+                // calendar is diagnosable from the Activity Log.
+                store.refreshSourcesIfNecessary()
+                logAvailableCalendars()
+            }
         } catch {
             authorizationState = .denied
             // Most common cause of a thrown error here: missing
@@ -58,10 +77,9 @@ final class CalendarService {
 
     /// Find the current or upcoming calendar event within a time window.
     /// Defaults to ±60 min so a meeting already in progress (started up to an
-    /// hour ago) or starting soon is still detected — the previous ±15 min
-    /// window missed long meetings the user joined late.
-    func currentOrUpcomingEvent(within minutes: TimeInterval = 60) -> EKEvent? {
-        let event = eventsInWindow(minutes: minutes).first
+    /// hour ago) or starting soon is still detected.
+    func currentOrUpcomingEvent(within minutes: TimeInterval = 60) async -> CalendarEvent? {
+        let event = await eventsInWindow(minutes: minutes).first
         if let event {
             LogManager.shared.log(
                 "Calendar: nearest event within ±\(Int(minutes))m is \"\(event.title ?? "untitled")\" starting \(event.startDate)",
@@ -76,35 +94,142 @@ final class CalendarService {
         return event
     }
 
-    /// All calendar events within ±`minutes` of now, sorted by proximity to now.
-    /// Used by the recording toolbar's manual "Match calendar event" picker so
-    /// the user can override an incorrect or missed auto-match.
-    func eventsInWindow(minutes: TimeInterval = 60) -> [EKEvent] {
+    /// All calendar events within ±`minutes` of now, merged from every enabled
+    /// source (local EventKit + Microsoft Graph) and sorted by proximity to now.
+    /// Served from a short cache; pass `force: true` (e.g. the toolbar's Refresh
+    /// button) to bypass it. Concurrent callers coalesce onto one fetch.
+    func eventsInWindow(minutes: TimeInterval = 60, force: Bool = false) async -> [CalendarEvent] {
+        if !force {
+            if let cache = eventsCache, cache.minutes == minutes,
+               Date.now.timeIntervalSince(cache.at) < eventsCacheTTL {
+                return cache.events
+            }
+            if let inFlightFetch, inFlightMinutes == minutes {
+                return await inFlightFetch.value
+            }
+        }
+
+        let task = Task { [weak self] () -> [CalendarEvent] in
+            guard let self else { return [] }
+            return await self.fetchEventsInWindow(minutes: minutes)
+        }
+        inFlightFetch = task
+        inFlightMinutes = minutes
+        let result = await task.value
+        // Leave a forced refresh that replaced us in charge of its own cleanup.
+        if inFlightFetch == task {
+            inFlightFetch = nil
+            inFlightMinutes = nil
+        }
+        eventsCache = EventsCache(minutes: minutes, events: result, at: Date.now)
+        return result
+    }
+
+    private func fetchEventsInWindow(minutes: TimeInterval) async -> [CalendarEvent] {
+        let now = Date.now
+        var merged = eventKitEventsInWindow(minutes: minutes)
+
+        // Graph is best-effort and self-gates (returns [] unless connected+enabled),
+        // so a network/token failure can never drop the local results.
+        let graphEvents = await graph.eventsInWindow(minutes: minutes)
+        if !graphEvents.isEmpty {
+            merged = deduplicate(local: merged, remote: graphEvents)
+        }
+
+        return merged.sorted {
+            abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now))
+        }
+    }
+
+    /// Drop Graph events that are the same meeting as a local one (the account
+    /// is in both stores). Matches on normalized title AND both start and end
+    /// minute — requiring the full time span to agree avoids merging two
+    /// genuinely different meetings that merely share a title and start minute.
+    /// Local (EventKit) wins.
+    private func deduplicate(local: [CalendarEvent], remote: [CalendarEvent]) -> [CalendarEvent] {
+        func key(_ e: CalendarEvent) -> String {
+            let title = (e.title ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let startMinute = Int(e.startDate.timeIntervalSince1970 / 60)
+            let endMinute = Int(e.endDate.timeIntervalSince1970 / 60)
+            return "\(title)@\(startMinute)-\(endMinute)"
+        }
+        let localKeys = Set(local.map(key))
+        return local + remote.filter { !localKeys.contains(key($0)) }
+    }
+
+    /// EventKit query mapped to the neutral model. Synchronous (no network).
+    private func eventKitEventsInWindow(minutes: TimeInterval) -> [CalendarEvent] {
         guard authorizationState == .authorized else {
             // .info, not .warning — for users who deliberately denied calendar
             // access this is steady-state, not an anomaly. Repeated toolbar
             // mounts shouldn't spam the warnings channel.
             LogManager.shared.log(
-                "Calendar: eventsInWindow(\(Int(minutes))m) skipped — authorization state is \(authorizationState)",
+                "Calendar: eventKit fetch(\(Int(minutes))m) skipped — authorization state is \(authorizationState)",
                 category: .general
             )
             return []
         }
+        // Refresh Exchange/CalDAV sources before querying — a long-lived store
+        // can otherwise serve stale data (or miss a recently-added account).
+        store.refreshSourcesIfNecessary()
+
+        let selected = selectedEventKitCalendars()
+        guard !selected.isEmpty else { return [] }
+
         let now = Date.now
         let start = now.addingTimeInterval(-minutes * 60)
         let end = now.addingTimeInterval(minutes * 60)
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        let events = store.events(matching: predicate)
-            .sorted { abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now)) }
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: selected)
+        let events = store.events(matching: predicate).map(Self.mapToCalendarEvent)
         LogManager.shared.log(
-            "Calendar: eventsInWindow(±\(Int(minutes))m) found \(events.count) event(s)",
+            "Calendar: EventKit found \(events.count) event(s) within ±\(Int(minutes))m across \(selected.count) calendar(s)",
             category: .general
         )
+        // When nothing turned up, surface which calendars EventKit knows about —
+        // a missing Teams/Outlook calendar here means the account isn't synced
+        // to macOS (vs. an empty window), which is the usual cause.
+        if events.isEmpty {
+            logAvailableCalendars()
+        }
         return events
     }
 
-    /// Extract attendee names from an event.
-    func attendeeNames(for event: EKEvent) -> [String] {
+    /// The EventKit calendars to query: all of them minus the ones the user
+    /// excluded in Settings. Empty when there are no calendars at all or every
+    /// calendar is excluded — both logged for diagnostics.
+    private func selectedEventKitCalendars() -> [EKCalendar] {
+        let all = store.calendars(for: .event)
+        guard !all.isEmpty else {
+            logAvailableCalendars()
+            return []
+        }
+        let disabled = CalendarSelection.disabledIDs()
+        let selected = all.filter { !disabled.contains($0.calendarIdentifier) }
+        if selected.isEmpty {
+            LogManager.shared.log(
+                "Calendar: all \(all.count) local calendar(s) are excluded in Settings → Calendar",
+                category: .general
+            )
+        }
+        return selected
+    }
+
+    private static func mapToCalendarEvent(_ event: EKEvent) -> CalendarEvent {
+        let linkID = event.calendarItemIdentifier
+        return CalendarEvent(
+            id: event.eventIdentifier ?? linkID,
+            linkIdentifier: linkID,
+            title: event.title,
+            startDate: event.startDate,
+            endDate: event.endDate ?? event.startDate,
+            attendees: attendeeNames(for: event),
+            isRecurring: event.hasRecurrenceRules,
+            source: .eventKit
+        )
+    }
+
+    /// Extract attendee display names (or emails) from an EventKit event.
+    private static func attendeeNames(for event: EKEvent) -> [String] {
         guard let attendees = event.attendees else { return [] }
         return attendees.compactMap { participant in
             if let name = participant.name, !name.isEmpty {
@@ -118,7 +243,64 @@ final class CalendarService {
         }
     }
 
-    /// Match event attendees to existing Contact records.
+    /// Log every event calendar EventKit can see, with its account/source type.
+    /// The key diagnostic for "my Teams calendar isn't showing": if the work
+    /// account isn't listed, it isn't synced into macOS at all.
+    private func logAvailableCalendars() {
+        let calendars = store.calendars(for: .event)
+        guard !calendars.isEmpty else {
+            LogManager.shared.log(
+                "Calendar: EventKit sees 0 event calendars — no calendar accounts are synced to macOS. Add your work/Exchange (Teams/Outlook) account in System Settings → Internet Accounts and enable Calendars, or connect Microsoft 365 in Settings → Calendar.",
+                category: .general,
+                level: .warning
+            )
+            return
+        }
+        let summary = calendars
+            .map { "\"\($0.title)\" [\(Self.describe($0.source))]" }
+            .joined(separator: ", ")
+        LogManager.shared.log(
+            "Calendar: EventKit sees \(calendars.count) calendar(s): \(summary)",
+            category: .general
+        )
+    }
+
+    /// Titles of the local calendars EventKit can see, for display in Settings.
+    func localCalendarNames() -> [String] {
+        store.calendars(for: .event).map(\.title)
+    }
+
+    /// Every calendar available for matching, across local + connected sources.
+    /// Used by Settings to let the user choose which calendars to look in.
+    func availableCalendars() async -> [CalendarChoice] {
+        var choices = store.calendars(for: .event).map {
+            CalendarChoice(
+                id: $0.calendarIdentifier,
+                title: $0.title,
+                account: $0.source?.title ?? "Local",
+                source: .eventKit
+            )
+        }
+        choices += await graph.availableCalendars()
+        return choices
+    }
+
+    private static func describe(_ source: EKSource?) -> String {
+        guard let source else { return "unknown" }
+        let type: String
+        switch source.sourceType {
+        case .local: type = "local"
+        case .exchange: type = "exchange"
+        case .calDAV: type = "calDAV"
+        case .mobileMe: type = "iCloud"
+        case .subscribed: type = "subscribed"
+        case .birthdays: type = "birthdays"
+        @unknown default: type = "other"
+        }
+        return "\(source.title) · \(type)"
+    }
+
+    /// Match attendee names to existing Contact records.
     /// Tries exact name/email/alias match first, then falls back to first-name match.
     func matchContacts(attendees: [String], existing: [Contact]) -> [(name: String, contact: Contact?)] {
         attendees.map { name in
@@ -145,19 +327,13 @@ final class CalendarService {
         fullName.components(separatedBy: " ").first ?? fullName
     }
 
-    /// Get the recurrence identifier for detecting recurring events.
-    func recurrenceID(for event: EKEvent) -> String? {
-        guard event.hasRecurrenceRules else { return nil }
-        return event.calendarItemIdentifier
-    }
-
     /// Find existing meetings with the same recurring event ID and assign a shared series.
     func matchToSeries(
-        event: EKEvent,
+        event: CalendarEvent,
         meeting: Meeting,
         in context: ModelContext
     ) {
-        guard let recurrenceID = recurrenceID(for: event) else { return }
+        guard let recurrenceID = event.recurrenceID else { return }
 
         // Look for existing meetings with this specific recurrence ID
         let descriptor = FetchDescriptor<Meeting>(
@@ -184,8 +360,8 @@ final class CalendarService {
         }
     }
 
-    /// Refresh the current event detection.
-    func refreshCurrentEvent() {
-        currentEvent = currentOrUpcomingEvent()
+    /// Refresh the cached current event detection.
+    func refreshCurrentEvent() async {
+        currentEvent = await currentOrUpcomingEvent()
     }
 }

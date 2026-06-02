@@ -121,17 +121,26 @@ struct RecordingToolbar: View {
         .background(.bar)
         .overlay(alignment: .bottom) {
             if let error = viewModel.errorMessage {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                    Text(error)
-                        .font(.caption2)
-                        .lineLimit(1)
+                Button {
+                    viewModel.errorMessage = nil
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                        Text(error)
+                            .font(.caption2)
+                            .lineLimit(1)
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange.opacity(0.6))
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.orange.opacity(0.1), in: Capsule())
                 }
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(.orange.opacity(0.1), in: Capsule())
+                .buttonStyle(.plain)
+                .help("Dismiss")
                 .offset(y: 16)
             }
         }
@@ -145,7 +154,7 @@ struct RecordingToolbar: View {
 private struct CalendarMatchMenu: View {
     @Bindable var viewModel: RecordingViewModel
     let modelContext: ModelContext
-    @State private var nearbyEvents: [EKEvent] = []
+    @State private var nearbyEvents: [CalendarEvent] = []
 
     private var matchedEventID: String? {
         viewModel.currentMeeting?.calendarEventID
@@ -164,11 +173,13 @@ private struct CalendarMatchMenu: View {
                     Text("No events within ±1 hour")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(nearbyEvents, id: \.calendarItemIdentifier) { event in
+                    // `id` is per-occurrence (won't collide for recurring events);
+                    // `linkIdentifier` is the series key we persist + match on.
+                    ForEach(nearbyEvents) { event in
                         Button {
                             viewModel.matchCalendarEventManually(event, in: modelContext)
                         } label: {
-                            let isMatched = event.calendarItemIdentifier == matchedEventID
+                            let isMatched = event.linkIdentifier == matchedEventID
                             let prefix = isMatched ? "✓ " : ""
                             let time = event.startDate.formatted(date: .omitted, time: .shortened)
                             Text("\(prefix)\(event.title ?? "Untitled") — \(time)")
@@ -178,14 +189,12 @@ private struct CalendarMatchMenu: View {
             }
             if linkedTitle != nil {
                 Divider()
-                Button(role: .destructive) {
+                UnlinkCalendarButton {
                     viewModel.unlinkCalendarEvent(in: modelContext)
-                } label: {
-                    Label("Unlink calendar event", systemImage: "calendar.badge.minus")
                 }
             }
             Divider()
-            Button("Refresh") { refresh() }
+            Button("Refresh") { refresh(force: true) }
         } label: {
             CalendarLinkLabel(linkedTitle: linkedTitle)
         }
@@ -194,12 +203,12 @@ private struct CalendarMatchMenu: View {
         .onAppear { refresh() }
     }
 
-    private func refresh() {
+    private func refresh(force: Bool = false) {
         Task { @MainActor in
             if viewModel.calendarService.authorizationState != .authorized {
                 await viewModel.calendarService.requestAccess()
             }
-            nearbyEvents = viewModel.calendarService.eventsInWindow(minutes: 60)
+            nearbyEvents = await viewModel.calendarService.eventsInWindow(minutes: 60, force: force)
         }
     }
 }

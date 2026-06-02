@@ -94,11 +94,11 @@ final class RecordingViewModel {
     let calendarService = CalendarService()
     private let meetingPrepService = MeetingPrepService()
 
-    /// Set at record-start when more than one calendar event sits within the
-    /// match window. The recording view observes this and presents a picker so
-    /// the user can choose which meeting this recording belongs to. Empty means
-    /// no choice is pending (zero or exactly one nearby event).
-    var pendingCalendarChoices: [EKEvent] = []
+    /// Set after record-start when more than one calendar event sits within the
+    /// match window. The app root observes this and presents a picker so the
+    /// user can choose which meeting this recording belongs to. Empty means no
+    /// choice is pending (zero or exactly one nearby event).
+    var pendingCalendarChoices: [CalendarEvent] = []
 
     // Auto-detection of external meeting activity (Teams/Zoom/etc.)
     let meetingDetector = MeetingDetectionService()
@@ -121,7 +121,7 @@ final class RecordingViewModel {
             return
         }
 
-        let attendeeNames = calendarService.attendeeNames(for: event)
+        let attendeeNames = event.attendees
         let descriptor = FetchDescriptor<Contact>()
         let contacts = (try? modelContext.fetch(descriptor)) ?? []
         let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
@@ -132,7 +132,7 @@ final class RecordingViewModel {
             return
         }
 
-        let recurrenceID = calendarService.recurrenceID(for: event)
+        let recurrenceID = event.recurrenceID
         var seriesID: UUID?
         if recurrenceID != nil {
             let meetingDesc = FetchDescriptor<Meeting>(
@@ -155,16 +155,16 @@ final class RecordingViewModel {
     /// from the toolbar's manual picker when the user wants to override or
     /// supply a match the auto-detector missed.
     func applyCalendarMatch(
-        event: EKEvent,
+        event: CalendarEvent,
         to meeting: Meeting,
         in modelContext: ModelContext,
         source: String
     ) {
         meeting.title = event.title ?? meeting.title
-        meeting.calendarEventID = event.calendarItemIdentifier
+        meeting.calendarEventID = event.linkIdentifier
         meeting.calendarEventTitle = event.title
 
-        let attendeeNames = calendarService.attendeeNames(for: event)
+        let attendeeNames = event.attendees
         let descriptor = FetchDescriptor<Contact>()
         let contacts = (try? modelContext.fetch(descriptor)) ?? []
         let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
@@ -193,7 +193,7 @@ final class RecordingViewModel {
     /// Manual variant invoked from the recording toolbar. Operates on the
     /// in-progress `currentMeeting` and persists immediately so a crash
     /// before the next periodic save doesn't drop the user's choice.
-    func matchCalendarEventManually(_ event: EKEvent, in modelContext: ModelContext) {
+    func matchCalendarEventManually(_ event: CalendarEvent, in modelContext: ModelContext) {
         guard let meeting = currentMeeting else { return }
         applyCalendarMatch(event: event, to: meeting, in: modelContext, source: "manual")
         PersistenceGate.save(
@@ -339,26 +339,9 @@ final class RecordingViewModel {
         } else {
             meeting = Meeting(title: "Meeting \(DateFormatter.shortDate.string(from: .now))")
 
-            // Calendar integration: link to a calendar event so the recording
-            // adopts its title and attendees. With one nearby event we link
-            // automatically; with several we surface a picker (pendingCalendarChoices)
-            // so the user chooses the right one.
-            let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
-            if !calendarEnabled {
-                log.log("Calendar match skipped: calendarIntegration toggle is off", category: .general)
-            } else if calendarService.authorizationState != .authorized {
-                log.log("Calendar match skipped: authorization state is \(calendarService.authorizationState) — grant access in System Settings → Privacy & Security → Calendars, or open the recording view to trigger the prompt", category: .general, level: .warning)
-            } else {
-                let nearby = calendarService.eventsInWindow(minutes: 60)
-                if nearby.count == 1 {
-                    applyCalendarMatch(event: nearby[0], to: meeting, in: modelContext, source: "auto")
-                } else if nearby.count > 1 {
-                    pendingCalendarChoices = nearby
-                    log.log("Calendar: \(nearby.count) events within ±60m — prompting user to pick", category: .general)
-                } else {
-                    log.log("Calendar match: no event within ±60m of recording start", category: .general)
-                }
-            }
+            // Calendar linking runs after the recording is live (see
+            // matchCalendarAtStart) so a network fetch (Microsoft Graph) never
+            // delays the start of capture.
 
             // Always add "me" as an attendee — the user must be present to record.
             let myContactIDString = UserDefaults.standard.string(forKey: "myContactID") ?? ""
@@ -424,6 +407,38 @@ final class RecordingViewModel {
         startRealCapture(meetingID: meeting.id)
         startIntelligenceService()
         startPeriodicPersistence()
+
+        if existing == nil {
+            matchCalendarAtStart(for: meeting, in: modelContext)
+        }
+    }
+
+    /// Fetch nearby calendar events (local + Microsoft Graph) and link the
+    /// in-progress recording — one match auto-links, several raise the picker.
+    /// Runs as a detached task so a network fetch never delays record-start.
+    private func matchCalendarAtStart(for meeting: Meeting, in modelContext: ModelContext) {
+        guard UserDefaults.standard.bool(forKey: "calendarIntegration") else {
+            log.log("Calendar match skipped: calendarIntegration toggle is off", category: .general)
+            return
+        }
+        let meetingID = meeting.id
+        Task { @MainActor in
+            if calendarService.authorizationState != .authorized {
+                await calendarService.requestAccess()
+            }
+            let nearby = await calendarService.eventsInWindow(minutes: 60)
+            // Bail if the user stopped/started a different recording meanwhile.
+            guard let current = currentMeeting, current.id == meetingID else { return }
+            if nearby.count == 1 {
+                applyCalendarMatch(event: nearby[0], to: current, in: modelContext, source: "auto")
+                PersistenceGate.save(modelContext, site: "matchCalendarAtStart", meetingID: current.id)
+            } else if nearby.count > 1 {
+                pendingCalendarChoices = nearby
+                log.log("Calendar: \(nearby.count) events within ±60m — prompting user to pick", category: .general)
+            } else {
+                log.log("Calendar match: no event within ±60m of recording start", category: .general)
+            }
+        }
     }
 
     func pauseRecording() {
@@ -692,6 +707,9 @@ final class RecordingViewModel {
                             meeting.applyGeneratedTitle(title)
                         }
                     }
+                } catch is CancellationError {
+                    // App quitting / teardown raced — not a real analysis failure.
+                    self.log.log("Final analysis cancelled — keeping rolling insights", category: .ai)
                 } catch {
                     meeting.analysisError = error.localizedDescription
                     self.log.log("Final analysis failed (persisting existing insights): \(error.localizedDescription)", category: .ai, level: .warning)
@@ -727,6 +745,10 @@ final class RecordingViewModel {
                     meetingID: meeting.id
                 )
                 if !insightsOK {
+                    // Surface on the meeting itself (we've already navigated away
+                    // from the recording screen, so the VM's errorMessage banner
+                    // wouldn't be visible). The detail view shows analysisError.
+                    meeting.analysisError = "Failed to save AI insights — the transcript is saved; use Reanalyze to retry."
                     self.log.log("Failed to save AI insights for \(meeting.id) — transcript is saved; Reanalyze available from the meeting detail view", category: .ai, level: .warning)
                 }
             }
@@ -1141,7 +1163,12 @@ final class RecordingViewModel {
                             self.log.log("AI analysis complete (\(result.actionItems.count) actions, \(result.topics.count) topics)", category: .ai)
                         }
                     }
+                } catch is CancellationError {
+                    break  // recording stopped/paused — normal, not a user error
+                } catch let urlError as URLError where urlError.code == .cancelled {
+                    break
                 } catch {
+                    if Task.isCancelled { break }
                     await MainActor.run {
                         self.errorMessage = "AI analysis: \(error.localizedDescription)"
                         self.log.log("AI analysis error: \(error.localizedDescription)", category: .ai, level: .error)

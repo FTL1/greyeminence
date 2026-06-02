@@ -116,6 +116,12 @@ enum AIResponseDecoder {
 
         var result = s
         if inString {
+            // If truncation landed mid-escape (a trailing backslash), appending
+            // a quote would just produce an escaped quote and leave the string
+            // open. Drop the dangling backslash first.
+            if escaped, result.hasSuffix("\\") {
+                result.removeLast()
+            }
             result.append("\"")
         }
         trimTrailingWhitespace(&result)
@@ -165,7 +171,7 @@ enum AIResponseDecoder {
     }
 
     private static func trimTrailingWhitespace(_ s: inout String) {
-        while let last = s.last, last == " " || last == "\n" || last == "\t" || last == "\r" {
+        while let last = s.last, last.isWhitespace {
             s.removeLast()
         }
     }

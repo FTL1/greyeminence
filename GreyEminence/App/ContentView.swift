@@ -153,6 +153,23 @@ struct ContentView: View {
         .sheet(isPresented: $showProfileSetup) {
             MyProfileSetupSheet()
         }
+        // Presented at the root so it appears regardless of which destination is
+        // active — a recording (and its multi-event calendar choice) can be
+        // started from the menu bar or auto-detector while the Recording tab
+        // isn't open.
+        .sheet(isPresented: Binding(
+            get: { !recordingViewModel.pendingCalendarChoices.isEmpty },
+            set: { if !$0 { recordingViewModel.pendingCalendarChoices = [] } }
+        )) {
+            CalendarEventPickerSheet(
+                events: recordingViewModel.pendingCalendarChoices,
+                onPick: { event in
+                    recordingViewModel.matchCalendarEventManually(event, in: modelContext)
+                    recordingViewModel.pendingCalendarChoices = []
+                },
+                onSkip: { recordingViewModel.pendingCalendarChoices = [] }
+            )
+        }
         .alert("Resume Recording?", isPresented: $showResumeAlert) {
             Button("Resume") {
                 if let meeting = interruptedMeeting {

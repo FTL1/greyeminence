@@ -67,11 +67,9 @@ struct MeetingHeaderBar: View {
                         .fixedSize(horizontal: true, vertical: false)
                     if meeting.isLinkedToCalendar {
                         Menu {
-                            Button(role: .destructive) {
+                            UnlinkCalendarButton {
                                 meeting.unlinkCalendarEvent()
                                 try? modelContext.save()
-                            } label: {
-                                Label("Unlink calendar event", systemImage: "calendar.badge.minus")
                             }
                         } label: {
                             Label(meeting.calendarEventTitle ?? "Linked", systemImage: "calendar.badge.checkmark")

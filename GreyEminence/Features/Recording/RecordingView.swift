@@ -53,19 +53,10 @@ struct RecordingView: View {
         .task {
             await TranscriptionCoordinator.preloadModels()
         }
-        .sheet(isPresented: Binding(
-            get: { !viewModel.pendingCalendarChoices.isEmpty },
-            set: { if !$0 { viewModel.pendingCalendarChoices = [] } }
-        )) {
-            CalendarEventPickerSheet(
-                events: viewModel.pendingCalendarChoices,
-                onPick: { event in
-                    viewModel.matchCalendarEventManually(event, in: modelContext)
-                    viewModel.pendingCalendarChoices = []
-                },
-                onSkip: { viewModel.pendingCalendarChoices = [] }
-            )
-        }
+        // NOTE: the calendar-event picker sheet is presented at the ContentView
+        // root, not here — a recording can be started from the menu bar or the
+        // auto-detector while this view isn't mounted, and the picker must still
+        // appear.
     }
 
     private var idleState: some View {
@@ -128,7 +119,7 @@ struct RecordingView: View {
             let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
             if calendarEnabled {
                 await viewModel.calendarService.requestAccess()
-                viewModel.calendarService.refreshCurrentEvent()
+                await viewModel.calendarService.refreshCurrentEvent()
                 viewModel.refreshPrepContext(in: modelContext)
             }
         }
