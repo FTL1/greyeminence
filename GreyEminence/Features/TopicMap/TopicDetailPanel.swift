@@ -59,21 +59,38 @@ struct TopicDetailPanel: View {
                         }
                     }
 
-                    if !viewModel.selectedCoTopics.isEmpty {
+                    if !viewModel.selectedNeighbours.isEmpty {
                         Divider()
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Related Topics")
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Connected topics")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
+                                .padding(.horizontal)
 
-                            FlowLayout(spacing: 4) {
-                                ForEach(viewModel.selectedCoTopics, id: \.self) { topic in
-                                    TopicBadge(topic: topic)
+                            ForEach(viewModel.selectedNeighbours) { neighbour in
+                                Button {
+                                    viewModel.setSelectedTopic(neighbour.id)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(neighbour.label)
+                                            .font(.caption.weight(.medium))
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("\(neighbour.weight)")
+                                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                        Text("shared")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 3)
+                                    .contentShape(Rectangle())
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal)
                     }
                 }
                 .padding(.vertical)

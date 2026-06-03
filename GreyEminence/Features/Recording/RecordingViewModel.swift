@@ -160,34 +160,11 @@ final class RecordingViewModel {
         in modelContext: ModelContext,
         source: String
     ) {
-        meeting.title = event.title ?? meeting.title
-        meeting.calendarEventID = event.linkIdentifier
-        meeting.calendarEventTitle = event.title
-
-        let attendeeNames = event.attendees
-        let descriptor = FetchDescriptor<Contact>()
-        let contacts = (try? modelContext.fetch(descriptor)) ?? []
-        let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
-        var addedCount = 0
-        var alreadyPresentCount = 0
-        for (_, contact) in matched {
-            guard let contact else { continue }
-            if meeting.attendees.contains(where: { $0.id == contact.id }) {
-                alreadyPresentCount += 1
-            } else {
-                meeting.attendees.append(contact)
-                addedCount += 1
-            }
-        }
-
+        // At record-start the recording adopts the event's title; attendee +
+        // series matching lives in CalendarService.linkEvent (shared with the
+        // post-hoc "link a past meeting" flow).
+        calendarService.linkEvent(event, to: meeting, in: modelContext, setTitle: true)
         speakerContactMapper.prepopulate(from: meeting.attendees)
-        calendarService.matchToSeries(event: event, meeting: meeting, in: modelContext)
-
-        let unmatchedCount = attendeeNames.count - addedCount - alreadyPresentCount
-        log.log(
-            "Calendar event matched (\(source)): \"\(event.title ?? "untitled")\" — \(attendeeNames.count) attendee(s) on event: \(addedCount) added, \(alreadyPresentCount) already present, \(unmatchedCount) unmatched",
-            category: .general
-        )
     }
 
     /// Manual variant invoked from the recording toolbar. Operates on the

@@ -111,7 +111,7 @@ final class CalendarService {
 
         let task = Task { [weak self] () -> [CalendarEvent] in
             guard let self else { return [] }
-            return await self.fetchEventsInWindow(minutes: minutes)
+            return await self.fetchEventsInWindow(around: Date.now, minutes: minutes)
         }
         inFlightFetch = task
         inFlightMinutes = minutes
@@ -125,19 +125,25 @@ final class CalendarService {
         return result
     }
 
-    private func fetchEventsInWindow(minutes: TimeInterval) async -> [CalendarEvent] {
-        let now = Date.now
-        var merged = eventKitEventsInWindow(minutes: minutes)
+    /// Events near a specific date — used to link a *past* meeting to its
+    /// calendar event after the fact. Not cached (the cache is for the "now"
+    /// window the recording flow polls).
+    func eventsAround(date: Date, minutes: TimeInterval = 90) async -> [CalendarEvent] {
+        await fetchEventsInWindow(around: date, minutes: minutes)
+    }
+
+    private func fetchEventsInWindow(around date: Date, minutes: TimeInterval) async -> [CalendarEvent] {
+        var merged = eventKitEventsInWindow(around: date, minutes: minutes)
 
         // Graph is best-effort and self-gates (returns [] unless connected+enabled),
         // so a network/token failure can never drop the local results.
-        let graphEvents = await graph.eventsInWindow(minutes: minutes)
+        let graphEvents = await graph.eventsInWindow(minutes: minutes, around: date)
         if !graphEvents.isEmpty {
             merged = deduplicate(local: merged, remote: graphEvents)
         }
 
         return merged.sorted {
-            abs($0.startDate.timeIntervalSince(now)) < abs($1.startDate.timeIntervalSince(now))
+            abs($0.startDate.timeIntervalSince(date)) < abs($1.startDate.timeIntervalSince(date))
         }
     }
 
@@ -158,7 +164,7 @@ final class CalendarService {
     }
 
     /// EventKit query mapped to the neutral model. Synchronous (no network).
-    private func eventKitEventsInWindow(minutes: TimeInterval) -> [CalendarEvent] {
+    private func eventKitEventsInWindow(around date: Date, minutes: TimeInterval) -> [CalendarEvent] {
         guard authorizationState == .authorized else {
             // .info, not .warning — for users who deliberately denied calendar
             // access this is steady-state, not an anomaly. Repeated toolbar
@@ -176,9 +182,8 @@ final class CalendarService {
         let selected = selectedEventKitCalendars()
         guard !selected.isEmpty else { return [] }
 
-        let now = Date.now
-        let start = now.addingTimeInterval(-minutes * 60)
-        let end = now.addingTimeInterval(minutes * 60)
+        let start = date.addingTimeInterval(-minutes * 60)
+        let end = date.addingTimeInterval(minutes * 60)
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: selected)
         let events = store.events(matching: predicate).map(Self.mapToCalendarEvent)
         LogManager.shared.log(
@@ -358,6 +363,46 @@ final class CalendarService {
                 existing.seriesTitle = seriesTitle
             }
         }
+    }
+
+    /// Apply a calendar event to a meeting: record the link, add matched
+    /// attendees, and join any recurring series. `setTitle` controls whether the
+    /// meeting title adopts the event name — true at record-start, **false** when
+    /// linking a past meeting after the fact (we don't want to clobber the
+    /// already-generated title; only the attendees should change).
+    @discardableResult
+    func linkEvent(
+        _ event: CalendarEvent,
+        to meeting: Meeting,
+        in context: ModelContext,
+        setTitle: Bool
+    ) -> (added: Int, alreadyPresent: Int) {
+        if setTitle {
+            meeting.title = event.title ?? meeting.title
+        }
+        meeting.calendarEventID = event.linkIdentifier
+        meeting.calendarEventTitle = event.title
+
+        let contacts = (try? context.fetch(FetchDescriptor<Contact>())) ?? []
+        let matched = matchContacts(attendees: event.attendees, existing: contacts)
+        var added = 0
+        var alreadyPresent = 0
+        for (_, contact) in matched {
+            guard let contact else { continue }
+            if meeting.attendees.contains(where: { $0.id == contact.id }) {
+                alreadyPresent += 1
+            } else {
+                meeting.attendees.append(contact)
+                added += 1
+            }
+        }
+
+        matchToSeries(event: event, meeting: meeting, in: context)
+        LogManager.shared.log(
+            "Calendar event linked (\(setTitle ? "title+attendees" : "attendees only")): \"\(event.title ?? "untitled")\" — \(added) added, \(alreadyPresent) already present",
+            category: .general
+        )
+        return (added, alreadyPresent)
     }
 
     /// Refresh the cached current event detection.

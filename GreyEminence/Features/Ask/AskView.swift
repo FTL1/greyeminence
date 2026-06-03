@@ -239,8 +239,7 @@ struct AskView: View {
                         Label("Answer", systemImage: "sparkles")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        Text(answer)
-                            .textSelection(.enabled)
+                        MarkdownText(markdown: answer)
                             .font(.body)
                     }
                     .padding(12)

@@ -74,6 +74,7 @@ struct TopicMapView: View {
             }
             .onChange(of: size) { _, newSize in
                 canvasSize = newSize
+                viewModel.lastCanvasSize = newSize
             }
             .onChange(of: insights.count) {
                 rebuildIfNeeded()
@@ -154,7 +155,7 @@ struct TopicMapView: View {
         let isHovered = node.id == viewModel.hoveredTopicID
 
         Button {
-            viewModel.selectedTopicID = (viewModel.selectedTopicID == node.id) ? nil : node.id
+            viewModel.setSelectedTopic(viewModel.selectedTopicID == node.id ? nil : node.id)
         } label: {
             HStack(spacing: 6) {
                 Text("\(node.meetingCount)")
@@ -195,21 +196,25 @@ struct TopicMapView: View {
             context.translateBy(x: viewModel.offset.x, y: viewModel.offset.y)
             context.scaleBy(x: viewModel.scale, y: viewModel.scale)
 
+            let focus = viewModel.focusActive
+            // In the ego view, spokes adopt the selected topic's accent colour.
+            let edgeColor: Color = focus ? .accentColor : .primary
+
             // Draw edges
             for edge in viewModel.edges {
                 guard edge.sourceIndex < viewModel.nodes.count,
                       edge.targetIndex < viewModel.nodes.count else { continue }
-                let from = viewModel.nodes[edge.sourceIndex].position
-                let to = viewModel.nodes[edge.targetIndex].position
                 let opacity = viewModel.edgeOpacity(for: edge)
                 guard opacity > 0.01 else { continue }
+                let from = viewModel.nodes[edge.sourceIndex].position
+                let to = viewModel.nodes[edge.targetIndex].position
 
                 var path = Path()
                 path.move(to: from)
                 path.addLine(to: to)
                 context.stroke(
                     path,
-                    with: .color(.primary.opacity(opacity)),
+                    with: .color(edgeColor.opacity(opacity)),
                     lineWidth: viewModel.edgeWidth(for: edge)
                 )
             }
@@ -228,8 +233,7 @@ struct TopicMapView: View {
 
                 let isSelected = node.id == viewModel.selectedTopicID
                 let isHovered = node.id == viewModel.hoveredTopicID
-                let isConnected = viewModel.isConnectedToSelected(node.id)
-                    || viewModel.isConnectedToHovered(node.id)
+                let isNeighbour = focus && !isSelected
 
                 // Glow ring for selected
                 if isSelected {
@@ -240,38 +244,46 @@ struct TopicMapView: View {
                     )
                 }
 
-                // Node fill — monochrome with emphasis on focus cluster
                 let fillColor: Color
                 if isSelected {
                     fillColor = .accentColor
+                } else if isNeighbour {
+                    fillColor = .primary.opacity(0.85)
                 } else if isHovered {
                     fillColor = .primary
-                } else if isConnected {
+                } else if viewModel.isConnectedToHovered(node.id) {
                     fillColor = .primary.opacity(0.7)
                 } else {
                     fillColor = .secondary
                 }
+                context.fill(Circle().path(in: rect), with: .color(fillColor.opacity(opacity)))
 
-                context.fill(
-                    Circle().path(in: rect),
-                    with: .color(fillColor.opacity(opacity))
-                )
-
-                // Label — only show for hovered, selected, connected nodes, or large nodes when zoomed
-                let showLabel = isSelected || isHovered || isConnected
+                // Labels: every visible node in the ego view (with its shared
+                // count); otherwise hovered/connected/large-when-zoomed.
+                let showLabel = focus
+                    || isHovered
+                    || viewModel.isConnectedToHovered(node.id)
                     || (viewModel.scale > 1.5 && node.meetingCount >= 3)
                 if showLabel {
-                    let weight: Font.Weight = (isSelected || isHovered) ? .semibold : .regular
-                    let labelOpacity = (isSelected || isHovered) ? 1.0 : 0.7
-                    let labelText = Text(node.label)
-                        .font(.system(size: max(9, 10 / viewModel.scale), weight: weight))
-                        .foregroundColor(.primary.opacity(labelOpacity * opacity))
-                    let labelPoint = CGPoint(
-                        x: node.position.x,
-                        y: node.position.y + node.radius + 4
-                    )
+                    let emphatic = isSelected || isHovered
+                    var labelString = node.label
+                    if isNeighbour, let weight = viewModel.weightToSelected(node.id) {
+                        labelString += "  ·\(weight)"
+                    }
+                    let labelText = Text(labelString)
+                        .font(.system(size: max(9, 10 / viewModel.scale), weight: emphatic ? .semibold : .regular))
+                        .foregroundColor(.primary.opacity((emphatic ? 1.0 : 0.85) * opacity))
+                    let labelPoint = CGPoint(x: node.position.x, y: node.position.y + node.radius + 4)
                     context.draw(labelText, at: labelPoint, anchor: .top)
                 }
+            }
+
+            // "+N more" hint when neighbours exceed the ring cap.
+            if focus, viewModel.extraNeighbourCount > 0 {
+                let hint = Text("+\(viewModel.extraNeighbourCount) more in panel")
+                    .font(.system(size: max(8, 9 / viewModel.scale)))
+                    .foregroundColor(.secondary)
+                context.draw(hint, at: CGPoint(x: size.width / 2, y: size.height - 18), anchor: .bottom)
             }
         }
         .background(Color.clear)

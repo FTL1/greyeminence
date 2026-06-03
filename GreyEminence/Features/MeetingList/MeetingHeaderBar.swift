@@ -65,22 +65,7 @@ struct MeetingHeaderBar: View {
                     Label("\(meeting.segments.count) segments", systemImage: "text.bubble")
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
-                    if meeting.isLinkedToCalendar {
-                        Menu {
-                            UnlinkCalendarButton {
-                                meeting.unlinkCalendarEvent()
-                                try? modelContext.save()
-                            }
-                        } label: {
-                            Label(meeting.calendarEventTitle ?? "Linked", systemImage: "calendar.badge.checkmark")
-                                .foregroundStyle(.green)
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help("Linked to a calendar event")
-                    }
+                    MeetingCalendarLinkMenu(meeting: meeting)
                     if editedCount > 0 {
                         Label("\(editedCount) edited", systemImage: "pencil")
                             .foregroundStyle(.orange)

@@ -28,6 +28,9 @@ struct TopicEdge {
     let sourceIndex: Int
     let targetIndex: Int
     let weight: Int         // co-occurrence count
+    /// True for each node's strongest few incident edges — the "backbone" drawn
+    /// in the unselected overview so it's a readable skeleton, not a hairball.
+    var isBackbone = false
 }
 
 struct TopicPair: Hashable {

@@ -7,7 +7,7 @@ import Foundation
 /// network/token failure can never drop the local EventKit results.
 @MainActor
 final class GraphCalendarProvider {
-    func eventsInWindow(minutes: TimeInterval) async -> [CalendarEvent] {
+    func eventsInWindow(minutes: TimeInterval, around: Date = Date.now) async -> [CalendarEvent] {
         guard GraphConfig.isConfigured,
               UserDefaults.standard.bool(forKey: GraphConfig.enabledKey),
               let token = await GraphAuthService.shared.validAccessToken() else {
@@ -30,7 +30,7 @@ final class GraphCalendarProvider {
         let events = await withTaskGroup(of: [CalendarEvent].self) { group in
             for calendarID in targets {
                 group.addTask {
-                    (try? await Self.fetchCalendarView(calendarID: calendarID, minutes: minutes, token: token)) ?? []
+                    (try? await Self.fetchCalendarView(calendarID: calendarID, minutes: minutes, token: token, around: around)) ?? []
                 }
             }
             var all: [CalendarEvent] = []
@@ -70,17 +70,17 @@ final class GraphCalendarProvider {
         }
     }
 
-    /// Calendar view for a specific calendar (`nil` = the account's default).
-    nonisolated private static func fetchCalendarView(calendarID: String?, minutes: TimeInterval, token: String) async throws -> [CalendarEvent] {
-        let now = Date.now
+    /// Calendar view for a specific calendar (`nil` = the account's default),
+    /// centered on `around` (now for live matching, the meeting date for post-hoc).
+    nonisolated private static func fetchCalendarView(calendarID: String?, minutes: TimeInterval, token: String, around: Date) async throws -> [CalendarEvent] {
         let iso = ISO8601DateFormatter()
         iso.timeZone = TimeZone(identifier: "UTC")
         let path = calendarID.map { "/me/calendars/\($0)/calendarView" } ?? "/me/calendarView"
         let data = try await graphGET(
             path: path,
             queryItems: [
-                .init(name: "startDateTime", value: iso.string(from: now.addingTimeInterval(-minutes * 60))),
-                .init(name: "endDateTime", value: iso.string(from: now.addingTimeInterval(minutes * 60))),
+                .init(name: "startDateTime", value: iso.string(from: around.addingTimeInterval(-minutes * 60))),
+                .init(name: "endDateTime", value: iso.string(from: around.addingTimeInterval(minutes * 60))),
                 .init(name: "$select", value: "subject,start,end,attendees,seriesMasterId,type,isAllDay"),
                 .init(name: "$orderby", value: "start/dateTime"),
                 .init(name: "$top", value: "50"),
