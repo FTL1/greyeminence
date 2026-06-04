@@ -8,58 +8,60 @@ struct TranscriptSegmentRow: View {
     @State private var showContactPicker = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            // Confidence dot (only shown for live segments with low confidence)
-            if let conf = confidence, conf < 0.6 {
-                Circle()
-                    .fill(conf < 0.3 ? Color.red : Color.yellow)
-                    .frame(width: 6, height: 6)
-                    .padding(.top, 6)
-                    .help(String(format: "Confidence: %.0f%%", conf * 100))
-            }
-
-            // Timestamp
-            Text(segment.formattedTimestamp)
-                .font(.caption)
-                .fontDesign(.monospaced)
-                .foregroundStyle(.tertiary)
-                .frame(width: 40, alignment: .trailing)
-
-            // Speaker badge with context menu for linking
-            SpeakerBadge(speaker: segment.speaker)
-                .contextMenu {
-                    if onLinkSpeaker != nil {
-                        Button("Link to Contact...") {
-                            showContactPicker = true
+        VStack(alignment: .leading, spacing: 3) {
+            // Header line: speaker · timestamp · flags. Keeping these on their own
+            // row lets the spoken text use the full width below instead of being
+            // squeezed into the column to the right of the badge.
+            HStack(spacing: 6) {
+                SpeakerBadge(speaker: segment.speaker)
+                    .contextMenu {
+                        if onLinkSpeaker != nil {
+                            Button("Link to Contact...") {
+                                showContactPicker = true
+                            }
                         }
                     }
-                }
-                .popover(isPresented: $showContactPicker) {
-                    ContactPicker(excludedContacts: []) { contact in
-                        onLinkSpeaker?(segment.speaker)
-                        showContactPicker = false
+                    .popover(isPresented: $showContactPicker) {
+                        ContactPicker(excludedContacts: []) { contact in
+                            onLinkSpeaker?(segment.speaker)
+                            showContactPicker = false
+                        }
                     }
+
+                Text(segment.formattedTimestamp)
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.tertiary)
+
+                if segment.isEdited {
+                    Image(systemName: "pencil")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help("Edited")
                 }
 
-            // Edited indicator
-            if segment.isEdited {
-                Image(systemName: "pencil")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .help("Edited")
+                // Confidence dot (only shown for live, low-confidence segments)
+                if let conf = confidence, conf < 0.6 {
+                    Circle()
+                        .fill(conf < 0.3 ? Color.red : Color.yellow)
+                        .frame(width: 6, height: 6)
+                        .help(String(format: "Confidence: %.0f%%", conf * 100))
+                }
+
+                Spacer(minLength: 0)
             }
 
-            // Text
+            // Spoken text — full width, always wraps (never truncated/clipped).
             Text(segment.text)
                 .font(.body)
                 .foregroundStyle(segment.isFinal ? .primary : .secondary)
                 .italic(!segment.isFinal)
                 .textSelection(.enabled)
                 .opacity(confidenceOpacity)
-
-            Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 5)
         .opacity(segment.isFinal ? 1.0 : 0.7)
     }
 

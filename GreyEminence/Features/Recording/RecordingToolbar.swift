@@ -7,7 +7,7 @@ struct RecordingToolbar: View {
     let modelContext: ModelContext
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             // Recording indicator
             HStack(spacing: 8) {
                 if viewModel.isRecording {
@@ -30,10 +30,13 @@ struct RecordingToolbar: View {
             }
             .frame(width: 70, alignment: .leading)
 
-            // Timer
+            // Timer — fixed to one line so a narrow pane never wraps it to "01:" / "45".
             Text(viewModel.formattedTime)
                 .font(.system(.title2, design: .monospaced, weight: .medium))
+                .monospacedDigit()
                 .foregroundStyle(viewModel.isRecording ? .primary : .secondary)
+                .lineLimit(1)
+                .fixedSize()
 
             Spacer()
 
@@ -81,39 +84,22 @@ struct RecordingToolbar: View {
                 CalendarMatchMenu(viewModel: viewModel, modelContext: modelContext)
             }
 
-            // Mic level + segment count
+            // Live status cluster (audio levels, segment count, AI activity).
+            // Collapses progressively when the pane is too narrow to fit it all,
+            // so the timer and primary controls are never crushed into a wrap.
             if viewModel.state != .idle {
-                Divider()
-                    .frame(height: 20)
-
-                // Mic level indicator
-                HStack(spacing: 2) {
-                    Image(systemName: "mic.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    LevelBar(level: viewModel.micLevel)
-                        .frame(width: 40, height: 12)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        audioMeters
+                        segmentCount
+                        AIActivityIndicator(state: viewModel.aiActivityState)
+                    }
+                    HStack(spacing: 10) {
+                        segmentCount
+                        AIActivityIndicator(state: viewModel.aiActivityState)
+                    }
+                    AIActivityIndicator(state: viewModel.aiActivityState)
                 }
-
-                // System audio level indicator
-                HStack(spacing: 2) {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    LevelBar(level: viewModel.systemLevel)
-                        .frame(width: 40, height: 12)
-                }
-
-                HStack(spacing: 4) {
-                    Image(systemName: "text.bubble")
-                        .foregroundStyle(.secondary)
-                    Text("\(viewModel.segments.count)")
-                        .font(.caption)
-                        .fontDesign(.monospaced)
-                        .foregroundStyle(.secondary)
-                }
-
-                AIActivityIndicator(state: viewModel.aiActivityState)
             }
         }
         .padding(.horizontal)
@@ -144,6 +130,43 @@ struct RecordingToolbar: View {
                 .offset(y: 16)
             }
         }
+    }
+
+    /// Mic + system-audio level meters, separated from the controls by a rule.
+    /// First thing dropped when the toolbar runs out of horizontal room.
+    private var audioMeters: some View {
+        HStack(spacing: 10) {
+            Divider().frame(height: 20)
+            HStack(spacing: 2) {
+                Image(systemName: "mic.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                LevelBar(level: viewModel.micLevel)
+                    .frame(width: 40, height: 12)
+            }
+            HStack(spacing: 2) {
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                LevelBar(level: viewModel.systemLevel)
+                    .frame(width: 40, height: 12)
+            }
+        }
+        .fixedSize()
+    }
+
+    private var segmentCount: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "text.bubble")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("\(viewModel.segments.count)")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 
@@ -264,9 +287,11 @@ struct AIActivityIndicator: View {
                     .font(.caption2)
                 Text("AI in \(secs)s")
                     .font(.caption)
-                    .fontDesign(.monospaced)
+                    .monospacedDigit()
             }
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
         case .analyzing:
             HStack(spacing: 4) {
                 Image(systemName: "brain")
@@ -277,6 +302,8 @@ struct AIActivityIndicator: View {
                     .font(.caption)
             }
             .foregroundStyle(.purple)
+            .lineLimit(1)
+            .fixedSize()
         }
     }
 }

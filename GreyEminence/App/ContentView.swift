@@ -476,13 +476,17 @@ struct ContentView: View {
             }
         case .recording:
             GeometryReader { geo in
-                let defaultWidth = geo.size.width * 0.5
+                // Keep the live transcript a healthy panel but never let it crowd
+                // the recording pane (whose toolbar is horizontally dense): floor
+                // the recording side at ~50% by clamping the inspector to 50% max.
+                let defaultWidth = geo.size.width * 0.4
                 let width = inspectorWidth ?? defaultWidth
-                let clampedWidth = min(max(width, 280), geo.size.width * 0.7)
+                let clampedWidth = min(max(width, 280), geo.size.width * 0.5)
 
                 HStack(spacing: 0) {
                     RecordingView(viewModel: recordingViewModel, showsTranscript: false)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(2)
                     // Only show the live transcript pane while a recording is
                     // active. When idle (e.g. returning here to start a new one)
                     // there's nothing live to show, and rendering it would
@@ -494,6 +498,7 @@ struct ContentView: View {
                             segmentConfidence: recordingViewModel.segmentConfidence
                         )
                         .frame(width: clampedWidth)
+                        .layoutPriority(0)
                     }
                 }
             }
