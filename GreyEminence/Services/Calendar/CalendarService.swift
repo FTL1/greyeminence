@@ -11,7 +11,6 @@ final class CalendarService {
     }
 
     private(set) var authorizationState: AuthorizationState = .notDetermined
-    private(set) var currentEvent: CalendarEvent?
 
     private nonisolated(unsafe) let store = EKEventStore()
     /// Microsoft Graph provider — only fetches when the user has connected an
@@ -73,25 +72,6 @@ final class CalendarService {
                 level: .warning
             )
         }
-    }
-
-    /// Find the current or upcoming calendar event within a time window.
-    /// Defaults to ±60 min so a meeting already in progress (started up to an
-    /// hour ago) or starting soon is still detected.
-    func currentOrUpcomingEvent(within minutes: TimeInterval = 60) async -> CalendarEvent? {
-        let event = await eventsInWindow(minutes: minutes).first
-        if let event {
-            LogManager.shared.log(
-                "Calendar: nearest event within ±\(Int(minutes))m is \"\(event.title ?? "untitled")\" starting \(event.startDate)",
-                category: .general
-            )
-        } else {
-            LogManager.shared.log(
-                "Calendar: no event within ±\(Int(minutes))m of now",
-                category: .general
-            )
-        }
-        return event
     }
 
     /// All calendar events within ±`minutes` of now, merged from every enabled
@@ -185,7 +165,10 @@ final class CalendarService {
         let start = date.addingTimeInterval(-minutes * 60)
         let end = date.addingTimeInterval(minutes * 60)
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: selected)
-        let events = store.events(matching: predicate).map(Self.mapToCalendarEvent)
+        // All-day events (vacations, holidays, birthdays) aren't meetings — exclude them.
+        let events = store.events(matching: predicate)
+            .filter { !$0.isAllDay }
+            .map(Self.mapToCalendarEvent)
         LogManager.shared.log(
             "Calendar: EventKit found \(events.count) event(s) within ±\(Int(minutes))m across \(selected.count) calendar(s)",
             category: .general
@@ -403,10 +386,5 @@ final class CalendarService {
             category: .general
         )
         return (added, alreadyPresent)
-    }
-
-    /// Refresh the cached current event detection.
-    func refreshCurrentEvent() async {
-        currentEvent = await currentOrUpcomingEvent()
     }
 }

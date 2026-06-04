@@ -63,23 +63,8 @@ struct RecordingView: View {
         VStack(spacing: 20) {
             Spacer()
 
-            // Show detected calendar event
-            if let event = viewModel.calendarService.currentEvent {
-                HStack(spacing: 10) {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(.blue)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(event.title ?? "Meeting")
-                            .font(.headline)
-                        Text(event.startDate.formatted(date: .omitted, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-            }
+            // Which calendar meeting are we about to record? Drives prep + link.
+            calendarSelector
 
             // Meeting prep view
             if let prepContext = viewModel.prepContext, !prepContext.isEmpty {
@@ -116,12 +101,102 @@ struct RecordingView: View {
         .frame(maxWidth: .infinity)
         .padding()
         .task {
-            let calendarEnabled = UserDefaults.standard.bool(forKey: "calendarIntegration")
-            if calendarEnabled {
-                await viewModel.calendarService.requestAccess()
-                await viewModel.calendarService.refreshCurrentEvent()
-                viewModel.refreshPrepContext(in: modelContext)
+            await viewModel.refreshCalendarCandidates(in: modelContext)
+        }
+    }
+
+    /// Idle-screen control for choosing which calendar meeting this recording
+    /// belongs to. The selection drives both the prep card and the record-start
+    /// link, so we never guess silently or ask twice. Hidden when there are no
+    /// nearby events.
+    @ViewBuilder
+    private var calendarSelector: some View {
+        if let selected = viewModel.selectedEvent {
+            // Confirmed selection — show it; allow changing or clearing.
+            Menu {
+                ForEach(viewModel.candidateEvents) { event in
+                    Button {
+                        viewModel.selectEvent(event, in: modelContext)
+                    } label: {
+                        Label(eventLabel(event),
+                              systemImage: event.id == selected.id ? "checkmark" : "calendar")
+                    }
+                }
+                Divider()
+                Button("Not a calendar meeting") { viewModel.clearSelectedEvent() }
+            } label: {
+                calendarChip(for: selected, showsChevron: viewModel.candidateEvents.count > 1)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        } else if viewModel.calendarSelectionCleared {
+            Button {
+                viewModel.reopenCalendarSelection(in: modelContext)
+            } label: {
+                Label("Link a calendar event", systemImage: "calendar.badge.plus")
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else if viewModel.candidateEvents.count >= 2 {
+            // Conflict: make the choice explicit — no prep until one is picked.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Which meeting are you recording?")
+                    .font(.subheadline.weight(.semibold))
+                ForEach(viewModel.candidateEvents) { event in
+                    Button {
+                        viewModel.selectEvent(event, in: modelContext)
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "calendar").foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(event.title ?? "Meeting")
+                                Text(event.startDate.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button("Not a calendar meeting") { viewModel.clearSelectedEvent() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 500)
+        }
+        // 0 candidates → nothing.
+    }
+
+    private func calendarChip(for event: CalendarEvent, showsChevron: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar").foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title ?? "Meeting").font(.headline)
+                Text(event.startDate.formatted(date: .omitted, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if showsChevron {
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func eventLabel(_ event: CalendarEvent) -> String {
+        let time = event.startDate.formatted(date: .omitted, time: .shortened)
+        return "\(event.title ?? "Meeting") — \(time)"
     }
 }

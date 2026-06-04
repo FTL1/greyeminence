@@ -122,6 +122,8 @@ final class GraphCalendarProvider {
     }
 
     nonisolated private static func map(_ ev: GraphEvent) -> CalendarEvent? {
+        // All-day events (vacations, holidays) aren't meetings — skip them.
+        guard !(ev.isAllDay ?? false) else { return nil }
         guard let startStr = ev.start?.dateTime, let start = parseDate(startStr) else { return nil }
         let end = (ev.end?.dateTime).flatMap(parseDate) ?? start
         // Treat as recurring only when we actually have a series key to group by.
@@ -179,6 +181,7 @@ struct GraphEvent: Decodable {
     let start: GraphDateTime?
     let end: GraphDateTime?
     let attendees: [GraphAttendee]?
+    let isAllDay: Bool?
 }
 
 struct GraphDateTime: Decodable {

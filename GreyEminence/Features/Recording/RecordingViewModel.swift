@@ -100,6 +100,20 @@ final class RecordingViewModel {
     /// choice is pending (zero or exactly one nearby event).
     var pendingCalendarChoices: [CalendarEvent] = []
 
+    /// Calendar events near *now*, surfaced on the idle screen so the user can
+    /// confirm which meeting they're about to record. Empty when calendar
+    /// integration is off or nothing is nearby.
+    var candidateEvents: [CalendarEvent] = []
+
+    /// The meeting the user chose (or a lone candidate auto-picked) on the idle
+    /// screen. Drives both the prep card and the record-start link, so we never
+    /// guess silently or ask twice.
+    var selectedEvent: CalendarEvent?
+
+    /// True when the user explicitly chose "Not a calendar meeting", so
+    /// record-start must not silently fall back to auto-matching.
+    private(set) var calendarSelectionCleared = false
+
     // Auto-detection of external meeting activity (Teams/Zoom/etc.)
     let meetingDetector = MeetingDetectionService()
     private var autoDetectionConfigured = false
@@ -114,9 +128,55 @@ final class RecordingViewModel {
     var isRecording: Bool { state == .recording }
     var isPaused: Bool { state == .paused }
 
-    /// Refresh meeting prep context based on detected calendar event and contacts.
+    /// Load nearby calendar events for the idle screen and choose a default
+    /// selection. Exactly one candidate auto-selects (the unambiguous case);
+    /// zero or 2+ leave the choice to the user — a conflict we must not resolve
+    /// silently. Honors an explicit "Not a calendar meeting".
+    func refreshCalendarCandidates(in modelContext: ModelContext) async {
+        guard UserDefaults.standard.bool(forKey: "calendarIntegration") else {
+            candidateEvents = []
+            selectedEvent = nil
+            prepContext = nil
+            return
+        }
+        if calendarService.authorizationState != .authorized {
+            await calendarService.requestAccess()
+        }
+        candidateEvents = await calendarService.eventsInWindow(minutes: 60)
+        if candidateEvents.count == 1, selectedEvent == nil, !calendarSelectionCleared {
+            selectEvent(candidateEvents[0], in: modelContext)
+        } else if selectedEvent == nil {
+            // 0 or 2+ with nothing chosen yet → no prep until the user picks.
+            prepContext = nil
+        }
+    }
+
+    /// Choose (or re-choose) the meeting being prepped/recorded; regenerates prep.
+    func selectEvent(_ event: CalendarEvent, in modelContext: ModelContext) {
+        selectedEvent = event
+        calendarSelectionCleared = false
+        refreshPrepContext(in: modelContext)
+    }
+
+    /// Explicit "Not a calendar meeting": clears the selection + prep and
+    /// suppresses record-start auto-matching for this idle session.
+    func clearSelectedEvent() {
+        selectedEvent = nil
+        calendarSelectionCleared = true
+        prepContext = nil
+    }
+
+    /// Undo a clear, re-offering the chooser (or auto-picking a lone candidate).
+    func reopenCalendarSelection(in modelContext: ModelContext) {
+        calendarSelectionCleared = false
+        if candidateEvents.count == 1 {
+            selectEvent(candidateEvents[0], in: modelContext)
+        }
+    }
+
+    /// Rebuild the prep card for the currently `selectedEvent` (if any).
     func refreshPrepContext(in modelContext: ModelContext) {
-        guard let event = calendarService.currentEvent else {
+        guard let event = selectedEvent else {
             prepContext = nil
             return
         }
@@ -144,6 +204,7 @@ final class RecordingViewModel {
         }
 
         prepContext = meetingPrepService.gatherPrepContext(
+            for: event,
             attendees: matchedContacts,
             seriesID: seriesID,
             in: modelContext
@@ -398,6 +459,19 @@ final class RecordingViewModel {
             log.log("Calendar match skipped: calendarIntegration toggle is off", category: .general)
             return
         }
+        // The user already chose (or declined) a meeting on the idle screen —
+        // honor it instead of re-fetching and risking a different pick.
+        if let chosen = selectedEvent {
+            applyCalendarMatch(event: chosen, to: meeting, in: modelContext, source: "idle-selection")
+            PersistenceGate.save(modelContext, site: "matchCalendarAtStart", meetingID: meeting.id)
+            return
+        }
+        if calendarSelectionCleared {
+            log.log("Calendar match skipped: user chose 'Not a calendar meeting'", category: .general)
+            return
+        }
+        // No idle selection (e.g. started from the menu bar or auto-detector):
+        // fetch nearby and either auto-link the single match or raise the picker.
         let meetingID = meeting.id
         Task { @MainActor in
             if calendarService.authorizationState != .authorized {
@@ -775,6 +849,9 @@ final class RecordingViewModel {
         lastPersistedSegmentCount = 0
         prepContext = nil
         pendingCalendarChoices = []
+        candidateEvents = []
+        selectedEvent = nil
+        calendarSelectionCleared = false
         currentSectionTag = nil
         currentSectionTagID = nil
         aiActivityState = .idle

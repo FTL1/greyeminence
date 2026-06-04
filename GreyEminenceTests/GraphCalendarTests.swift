@@ -107,6 +107,21 @@ final class GraphCalendarTests: XCTestCase {
         XCTAssertNil(e.recurrenceID)
     }
 
+    func testAllDayEventsAreExcluded() throws {
+        let json = """
+        {"value":[
+          {"id":"AD","subject":"Vacation","type":"singleInstance","isAllDay":true,
+           "start":{"dateTime":"2026-06-01T00:00:00.0000000","timeZone":"UTC"},
+           "end":{"dateTime":"2026-06-02T00:00:00.0000000","timeZone":"UTC"}},
+          {"id":"M","subject":"Standup","type":"singleInstance","isAllDay":false,
+           "start":{"dateTime":"2026-06-01T09:00:00.0000000","timeZone":"UTC"},
+           "end":{"dateTime":"2026-06-01T09:15:00.0000000","timeZone":"UTC"}}
+        ]}
+        """
+        let events = try GraphCalendarProvider.decodeEvents(from: Data(json.utf8))
+        XCTAssertEqual(events.map(\.title), ["Standup"])  // all-day "Vacation" dropped
+    }
+
     func testEventWithUnparseableDateIsSkipped() throws {
         let json = """
         {"value":[

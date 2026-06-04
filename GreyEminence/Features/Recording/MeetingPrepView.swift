@@ -5,8 +5,15 @@ struct MeetingPrepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Meeting Prep", systemImage: "doc.text.magnifyingglass")
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Label("Meeting Prep", systemImage: "doc.text.magnifyingglass")
+                    .font(.headline)
+                if !context.sourceSummary.isEmpty {
+                    Text(context.sourceSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if !context.unresolvedItems.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
