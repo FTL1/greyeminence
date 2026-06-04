@@ -36,16 +36,14 @@
 	<string>https://github.com/mpurdon/greyeminence/releases/latest/download/appcast.xml</string>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>Microsoft Graph OAuth</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>msauth.com.greyeminence.app</string>
-			</array>
-		</dict>
-	</array>
+	<!--
+	  No CFBundleURLTypes: the Microsoft Graph OAuth redirect
+	  (msauth.com.greyeminence.app://) is captured in-process by
+	  ASWebAuthenticationSession via its callbackURLScheme. Statically
+	  registering the scheme here makes LaunchServices ALSO launch a second
+	  app instance to "handle" the redirect, which immediately exits — the
+	  "a second Grey Eminence opens then closes" flicker. ASWebAuthenticationSession
+	  does not need the registration; do not re-add it.
+	-->
 </dict>
 </plist>
