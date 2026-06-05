@@ -174,41 +174,16 @@ final class RecordingViewModel {
         }
     }
 
-    /// Rebuild the prep card for the currently `selectedEvent` (if any).
+    /// Rebuild the prep card for the currently `selectedEvent` (if any). Prep is
+    /// drawn only from prior recorded occurrences of the *same* recurring meeting
+    /// (resolved inside the service) — never from unrelated meetings that merely
+    /// share attendees.
     func refreshPrepContext(in modelContext: ModelContext) {
         guard let event = selectedEvent else {
             prepContext = nil
             return
         }
-
-        let attendeeNames = event.attendees
-        let descriptor = FetchDescriptor<Contact>()
-        let contacts = (try? modelContext.fetch(descriptor)) ?? []
-        let matched = calendarService.matchContacts(attendees: attendeeNames, existing: contacts)
-        let matchedContacts = matched.compactMap(\.contact)
-
-        guard !matchedContacts.isEmpty else {
-            prepContext = nil
-            return
-        }
-
-        let recurrenceID = event.recurrenceID
-        var seriesID: UUID?
-        if recurrenceID != nil {
-            let meetingDesc = FetchDescriptor<Meeting>(
-                predicate: #Predicate<Meeting> { $0.calendarEventID != nil }
-            )
-            if let meetings = try? modelContext.fetch(meetingDesc) {
-                seriesID = meetings.first(where: { $0.calendarEventID == recurrenceID })?.seriesID
-            }
-        }
-
-        prepContext = meetingPrepService.gatherPrepContext(
-            for: event,
-            attendees: matchedContacts,
-            seriesID: seriesID,
-            in: modelContext
-        )
+        prepContext = meetingPrepService.gatherPrepContext(for: event, in: modelContext)
     }
 
     /// Apply a calendar event's metadata (title, attendees, series) to a meeting.

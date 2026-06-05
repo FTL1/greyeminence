@@ -1,69 +1,55 @@
 import XCTest
 @testable import Grey_Eminence
 
-/// Pure, offline tests for the prep-scoping helpers — the "last N meetings"
-/// recency cut and the provenance summary wording. No SwiftData involved.
+/// Pure, offline tests for the prep helpers — provenance summary wording,
+/// assignee cleaning, and order-preserving dedupe. No SwiftData involved.
 final class MeetingPrepServiceTests: XCTestCase {
 
-    /// Fixed reference so the test is deterministic (no `Date.now`).
-    private func date(_ daysAgo: Int) -> Date {
-        Date(timeIntervalSince1970: 1_700_000_000)
-            .addingTimeInterval(TimeInterval(-daysAgo * 86_400))
-    }
+    // MARK: - History summary
 
-    // MARK: - Recency cut (the "61 days ago" fix)
-
-    func testRecentMeetingIDsKeepsNewestN() {
-        let a = UUID(), b = UUID(), c = UUID(), d = UUID()
-        let meetings: [(id: UUID, date: Date)] = [
-            (a, date(61)),   // oldest — dropped
-            (b, date(7)),    // newest
-            (c, date(30)),
-            (d, date(14)),
-        ]
-        // Newest first, capped at 2 → [b (7d), d (14d)]; the 61-day item is gone.
-        XCTAssertEqual(MeetingPrepService.recentMeetingIDs(from: meetings, limit: 2), [b, d])
-    }
-
-    func testRecentMeetingIDsHandlesFewerThanLimit() {
-        let a = UUID()
-        XCTAssertEqual(MeetingPrepService.recentMeetingIDs(from: [(a, date(3))], limit: 2), [a])
-    }
-
-    func testRecentMeetingIDsEmpty() {
-        XCTAssertEqual(MeetingPrepService.recentMeetingIDs(from: [], limit: 2), [])
-    }
-
-    // MARK: - Provenance summary
-
-    func testSummarySeriesWording() {
+    func testHistorySummarySingleOccurrence() {
+        // No date → stable, no locale-dependent string to assert.
         XCTAssertEqual(
-            MeetingPrepService.summary(count: 1, isSeries: true, seriesTitle: "OLP Team Sync", attendeeNames: []),
-            "From your last OLP Team Sync"
-        )
-        XCTAssertEqual(
-            MeetingPrepService.summary(count: 2, isSeries: true, seriesTitle: "OLP Team Sync", attendeeNames: ["Erin"]),
-            "From your last 2 OLP Team Sync meetings"
+            MeetingPrepService.historySummary(count: 1, mostRecent: nil),
+            "From the last time you recorded this meeting"
         )
     }
 
-    func testSummaryAttendeeWording() {
+    func testHistorySummaryMultipleOccurrences() {
         XCTAssertEqual(
-            MeetingPrepService.summary(count: 1, isSeries: false, seriesTitle: nil, attendeeNames: ["Erin", "Razia"]),
-            "From your last meeting with Erin, Razia"
+            MeetingPrepService.historySummary(count: 2, mostRecent: nil),
+            "From your last 2 recordings of this meeting"
         )
-        // Names capped at 2 even when more attendees matched.
         XCTAssertEqual(
-            MeetingPrepService.summary(count: 2, isSeries: false, seriesTitle: nil, attendeeNames: ["Erin", "Razia", "Kate"]),
-            "From your last 2 meetings with Erin, Razia"
+            MeetingPrepService.historySummary(count: 3, mostRecent: nil),
+            "From your last 3 recordings of this meeting"
         )
     }
 
-    func testSummaryEmptyWhenNoHistory() {
-        XCTAssertEqual(
-            MeetingPrepService.summary(count: 0, isSeries: false, seriesTitle: nil, attendeeNames: ["Erin"]),
-            ""
-        )
+    func testHistorySummarySingleOccurrenceIncludesDateWhenPresent() {
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let summary = MeetingPrepService.historySummary(count: 1, mostRecent: date)
+        XCTAssertTrue(summary.hasPrefix("From the last time you recorded this meeting · "))
+        XCTAssertTrue(summary.count > "From the last time you recorded this meeting · ".count)
+    }
+
+    // MARK: - Assignee cleaning (the "Speaker 2" leak)
+
+    func testCleanAssigneeStripsDiarizationPlaceholders() {
+        XCTAssertNil(MeetingPrepService.cleanAssignee("Speaker 2"))
+        XCTAssertNil(MeetingPrepService.cleanAssignee("speaker 10"))
+        XCTAssertNil(MeetingPrepService.cleanAssignee("Unknown"))
+        XCTAssertNil(MeetingPrepService.cleanAssignee("Me"))
+        XCTAssertNil(MeetingPrepService.cleanAssignee("   "))
+        XCTAssertNil(MeetingPrepService.cleanAssignee(nil))
+    }
+
+    func testCleanAssigneeKeepsRealNames() {
+        XCTAssertEqual(MeetingPrepService.cleanAssignee("Haley"), "Haley")
+        XCTAssertEqual(MeetingPrepService.cleanAssignee("  Stephen Smith "), "Stephen Smith")
+        // "Speaker" as part of a real title shouldn't be stripped (only the
+        // "Speaker N" diarization prefix is).
+        XCTAssertEqual(MeetingPrepService.cleanAssignee("Speakerphone Vendor"), "Speakerphone Vendor")
     }
 
     // MARK: - Order-preserving dedupe

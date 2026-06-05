@@ -109,7 +109,7 @@ enum AIPromptTemplates {
     static func systemPromptWithContext(prep: MeetingPrepContext?) -> String {
         guard let prep, !prep.isEmpty else { return systemPrompt }
 
-        var contextBlock = "\n\nCONTEXT FROM PREVIOUS MEETINGS WITH THESE PARTICIPANTS:\n"
+        var contextBlock = "\n\nCONTEXT FROM PREVIOUS OCCURRENCES OF THIS RECURRING MEETING:\n"
 
         if !prep.unresolvedItems.isEmpty {
             contextBlock += "\nUnresolved action items:\n"

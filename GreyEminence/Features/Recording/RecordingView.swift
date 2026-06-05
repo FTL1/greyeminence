@@ -68,7 +68,7 @@ struct RecordingView: View {
             calendarSelector
 
             // Meeting prep view
-            if let prepContext = viewModel.prepContext, !prepContext.isEmpty {
+            if let prepContext = viewModel.prepContext, prepContext.shouldDisplay {
                 MeetingPrepView(context: prepContext)
                     .frame(maxWidth: 500)
             }

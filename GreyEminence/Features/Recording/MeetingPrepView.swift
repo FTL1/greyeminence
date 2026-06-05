@@ -8,13 +8,64 @@ struct MeetingPrepView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Meeting Prep", systemImage: "doc.text.magnifyingglass")
                     .font(.headline)
-                if !context.sourceSummary.isEmpty {
-                    Text(context.sourceSummary)
+                if case .history(let summary) = context.provenance {
+                    Text(summary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
+            switch context.provenance {
+            case .firstOccurrence(let title):
+                firstOccurrenceMessage(title: title)
+            case .history:
+                if context.hasContent {
+                    contentSections
+                } else {
+                    statedMessage(
+                        icon: "checkmark.circle",
+                        text: "Nothing carried over from last time — no open items or questions."
+                    )
+                }
+            case .notApplicable:
+                EmptyView()
+            }
+        }
+        .padding()
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.quaternary, lineWidth: 1)
+        )
+    }
+
+    // MARK: - States
+
+    /// Recurring meeting we've never recorded before — be honest about it.
+    private func firstOccurrenceMessage(title: String) -> some View {
+        statedMessage(
+            icon: "clock.arrow.circlepath",
+            text: "First time recording “\(title)”. Once you've recorded it before, unresolved items, open questions, and recent topics from past occurrences will appear here."
+        )
+    }
+
+    private func statedMessage(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Content (history with carried-over items)
+
+    private var contentSections: some View {
+        VStack(alignment: .leading, spacing: 12) {
             if !context.unresolvedItems.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Unresolved Items")
@@ -83,12 +134,5 @@ struct MeetingPrepView: View {
                 }
             }
         }
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.quaternary, lineWidth: 1)
-        )
     }
 }
-

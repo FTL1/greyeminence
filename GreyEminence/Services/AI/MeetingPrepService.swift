@@ -2,17 +2,38 @@ import Foundation
 import SwiftData
 
 struct MeetingPrepContext: Sendable {
-    /// Human-readable provenance, e.g. "From your last 2 OLP Team Sync meetings".
-    /// Empty when there's no prior history to draw on.
-    let sourceSummary: String
+    /// Why this card exists — drives both the UI and whether we have real
+    /// history to feed the AI prompt.
+    enum Provenance: Sendable, Equatable {
+        /// Prior recorded occurrences of this exact meeting were found.
+        case history(summary: String)
+        /// A recurring meeting we've never recorded before — no history yet.
+        case firstOccurrence(title: String)
+        /// A one-off meeting: there is no "previous occurrence" to prep from.
+        case notApplicable
+    }
+
+    let provenance: Provenance
     let unresolvedItems: [PrepActionItem]
     let previousTopics: [String]
     let followUps: [String]
-    let attendeeNames: [String]
 
-    var isEmpty: Bool {
-        unresolvedItems.isEmpty && previousTopics.isEmpty && followUps.isEmpty
+    var hasContent: Bool {
+        !unresolvedItems.isEmpty || !previousTopics.isEmpty || !followUps.isEmpty
     }
+
+    /// Whether the card should appear at all. One-offs show nothing; recurring
+    /// meetings always show *something* (real prep, or a stated "no history yet").
+    var shouldDisplay: Bool {
+        switch provenance {
+        case .notApplicable: return false
+        case .firstOccurrence, .history: return true
+        }
+    }
+
+    /// Gate for injecting context into the AI prompt: only when there is actual
+    /// carried-over content from prior occurrences.
+    var isEmpty: Bool { !hasContent }
 }
 
 struct PrepActionItem: Sendable, Identifiable {
@@ -26,47 +47,41 @@ struct PrepActionItem: Sendable, Identifiable {
 
 @MainActor
 final class MeetingPrepService {
-    /// How many recent prior meetings to base prep on. Keeps the card grounded
-    /// in the last couple of conversations instead of every meeting in history,
-    /// so a months-old stray item can't dominate the list.
+    /// How many recent prior occurrences to base prep on — the user cares mainly
+    /// about the previous meeting, with one more for continuity.
     static let recentMeetingLimit = 2
 
     /// Gather prep context for the meeting the user is about to record, drawn
-    /// from the most recent occurrences of its series (or, failing that, the
-    /// most recent meetings sharing its attendees).
-    func gatherPrepContext(
-        for event: CalendarEvent,
-        attendees: [Contact],
-        seriesID: UUID?,
-        in context: ModelContext
-    ) -> MeetingPrepContext {
-        // Candidate prior meetings: the recurring series (if any) ∪ any meeting
-        // these attendees were in. Series presence drives the summary wording.
-        var related: Set<UUID> = []
-        var isSeries = false
-        if let seriesID {
-            let descriptor = FetchDescriptor<Meeting>(
-                predicate: #Predicate<Meeting> { $0.seriesID == seriesID }
-            )
-            if let seriesMeetings = try? context.fetch(descriptor), !seriesMeetings.isEmpty {
-                isSeries = true
-                for m in seriesMeetings { related.insert(m.id) }
-            }
-        }
-        for contact in attendees {
-            for meeting in contact.meetings { related.insert(meeting.id) }
+    /// **only** from prior recorded occurrences of this same recurring meeting.
+    ///
+    /// Deliberately NOT attendee-based: sharing attendees with unrelated meetings
+    /// is not a meeting relationship, and pulling their action items/topics in
+    /// produces nonsense (e.g. a "Client Data" meeting showing "US Politics"
+    /// topics from an unrelated chat with the same two people). When there's no
+    /// recorded history of *this* meeting, we say so rather than inventing prep.
+    func gatherPrepContext(for event: CalendarEvent, in context: ModelContext) -> MeetingPrepContext {
+        func empty(_ provenance: MeetingPrepContext.Provenance) -> MeetingPrepContext {
+            MeetingPrepContext(provenance: provenance, unresolvedItems: [], previousTopics: [], followUps: [])
         }
 
-        // Keep only the most recent N related meetings (newest first), so the
-        // prep reflects the last couple of conversations rather than the whole
-        // history.
-        let allMeetings = (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
-        let relatedMeetings = allMeetings.filter { related.contains($0.id) }
-        let recentIDs = Self.recentMeetingIDs(
-            from: relatedMeetings.map { (id: $0.id, date: $0.date) },
-            limit: Self.recentMeetingLimit
+        // Prep is anchored to the recurring series. A one-off has no prior
+        // occurrence to prep from.
+        guard let recurrenceID = event.recurrenceID else {
+            return empty(.notApplicable)
+        }
+
+        // Prior recorded occurrences: meetings linked to the same recurrence key.
+        let descriptor = FetchDescriptor<Meeting>(
+            predicate: #Predicate<Meeting> { $0.calendarEventID == recurrenceID }
         )
-        let recent = recentIDs.compactMap { id in relatedMeetings.first { $0.id == id } }
+        let priorOccurrences = ((try? context.fetch(descriptor)) ?? [])
+            .sorted { $0.date > $1.date }
+
+        guard !priorOccurrences.isEmpty else {
+            return empty(.firstOccurrence(title: event.title ?? "this meeting"))
+        }
+
+        let recent = Array(priorOccurrences.prefix(Self.recentMeetingLimit))
 
         var unresolvedItems: [PrepActionItem] = []
         var previousTopics: [String] = []
@@ -78,7 +93,7 @@ final class MeetingPrepService {
                 unresolvedItems.append(PrepActionItem(
                     id: item.id,
                     text: item.text,
-                    assignee: item.displayAssignee,
+                    assignee: Self.cleanAssignee(item.displayAssignee),
                     meetingTitle: meeting.title,
                     meetingDate: meeting.date,
                     daysSinceCreated: days
@@ -91,44 +106,38 @@ final class MeetingPrepService {
         }
 
         return MeetingPrepContext(
-            sourceSummary: Self.summary(
-                count: recent.count,
-                isSeries: isSeries,
-                seriesTitle: event.title,
-                attendeeNames: attendees.map(\.name)
-            ),
-            // Newest meeting first — the most recent conversation is the most
-            // relevant context, not the oldest unresolved item.
+            provenance: .history(summary: Self.historySummary(count: recent.count, mostRecent: recent.first?.date)),
+            // Newest occurrence first — the previous meeting is the priority.
             unresolvedItems: unresolvedItems.sorted { $0.meetingDate > $1.meetingDate },
             previousTopics: Self.dedupePreservingOrder(previousTopics),
-            followUps: Self.dedupePreservingOrder(followUps),
-            attendeeNames: attendees.map(\.name)
+            followUps: Self.dedupePreservingOrder(followUps)
         )
     }
 
     // MARK: - Pure helpers (unit-tested without SwiftData)
 
-    /// The most recent `limit` meeting ids (newest first) from a related set.
-    nonisolated static func recentMeetingIDs(from meetings: [(id: UUID, date: Date)], limit: Int) -> [UUID] {
-        meetings.sorted { $0.date > $1.date }.prefix(limit).map(\.id)
+    /// Provenance line for the prep card when prior occurrences exist.
+    nonisolated static func historySummary(count: Int, mostRecent: Date?) -> String {
+        if count <= 1 {
+            if let mostRecent {
+                return "From the last time you recorded this meeting · \(shortDate(mostRecent))"
+            }
+            return "From the last time you recorded this meeting"
+        }
+        return "From your last \(count) recordings of this meeting"
     }
 
-    /// Provenance line for the prep card. Series wording when the meeting is
-    /// recurring; otherwise names the people. Empty when there's no history.
-    nonisolated static func summary(count: Int, isSeries: Bool, seriesTitle: String?, attendeeNames: [String]) -> String {
-        if count == 0 { return "" }
-        if isSeries, let title = seriesTitle, !title.isEmpty {
-            return count == 1
-                ? "From your last \(title)"
-                : "From your last \(count) \(title) meetings"
-        }
-        let names = attendeeNames.prefix(2).joined(separator: ", ")
-        if names.isEmpty {
-            return count == 1 ? "From your last meeting" : "From your last \(count) meetings"
-        }
-        return count == 1
-            ? "From your last meeting with \(names)"
-            : "From your last \(count) meetings with \(names)"
+    nonisolated static func shortDate(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// Suppress diarization placeholders ("Speaker 2", "Unknown", "Me") that
+    /// aren't real owners — showing them as an assignee is noise.
+    nonisolated static func cleanAssignee(_ assignee: String?) -> String? {
+        guard let trimmed = assignee?.trimmingCharacters(in: .whitespaces), !trimmed.isEmpty else { return nil }
+        let lower = trimmed.lowercased()
+        if lower == "me" || lower == "unknown" || lower.hasPrefix("speaker ") { return nil }
+        return trimmed
     }
 
     /// Deduplicate keeping first-seen order (stable, unlike `Set`).
