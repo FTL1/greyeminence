@@ -16,6 +16,7 @@
 		0822C1F8DEC3B3C33FA40140 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = E73B3D65573E84BFDA22E0FA /* FluidAudio */; };
 		0962CE60D8CA562FED69C778 /* ModelDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00113CB03ECCACD1B6516101 /* ModelDownloadManager.swift */; };
 		0ADAF5362F0166CB7AA9E9C0 /* InterviewHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59A83B6524CF1BD8477EC89 /* InterviewHubView.swift */; };
+		0B71B37A9D1D33DDB115A4C8 /* ActionItemOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EA408D29CF047676AC4ED4E /* ActionItemOwnershipTests.swift */; };
 		0D999193690073A261246592 /* ResumeAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F296FDF7EC19DD5EE43B83C1 /* ResumeAnalyzer.swift */; };
 		0DA17FC2ACA6257DDF8C6BF5 /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 657275C542280701138F3D42 /* AudioSettingsView.swift */; };
 		123D4745990C59FC22E00449 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEE957511562C3879F9C0E27 /* PDFExporter.swift */; };
@@ -362,6 +363,7 @@
 		99A4578AF2E5B438A1967303 /* MeetingCalendarLinkMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCalendarLinkMenu.swift; sourceTree = "<group>"; };
 		9B796C4DF1E269665A3A47C8 /* GraphCalendarProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphCalendarProvider.swift; sourceTree = "<group>"; };
 		9E9BD9C1EDBF636CD6482196 /* TopicGraphTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicGraphTypes.swift; sourceTree = "<group>"; };
+		9EA408D29CF047676AC4ED4E /* ActionItemOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionItemOwnershipTests.swift; sourceTree = "<group>"; };
 		9F43B13AE41AF8236D03AB34 /* InterviewImpressionTrait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewImpressionTrait.swift; sourceTree = "<group>"; };
 		9FA5FAFDECE066A3112DE8CC /* GraphAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphAuthService.swift; sourceTree = "<group>"; };
 		A0AF2329398C06BB75B022FF /* StorageManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageManager.swift; sourceTree = "<group>"; };
@@ -642,6 +644,7 @@
 		5F9B2999A466CA56184EA3B1 /* GreyEminenceTests */ = {
 			isa = PBXGroup;
 			children = (
+				9EA408D29CF047676AC4ED4E /* ActionItemOwnershipTests.swift */,
 				3946643E25AD52CD5C5B4307 /* AIRetryTests.swift */,
 				C4EF91E8F82E0C8EF8ED9093 /* AudioFileWriterEncoderTests.swift */,
 				8EE1444D1BB821BCF57E37F6 /* AudioFileWriterTests.swift */,
@@ -1314,6 +1317,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6E45CEDA458C896848FE2178 /* AIRetryTests.swift in Sources */,
+				0B71B37A9D1D33DDB115A4C8 /* ActionItemOwnershipTests.swift in Sources */,
 				9D7653A675A0763B57614A71 /* AudioFileWriterEncoderTests.swift in Sources */,
 				D6576BB5BC20C4820836652A /* AudioFileWriterTests.swift in Sources */,
 				9947345F325AC7C5285ACD04 /* GraphCalendarTests.swift in Sources */,
@@ -1416,7 +1420,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.21.5;
+				MARKETING_VERSION = 0.21.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;
@@ -1438,7 +1442,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.21.5;
+				MARKETING_VERSION = 0.21.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;

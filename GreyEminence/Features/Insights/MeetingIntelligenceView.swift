@@ -161,8 +161,9 @@ struct MeetingIntelligenceView: View {
             // Seed with analyze() first so performFinalAnalysis has a prior
             // summary to refine. Then always run the final pass — it produces
             // the polished result including the meeting title.
-            _ = try await service.analyze(segments: snapshots)
-            guard let rawResult = try await service.performFinalAnalysis(segments: snapshots) else {
+            let roster = MeetingRoster.snapshot(for: meeting)
+            _ = try await service.analyze(segments: snapshots, roster: roster)
+            guard let rawResult = try await service.performFinalAnalysis(segments: snapshots, roster: roster) else {
                 reanalysisError = "Analysis returned no results."
                 return
             }

@@ -609,8 +609,9 @@ struct TranscriptPanelView: View {
             relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: target.id)
         )
         do {
-            _ = try await service.analyze(segments: snapshots)
-            if let result = try await service.performFinalAnalysis(segments: snapshots) {
+            let roster = MeetingRoster.snapshot(for: target)
+            _ = try await service.analyze(segments: snapshots, roster: roster)
+            if let result = try await service.performFinalAnalysis(segments: snapshots, roster: roster) {
                 if let title = result.title {
                     target.applyGeneratedTitle(title)
                 }

@@ -449,8 +449,9 @@ struct TopicMapView: View {
 
             do {
                 // Seed with first pass, then final
-                _ = try await service.analyze(segments: snapshots)
-                guard let result = try await service.performFinalAnalysis(segments: snapshots) else {
+                let roster = MeetingRoster.snapshot(for: meeting)
+                _ = try await service.analyze(segments: snapshots, roster: roster)
+                guard let result = try await service.performFinalAnalysis(segments: snapshots, roster: roster) else {
                     continue
                 }
 

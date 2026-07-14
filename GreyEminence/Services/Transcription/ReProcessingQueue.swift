@@ -446,8 +446,9 @@ final class ReProcessingQueue {
             relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
         )
         do {
-            _ = try await service.analyze(segments: segments)
-            guard let result = try await service.performFinalAnalysis(segments: segments) else { return }
+            let roster = MeetingRoster.snapshot(for: meeting)
+            _ = try await service.analyze(segments: segments, roster: roster)
+            guard let result = try await service.performFinalAnalysis(segments: segments, roster: roster) else { return }
             for old in meeting.insights { context.delete(old) }
             for old in meeting.actionItems { context.delete(old) }
 

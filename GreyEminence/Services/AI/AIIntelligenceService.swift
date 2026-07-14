@@ -30,6 +30,29 @@ struct ParsedActionItem: Sendable {
     let sourceQuote: String?
 }
 
+/// Who's in the meeting, from the tool user's perspective. Grounds the
+/// action-item ownership rules: the tool serves one user, so items another
+/// attendee owns are excluded — except in a 1:1, where the other person's
+/// commitments are promises to the user.
+struct MeetingRoster: Sendable {
+    let myName: String?
+    let otherAttendees: [String]
+
+    var isOneOnOne: Bool { otherAttendees.count == 1 }
+
+    /// Snapshot from a meeting's attendee list, with "me" resolved via the
+    /// My Profile contact. Taken fresh at each analysis pass because the
+    /// attendee list can change mid-recording (calendar link/unlink).
+    @MainActor
+    static func snapshot(for meeting: Meeting) -> MeetingRoster {
+        let myID = Meeting.storedMyContactID
+        return MeetingRoster(
+            myName: meeting.attendees.first { $0.id == myID }?.name,
+            otherAttendees: meeting.attendees.filter { $0.id != myID }.map(\.name)
+        )
+    }
+}
+
 // MARK: - Structured Summary Types
 
 struct SummaryPoint: Sendable, Codable {
@@ -93,11 +116,11 @@ actor AIIntelligenceService {
         self.relatedContextProvider = relatedContextProvider
     }
 
-    private var effectiveSystemPrompt: String {
-        AIPromptTemplates.systemPromptWithContext(prep: prepContext)
+    private func effectiveSystemPrompt(roster: MeetingRoster?) -> String {
+        AIPromptTemplates.systemPromptWithContext(prep: prepContext, roster: roster)
     }
 
-    func analyze(segments: [SegmentSnapshot]) async throws -> AnalysisResult? {
+    func analyze(segments: [SegmentSnapshot], roster: MeetingRoster? = nil) async throws -> AnalysisResult? {
         let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard nonEmpty.count > lastAnalyzedSegmentCount else {
             return nil
@@ -127,17 +150,18 @@ actor AIIntelligenceService {
 
         LogManager.send("AI analysis starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
         let capturedMeetingID = meetingID
-        let response = try await AIRetry.run(label: "analyze", meetingID: capturedMeetingID) { [client, effectiveSystemPrompt, userPrompt] in
+        let systemPrompt = effectiveSystemPrompt(roster: roster)
+        let response = try await AIRetry.run(label: "analyze", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
             try await withTimeout(seconds: 90) {
                 try await client.sendMessage(
-                    system: effectiveSystemPrompt,
+                    system: systemPrompt,
                     userContent: userPrompt
                 )
             }
         }
         LogManager.send("AI raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
 
-        let parsed = try parseResponse(response, raw: response)
+        let parsed = enforceActionItemOwnership(on: try parseResponse(response, raw: response), roster: roster, segments: nonEmpty)
         let result = applyResultPreservingPrevious(parsed)
         previousSummary = result.summary
         previousActionItems = result.actionItems
@@ -166,14 +190,14 @@ actor AIIntelligenceService {
         )
     }
 
-    func performFinalAnalysis(segments: [SegmentSnapshot]) async throws -> AnalysisResult? {
+    func performFinalAnalysis(segments: [SegmentSnapshot], roster: MeetingRoster? = nil) async throws -> AnalysisResult? {
         let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !nonEmpty.isEmpty else { return nil }
 
         // Single final pass with the full transcript. If we have prior accumulated context,
         // use the cleanup prompt; otherwise fall back to initial analysis.
         guard !previousSummary.isEmpty else {
-            return try await analyze(segments: segments)
+            return try await analyze(segments: segments, roster: roster)
         }
 
         // Related discussions from other meetings, retrieved with the topics
@@ -202,20 +226,69 @@ actor AIIntelligenceService {
 
         LogManager.send("AI final cleanup starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
         let capturedMeetingID = meetingID
-        let response = try await AIRetry.run(label: "finalCleanup", meetingID: capturedMeetingID) { [client, effectiveSystemPrompt, userPrompt] in
+        let systemPrompt = effectiveSystemPrompt(roster: roster)
+        let response = try await AIRetry.run(label: "finalCleanup", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
             try await withTimeout(seconds: 90) {
                 try await client.sendMessage(
-                    system: effectiveSystemPrompt,
+                    system: systemPrompt,
                     userContent: userPrompt
                 )
             }
         }
         LogManager.send("AI final cleanup raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
 
-        let parsed = try parseResponse(response, raw: response)
+        let parsed = enforceActionItemOwnership(on: try parseResponse(response, raw: response), roster: roster, segments: nonEmpty)
         let result = applyResultPreservingPrevious(parsed)
         LogManager.send("AI final cleanup complete", category: .ai, meetingID: meetingID)
         return result
+    }
+
+    // MARK: - Action-item ownership
+
+    /// Belt-and-braces enforcement of the prompt's ownership rules: drop items
+    /// another attendee owns unless the meeting is a 1:1. The prompt is the
+    /// primary mechanism; this catches the model ignoring it.
+    private func enforceActionItemOwnership(
+        on result: AnalysisResult,
+        roster: MeetingRoster?,
+        segments: [SegmentSnapshot]
+    ) -> AnalysisResult {
+        let effective = Self.rosterForFiltering(roster, segments: segments)
+        let kept = result.actionItems.filter { Self.keepsActionItem(assignee: $0.assignee, roster: effective) }
+        let dropped = result.actionItems.count - kept.count
+        guard dropped > 0 else { return result }
+        LogManager.send("Dropped \(dropped) action item(s) owned by other attendees", category: .ai, meetingID: meetingID)
+        return AnalysisResult(
+            title: result.title,
+            summary: result.summary,
+            actionItems: kept,
+            followUps: result.followUps,
+            topics: result.topics,
+            rawResponse: result.rawResponse
+        )
+    }
+
+    /// The roster used for filtering. When no attendee roster is available
+    /// (no calendar link), fall back to the distinct non-"Me" speakers in the
+    /// transcript so the 1:1 exception still works from diarization alone.
+    nonisolated static func rosterForFiltering(_ roster: MeetingRoster?, segments: [SegmentSnapshot]) -> MeetingRoster {
+        if let roster, !roster.otherAttendees.isEmpty { return roster }
+        let others = Set(segments.map(\.speaker.displayName)).subtracting(["Me"])
+        return MeetingRoster(myName: roster?.myName, otherAttendees: Array(others))
+    }
+
+    /// Whether an action item survives the ownership filter. Unowned items and
+    /// the user's own items always stay; diarization placeholders count as
+    /// unclear ownership (they could be anyone); anything clearly owned by
+    /// another person stays only in a 1:1.
+    nonisolated static func keepsActionItem(assignee: String?, roster: MeetingRoster) -> Bool {
+        guard let raw = assignee?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !raw.isEmpty else { return true }
+        if raw == "me" || raw == "null" || raw == "unknown" { return true }
+        if raw.hasPrefix("speaker ") { return true }
+        if let my = roster.myName?.lowercased(), !my.isEmpty,
+           my.contains(raw) || raw.contains(my) { return true }
+        return roster.isOneOnOne
     }
 
     // MARK: - Private

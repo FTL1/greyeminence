@@ -6,7 +6,7 @@ enum AIPromptTemplates {
     /// Bumped whenever the built-in prompt text changes meaningfully. Persisted with
     /// MeetingInsight so we can tell which prompt generation produced a given result
     /// and offer "regenerate with newer prompt" UX later.
-    static let promptVersion = "meeting.v2"
+    static let promptVersion = "meeting.v3"
 
     // MARK: - Public accessors
     //
@@ -126,9 +126,11 @@ enum AIPromptTemplates {
             .joined(separator: "\n")
     }
 
-    /// Enriched system prompt with meeting prep context for cross-meeting intelligence.
-    static func systemPromptWithContext(prep: MeetingPrepContext?) -> String {
-        guard let prep, prep.hasContent else { return systemPrompt }
+    /// Enriched system prompt with the meeting roster and prep context for
+    /// cross-meeting intelligence.
+    static func systemPromptWithContext(prep: MeetingPrepContext?, roster: MeetingRoster? = nil) -> String {
+        let base = systemPrompt + rosterBlock(roster)
+        guard let prep, prep.hasContent else { return base }
 
         var contextBlock = "\n\nCONTEXT FROM PREVIOUS OCCURRENCES OF THIS RECURRING MEETING:\n"
 
@@ -158,7 +160,26 @@ enum AIPromptTemplates {
         is answered, remove it from follow_ups.
         """
 
-        return systemPrompt + contextBlock
+        return base + contextBlock
+    }
+
+    /// Participant block appended to the system prompt when the attendee list
+    /// is known beyond just the user. Anchors "assignee" to real names so
+    /// items land on the correct attendee, and lets the model apply the
+    /// ownership rules (mine / unowned / 1:1 exception) reliably.
+    static func rosterBlock(_ roster: MeetingRoster?) -> String {
+        guard let roster, !roster.otherAttendees.isEmpty else { return "" }
+        let user = roster.myName.map { "\($0) — they appear in the transcript as \"Me\"" }
+            ?? "the person appearing in the transcript as \"Me\""
+        return """
+
+
+        MEETING PARTICIPANTS:
+        The tool user is \(user). Other attendees: \(roster.otherAttendees.joined(separator: ", ")).
+        When setting "assignee", use exactly "Me" for the tool user or one of the attendee \
+        names above — match the person the transcript actually refers to; never invent a \
+        name that isn't listed.
+        """
     }
 
     private static func formatActionItems(_ items: [ParsedActionItem]) -> String {
@@ -215,8 +236,20 @@ enum AIPromptTemplates {
         - Never include meta-observations about the meeting itself (e.g. "Meeting covered several topics").
         - The "intro" field is optional — include it only when a sentence of context genuinely helps \
         frame the points below it. Otherwise omit the key entirely.
-        - "action_items" should only include concrete commitments or tasks, not vague statements. \
-        Set "assignee" to the speaker's name if identifiable, otherwise null. \
+        - "action_items" exist for ONE person: the tool user (the "Me" speaker in the \
+        transcript). Include only (1) tasks the user personally committed to or was asked \
+        to take on, and (2) tasks nobody clearly owns. Do NOT include tasks another \
+        attendee clearly owns — the summary already captures what other people are doing. \
+        EXCEPTION — 1:1 meetings: when exactly two people are in the meeting (the user and \
+        one other person), include the other person's commitments too, and if a task is \
+        definitely not the user's, set "assignee" to the other participant's name rather \
+        than leaving it unowned. \
+        Be selective: only concrete, deliberate commitments — never vague intentions, \
+        hypotheticals, or process observations. A typical 30-minute meeting yields 3-6 \
+        genuine action items; more than 8 means you are over-extracting — merge related \
+        tasks and drop the marginal ones. \
+        Set "assignee" to "Me" when the task is the user's, the other participant's name \
+        under the 1:1 exception, or null when ownership is genuinely unclear. \
         Set "source_quote" to a short verbatim snippet (one sentence, 5-25 words) copied from \
         the transcript that triggered this action — the exact words a speaker said, not your \
         paraphrase. This anchors the task to a specific moment in the conversation. Pick the \
@@ -247,7 +280,8 @@ enum AIPromptTemplates {
         - When updating a rolling analysis, ALWAYS preserve all previous action items, topics, \
         and follow-up questions. The PREVIOUS SUMMARY is a JSON array — parse it, keep all existing \
         sections and points, add new points to the relevant sections or add new sections for new topics. \
-        Never drop earlier insights unless explicitly resolved or contradicted.
+        Never drop earlier insights unless explicitly resolved, contradicted, or revealed \
+        to be owned by another attendee (per the action_items ownership rules).
         """
 
     private static let defaultInitialAnalysisPrompt: String = """
@@ -297,7 +331,9 @@ enum AIPromptTemplates {
         merge redundant points, tighten wording, reorder sections by importance, remove any \
         meta-observations. Cover the full meeting arc.
         - Deduplicate action items — merge near-duplicates, remove redundant ones, \
-        and keep the clearest phrasing.
+        and keep the clearest phrasing. Re-check ownership against the full transcript: \
+        drop any item another attendee clearly owns (unless the two-person exception \
+        applies) and fix assignees that don't match what was actually said.
         - Re-derive the follow-up questions against the FULL transcript. Drop any \
         accumulated question the transcript actually answers or that overlaps an action \
         item, merge near-duplicates, and add new blind-spot questions now visible from \

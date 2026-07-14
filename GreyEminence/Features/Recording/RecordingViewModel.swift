@@ -725,7 +725,8 @@ final class RecordingViewModel {
             // Try final AI analysis (may fail or return nil — that's OK)
             if let service {
                 do {
-                    if let result = try await service.performFinalAnalysis(segments: finalSnapshots) {
+                    let roster = MeetingRoster.snapshot(for: meeting)
+                    if let result = try await service.performFinalAnalysis(segments: finalSnapshots, roster: roster) {
                         resultSummary = result.summary
                         resultActionItems = result.actionItems.map { parsed in
                             ActionItem(parsed: parsed, sourceSegments: meeting.segments)
@@ -1184,12 +1185,15 @@ final class RecordingViewModel {
                 }
 
                 let snapshots = await MainActor.run { self.snapshotSegments() }
+                // Fresh roster each pass — the attendee list changes when a
+                // calendar event is linked/unlinked mid-recording.
+                let roster = await MainActor.run { self.currentMeeting.map { MeetingRoster.snapshot(for: $0) } }
                 await MainActor.run {
                     self.log.log("AI sending \(snapshots.count) segments to Claude API", category: .ai)
                 }
 
                 do {
-                    if let result = try await service.analyze(segments: snapshots) {
+                    if let result = try await service.analyze(segments: snapshots, roster: roster) {
                         await MainActor.run {
                             self.streamingSummary = result.summary
                             self.actionItems = result.actionItems.map { parsed in
