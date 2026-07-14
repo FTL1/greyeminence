@@ -106,6 +106,7 @@
 		7699EF292CB0F123ED431524 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BA1A084FCAEDCA30D57F7BF5 /* Assets.xcassets */; };
 		77072DF00BC4524199A52DC2 /* SpeakerDiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EAE39B31598DBAB6A3CFFFB /* SpeakerDiarizationService.swift */; };
 		777499478FD70265752E1BC4 /* ReProcessingQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92551E29994E7C2FCDC046A7 /* ReProcessingQueue.swift */; };
+		7960F6A714486B5DAF8348B3 /* MeetingUnlinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE98E78710B13E2714E2AE7 /* MeetingUnlinkTests.swift */; };
 		7A4F454AC4B9BA571EF81973 /* ReProcessingStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 300EAE12152D87923A870EA9 /* ReProcessingStatusBar.swift */; };
 		7C169E02EA7A7A86699F2F32 /* LiveInterviewIntelligenceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BA4CA49EBD1B2A041D5E84 /* LiveInterviewIntelligenceView.swift */; };
 		7CEB0A0F16374551DA00F110 /* CharacterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0AD8CAF60468321ABA92DD /* CharacterSheet.swift */; };
@@ -407,6 +408,7 @@
 		C6F5DC8974A4F45DDF6B19FC /* EditableTranscriptSegmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditableTranscriptSegmentRow.swift; sourceTree = "<group>"; };
 		C9DC43270047C0FBF582EDB1 /* RoleRubricLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoleRubricLink.swift; sourceTree = "<group>"; };
 		CA9332875D8DF9786389A129 /* InterviewRole.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewRole.swift; sourceTree = "<group>"; };
+		CAE98E78710B13E2714E2AE7 /* MeetingUnlinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingUnlinkTests.swift; sourceTree = "<group>"; };
 		CCD46DD530F5CE11FE209E36 /* DedupDebugRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DedupDebugRow.swift; sourceTree = "<group>"; };
 		CD8714B1A96853CD73CAE8D7 /* CONTRIBUTING.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CONTRIBUTING.md; sourceTree = "<group>"; };
 		CD9733020AF86912380852E7 /* AWSCredentialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AWSCredentialLoader.swift; sourceTree = "<group>"; };
@@ -642,6 +644,7 @@
 				3C8B4C05A02D3A4C5A814ECA /* GraphCalendarTests.swift */,
 				24E62151A7511B5FC5E32D4C /* MarkdownTextTests.swift */,
 				3EE17E978DC04D724F920A6B /* MeetingPrepServiceTests.swift */,
+				CAE98E78710B13E2714E2AE7 /* MeetingUnlinkTests.swift */,
 				80A717B7D00035B80DA03D31 /* StoreBackupServiceTests.swift */,
 				ACD13CBF8483BC48BC008542 /* TopicMapTests.swift */,
 			);
@@ -1309,6 +1312,7 @@
 				9947345F325AC7C5285ACD04 /* GraphCalendarTests.swift in Sources */,
 				AD6BEC051B8BD32839B1AA50 /* MarkdownTextTests.swift in Sources */,
 				A6D874A2BCD6A09B6EC5F7E3 /* MeetingPrepServiceTests.swift in Sources */,
+				7960F6A714486B5DAF8348B3 /* MeetingUnlinkTests.swift in Sources */,
 				9AD1A6B7364F61A0019DE2CB /* StoreBackupServiceTests.swift in Sources */,
 				046A05CC7579B2253099D51D /* TopicMapTests.swift in Sources */,
 			);
@@ -1404,7 +1408,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.21.3;
+				MARKETING_VERSION = 0.21.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;
@@ -1426,7 +1430,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.21.3;
+				MARKETING_VERSION = 0.21.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;

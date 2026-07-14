@@ -222,6 +222,10 @@ final class RecordingViewModel {
     func unlinkCalendarEvent(in modelContext: ModelContext) {
         guard let meeting = currentMeeting else { return }
         meeting.unlinkCalendarEvent()
+        // The event's attendees were just pruned; rebuild the speaker mappings
+        // from scratch so aliases of removed contacts stop claiming speakers.
+        speakerContactMapper.reset()
+        speakerContactMapper.prepopulate(from: meeting.attendees)
         log.log("Calendar event unlinked from recording", category: .general)
         PersistenceGate.save(
             modelContext,

@@ -135,7 +135,11 @@ final class Meeting {
     /// stops showing the (now-irrelevant) event name. But if the user manually
     /// renamed the meeting (title no longer matches the event title), keep their
     /// name — don't clobber a deliberate edit.
-    func unlinkCalendarEvent() {
+    ///
+    /// Attendees are pruned to just "me": unlinking means the event was the
+    /// wrong one, so the attendees it contributed are presumed wrong too. With
+    /// no My Profile configured, everyone is removed.
+    func unlinkCalendarEvent(keepingAttendeeID myID: UUID? = Meeting.storedMyContactID) {
         let titleIsEventDerived = (title == calendarEventTitle)
         calendarEventID = nil
         calendarEventTitle = nil
@@ -146,6 +150,13 @@ final class Meeting {
            !generated.isEmpty {
             title = generated
         }
+        attendees.removeAll { $0.id != myID }
+    }
+
+    /// The user's own Contact id from Settings → My Profile (same key
+    /// `@AppStorage("myContactID")` writes). `nil` when not configured.
+    static var storedMyContactID: UUID? {
+        UUID(uuidString: UserDefaults.standard.string(forKey: "myContactID") ?? "")
     }
 }
 
