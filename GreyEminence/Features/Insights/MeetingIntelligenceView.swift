@@ -145,7 +145,8 @@ struct MeetingIntelligenceView: View {
                 client: client,
                 meetingID: meeting.id,
                 suppressedActionItems: meeting.suppressedActionItems,
-                suppressedFollowUps: meeting.suppressedFollowUps
+                suppressedFollowUps: meeting.suppressedFollowUps,
+                relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
             )
 
             let snapshots: [SegmentSnapshot] = meeting.segments

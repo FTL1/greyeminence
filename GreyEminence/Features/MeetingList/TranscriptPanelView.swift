@@ -603,7 +603,11 @@ struct TranscriptPanelView: View {
             return
         }
 
-        let service = AIIntelligenceService(client: client, meetingID: target.id)
+        let service = AIIntelligenceService(
+            client: client,
+            meetingID: target.id,
+            relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: target.id)
+        )
         do {
             _ = try await service.analyze(segments: snapshots)
             if let result = try await service.performFinalAnalysis(segments: snapshots) {

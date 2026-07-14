@@ -436,7 +436,11 @@ struct TopicMapView: View {
         for (i, meeting) in toAnalyze.enumerated() {
             reanalyzeProgress = (i + 1, toAnalyze.count)
 
-            let service = AIIntelligenceService(client: client, meetingID: meeting.id)
+            let service = AIIntelligenceService(
+                client: client,
+                meetingID: meeting.id,
+                relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
+            )
             let snapshots: [SegmentSnapshot] = meeting.segments
                 .sorted { $0.startTime < $1.startTime }
                 .map { SegmentSnapshot(speaker: $0.speaker, text: $0.text, formattedTimestamp: $0.formattedTimestamp, isFinal: $0.isFinal) }

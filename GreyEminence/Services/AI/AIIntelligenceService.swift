@@ -60,11 +60,17 @@ extension SummarySection {
 // MARK: - Intelligence Service
 
 actor AIIntelligenceService {
+    /// Called with the meeting's accumulated topics at final-analysis time;
+    /// returns formatted transcript snippets from other meetings (or nil) used
+    /// to ground blind-spot follow-up questions.
+    typealias RelatedContextProvider = @Sendable ([String]) async -> String?
+
     private let client: any AIClient
     private let prepContext: MeetingPrepContext?
     private let meetingID: UUID?
     private let suppressedActionItems: [String]
     private let suppressedFollowUps: [String]
+    private let relatedContextProvider: RelatedContextProvider?
     private var previousSummary: String = ""
     private var previousActionItems: [ParsedActionItem] = []
     private var previousFollowUps: [String] = []
@@ -76,13 +82,15 @@ actor AIIntelligenceService {
         prepContext: MeetingPrepContext? = nil,
         meetingID: UUID? = nil,
         suppressedActionItems: [String] = [],
-        suppressedFollowUps: [String] = []
+        suppressedFollowUps: [String] = [],
+        relatedContextProvider: RelatedContextProvider? = nil
     ) {
         self.client = client
         self.prepContext = prepContext
         self.meetingID = meetingID
         self.suppressedActionItems = suppressedActionItems
         self.suppressedFollowUps = suppressedFollowUps
+        self.relatedContextProvider = relatedContextProvider
     }
 
     private var effectiveSystemPrompt: String {
@@ -168,6 +176,17 @@ actor AIIntelligenceService {
             return try await analyze(segments: segments)
         }
 
+        // Related discussions from other meetings, retrieved with the topics
+        // accumulated during rolling analysis. Grounds blind-spot follow-ups;
+        // nil (store empty, provider unavailable) degrades to prompt-only.
+        var relatedContext: String? = nil
+        if let relatedContextProvider {
+            relatedContext = await relatedContextProvider(previousTopics)
+            if let relatedContext {
+                LogManager.send("Related-meeting context attached (\(relatedContext.count) chars)", category: .ai, meetingID: meetingID)
+            }
+        }
+
         // Final cleanup pass: send full transcript + all accumulated insights
         let fullTranscript = AIPromptTemplates.formatSegments(nonEmpty)
         let userPrompt = AIPromptTemplates.finalCleanupPrompt(
@@ -177,7 +196,8 @@ actor AIIntelligenceService {
             currentFollowUps: previousFollowUps,
             currentTopics: previousTopics,
             suppressedActionItems: suppressedActionItems,
-            suppressedFollowUps: suppressedFollowUps
+            suppressedFollowUps: suppressedFollowUps,
+            relatedContext: relatedContext
         )
 
         LogManager.send("AI final cleanup starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)

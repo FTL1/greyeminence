@@ -6,7 +6,7 @@ enum AIPromptTemplates {
     /// Bumped whenever the built-in prompt text changes meaningfully. Persisted with
     /// MeetingInsight so we can tell which prompt generation produced a given result
     /// and offer "regenerate with newer prompt" UX later.
-    static let promptVersion = "meeting.v1"
+    static let promptVersion = "meeting.v2"
 
     // MARK: - Public accessors
     //
@@ -51,7 +51,8 @@ enum AIPromptTemplates {
         currentFollowUps: [String],
         currentTopics: [String],
         suppressedActionItems: [String] = [],
-        suppressedFollowUps: [String] = []
+        suppressedFollowUps: [String] = [],
+        relatedContext: String? = nil
     ) -> String {
         let template = PromptStore.shared.get(.meetingFinal, default: defaultFinalCleanupPrompt)
         return PromptStore.render(template, values: [
@@ -61,7 +62,27 @@ enum AIPromptTemplates {
             "currentFollowUps": formatNumberedList(currentFollowUps),
             "currentTopics": formatTopics(currentTopics),
             "suppressionBlock": suppressionBlock(actionItems: suppressedActionItems, followUps: suppressedFollowUps),
+            "relatedContext": relatedContextBlock(relatedContext),
         ])
+    }
+
+    /// Wraps retrieved snippets from other meetings in instructions that scope
+    /// them to blind-spot detection only. Empty string when there's nothing —
+    /// the template renders cleanly without the block.
+    static func relatedContextBlock(_ snippets: String?) -> String {
+        guard let snippets, !snippets.isEmpty else { return "" }
+        return """
+
+
+        RELATED DISCUSSIONS FROM OTHER MEETINGS:
+        The snippets below come from OTHER meetings' transcripts — none of this was said \
+        in this meeting. Use them ONLY to find blind spots: if they raise concerns, \
+        constraints, stakeholders, decisions, or topics relevant to this meeting's purpose \
+        that this meeting never touched, turn those into follow_ups. Do NOT import them \
+        into the summary, action items, or topics.
+
+        \(snippets)
+        """
     }
 
     /// Builds a "DO NOT RE-SUGGEST" block for prompts when the user has deleted
@@ -200,14 +221,21 @@ enum AIPromptTemplates {
         the transcript that triggered this action — the exact words a speaker said, not your \
         paraphrase. This anchors the task to a specific moment in the conversation. Pick the \
         single most direct sentence; do not concatenate multiple turns.
-        - "follow_ups" are questions about BLOCKERS, MISSING INFORMATION, or DEPENDENCIES \
-        that would prevent the action items above from being completed — or genuine gaps the \
-        meeting didn't resolve (unanswered decisions, missing stakeholders, unclear acceptance \
-        criteria, unspecified deadlines, undefined owners). DO NOT restate an action item as a \
-        question — if a task is "Investigate X", do not also emit "What is X?" as a follow-up. \
-        Every follow-up must ask about something a person would need to know or decide BEFORE \
-        an action item is actionable, or about an unresolved point that didn't make it onto the \
-        action list. If there are no genuine blockers or unresolved gaps, return an empty array.
+        - "follow_ups" are BLIND SPOTS: specific questions about things that were NOT \
+        discussed in the meeting but are likely relevant to its purpose — the questions \
+        nobody thought to ask. Look for: risks or failure modes nobody raised, stakeholders \
+        or perspectives that were missing from the conversation, alternatives that went \
+        unexamined, dependencies or second-order consequences of the decisions made, and \
+        (when RELATED DISCUSSIONS from other meetings are provided) relevant prior context \
+        this meeting overlooked. \
+        Hard rules: a follow-up must NOT be answerable from the transcript — if the meeting \
+        discussed it, even partially, it does not belong here. DO NOT restate a summary \
+        point or an action item as a question — if a task is "Investigate X", do not emit \
+        "What is X?" or "Who will investigate X?". DO NOT ask for status updates on things \
+        already assigned. Avoid generic questions that could be asked of any meeting \
+        ("What is the timeline?") — every question must be anchored in this meeting's \
+        specific content. Quality over quantity: 2-5 sharp questions beat a long list. \
+        If nothing qualifies, return an empty array.
         - "topics" should include TWO types, merged into one flat array ordered by prominence: \
         (1) Theme topics: broad subjects discussed (e.g. "System Design", "Code Review Process") \
         (2) Key terms: specific proper nouns, acronyms, tools, services, platforms, libraries, \
@@ -270,7 +298,10 @@ enum AIPromptTemplates {
         meta-observations. Cover the full meeting arc.
         - Deduplicate action items — merge near-duplicates, remove redundant ones, \
         and keep the clearest phrasing.
-        - Deduplicate follow-up questions — merge similar ones.
+        - Re-derive the follow-up questions against the FULL transcript. Drop any \
+        accumulated question the transcript actually answers or that overlaps an action \
+        item, merge near-duplicates, and add new blind-spot questions now visible from \
+        the complete meeting arc (and from RELATED DISCUSSIONS, when provided).
         - Consolidate topics — remove exact duplicates and merge near-duplicates, but keep both \
         theme topics (broad subjects) AND key terms (specific names, acronyms, tools, services). \
         Order themes first by prominence, then key terms alphabetically. Preserve canonical forms \
@@ -293,6 +324,7 @@ enum AIPromptTemplates {
 
         FULL TRANSCRIPT:
         {{fullTranscript}}
+        {{relatedContext}}
         {{suppressionBlock}}
         """
 }

@@ -440,7 +440,11 @@ final class ReProcessingQueue {
 
     private func reRunAIAnalysis(meeting: Meeting, segments: [SegmentSnapshot], context: ModelContext) async {
         guard !segments.isEmpty, let client = try? await AIClientFactory.makeClient() else { return }
-        let service = AIIntelligenceService(client: client, meetingID: meeting.id)
+        let service = AIIntelligenceService(
+            client: client,
+            meetingID: meeting.id,
+            relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
+        )
         do {
             _ = try await service.analyze(segments: segments)
             guard let result = try await service.performFinalAnalysis(segments: segments) else { return }

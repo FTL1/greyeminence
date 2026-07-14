@@ -1163,7 +1163,12 @@ final class RecordingViewModel {
                 self.log.log("AI intelligence service starting (model: \(model))", category: .ai)
             }
             let meetingID = await MainActor.run { self.currentMeeting?.id }
-            let service = AIIntelligenceService(client: client, prepContext: prepCtx, meetingID: meetingID)
+            let service = AIIntelligenceService(
+                client: client,
+                prepContext: prepCtx,
+                meetingID: meetingID,
+                relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meetingID)
+            )
             let clientModelID = client.modelIdentifier
             await MainActor.run {
                 self.intelligenceService = service
