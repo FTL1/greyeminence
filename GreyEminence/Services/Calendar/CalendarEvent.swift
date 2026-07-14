@@ -35,4 +35,10 @@ struct CalendarEvent: Identifiable, Sendable, Hashable {
 
     /// Recurrence/series key, or nil for a one-off event.
     var recurrenceID: String? { isRecurring ? linkIdentifier : nil }
+
+    /// Start time formatted for display (e.g. "10:30 AM"). One definition for
+    /// every calendar-event row instead of re-formatting at each call site.
+    var displayTime: String {
+        startDate.formatted(date: .omitted, time: .shortened)
+    }
 }

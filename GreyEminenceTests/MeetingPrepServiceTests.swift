@@ -10,25 +10,25 @@ final class MeetingPrepServiceTests: XCTestCase {
     func testHistorySummarySingleOccurrence() {
         // No date → stable, no locale-dependent string to assert.
         XCTAssertEqual(
-            MeetingPrepService.historySummary(count: 1, mostRecent: nil),
+            MeetingPrepView.historySummary(count: 1, mostRecent: nil),
             "From the last time you recorded this meeting"
         )
     }
 
     func testHistorySummaryMultipleOccurrences() {
         XCTAssertEqual(
-            MeetingPrepService.historySummary(count: 2, mostRecent: nil),
+            MeetingPrepView.historySummary(count: 2, mostRecent: nil),
             "From your last 2 recordings of this meeting"
         )
         XCTAssertEqual(
-            MeetingPrepService.historySummary(count: 3, mostRecent: nil),
+            MeetingPrepView.historySummary(count: 3, mostRecent: nil),
             "From your last 3 recordings of this meeting"
         )
     }
 
     func testHistorySummarySingleOccurrenceIncludesDateWhenPresent() {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
-        let summary = MeetingPrepService.historySummary(count: 1, mostRecent: date)
+        let summary = MeetingPrepView.historySummary(count: 1, mostRecent: date)
         XCTAssertTrue(summary.hasPrefix("From the last time you recorded this meeting · "))
         XCTAssertTrue(summary.count > "From the last time you recorded this meeting · ".count)
     }

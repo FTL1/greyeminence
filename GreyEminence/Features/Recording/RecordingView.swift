@@ -149,13 +149,7 @@ struct RecordingView: View {
                         viewModel.selectEvent(event, in: modelContext)
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "calendar").foregroundStyle(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(event.title ?? "Meeting")
-                                Text(event.startDate.formatted(date: .omitted, time: .shortened))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            eventRow(event, titleFont: .body)
                             Spacer()
                         }
                         .padding(.horizontal, 14)
@@ -178,13 +172,7 @@ struct RecordingView: View {
 
     private func calendarChip(for event: CalendarEvent, showsChevron: Bool) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "calendar").foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.title ?? "Meeting").font(.headline)
-                Text(event.startDate.formatted(date: .omitted, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            eventRow(event, titleFont: .headline)
             if showsChevron {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
@@ -196,8 +184,21 @@ struct RecordingView: View {
         .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
     }
 
+    /// Calendar icon + title + start time — the shared visual unit for every
+    /// event row (the selected chip and the conflict-list buttons).
+    private func eventRow(_ event: CalendarEvent, titleFont: Font) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar").foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(event.title ?? "Meeting").font(titleFont)
+                Text(event.displayTime)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func eventLabel(_ event: CalendarEvent) -> String {
-        let time = event.startDate.formatted(date: .omitted, time: .shortened)
-        return "\(event.title ?? "Meeting") — \(time)"
+        "\(event.title ?? "Meeting") — \(event.displayTime)"
     }
 }

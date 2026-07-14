@@ -107,7 +107,7 @@ enum AIPromptTemplates {
 
     /// Enriched system prompt with meeting prep context for cross-meeting intelligence.
     static func systemPromptWithContext(prep: MeetingPrepContext?) -> String {
-        guard let prep, !prep.isEmpty else { return systemPrompt }
+        guard let prep, prep.hasContent else { return systemPrompt }
 
         var contextBlock = "\n\nCONTEXT FROM PREVIOUS OCCURRENCES OF THIS RECURRING MEETING:\n"
 

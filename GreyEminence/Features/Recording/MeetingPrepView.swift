@@ -8,8 +8,8 @@ struct MeetingPrepView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Label("Meeting Prep", systemImage: "doc.text.magnifyingglass")
                     .font(.headline)
-                if case .history(let summary) = context.provenance {
-                    Text(summary)
+                if case .history(let count, let mostRecent) = context.provenance {
+                    Text(Self.historySummary(count: count, mostRecent: mostRecent))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -17,7 +17,10 @@ struct MeetingPrepView: View {
 
             switch context.provenance {
             case .firstOccurrence(let title):
-                firstOccurrenceMessage(title: title)
+                statedMessage(
+                    icon: "clock.arrow.circlepath",
+                    text: "First time recording “\(title)”. Once you've recorded it before, unresolved items, open questions, and recent topics from past occurrences will appear here."
+                )
             case .history:
                 if context.hasContent {
                     contentSections
@@ -39,15 +42,24 @@ struct MeetingPrepView: View {
         )
     }
 
-    // MARK: - States
+    // MARK: - Copy (presentation owns the wording; the service carries only data)
 
-    /// Recurring meeting we've never recorded before — be honest about it.
-    private func firstOccurrenceMessage(title: String) -> some View {
-        statedMessage(
-            icon: "clock.arrow.circlepath",
-            text: "First time recording “\(title)”. Once you've recorded it before, unresolved items, open questions, and recent topics from past occurrences will appear here."
-        )
+    /// Provenance line for the prep card when prior occurrences exist.
+    nonisolated static func historySummary(count: Int, mostRecent: Date?) -> String {
+        if count <= 1 {
+            if let mostRecent {
+                return "From the last time you recorded this meeting · \(shortDate(mostRecent))"
+            }
+            return "From the last time you recorded this meeting"
+        }
+        return "From your last \(count) recordings of this meeting"
     }
+
+    nonisolated static func shortDate(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    // MARK: - States
 
     private func statedMessage(icon: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 8) {

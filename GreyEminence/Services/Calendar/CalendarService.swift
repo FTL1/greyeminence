@@ -315,6 +315,22 @@ final class CalendarService {
         fullName.components(separatedBy: " ").first ?? fullName
     }
 
+    /// Prior recorded meetings that are occurrences of the same recurring series
+    /// as `event`, newest first, capped at `limit`. The single source of truth
+    /// for "which past meetings belong to this event's series" (used by meeting
+    /// prep) — keyed on the recurrence id, same join `matchToSeries` uses to
+    /// build a series. Empty for a one-off event (no recurrence key). The sort +
+    /// limit run in SQLite so a long series doesn't hydrate every occurrence.
+    nonisolated static func priorOccurrences(of event: CalendarEvent, limit: Int, in context: ModelContext) -> [Meeting] {
+        guard let recurrenceID = event.recurrenceID else { return [] }
+        var descriptor = FetchDescriptor<Meeting>(
+            predicate: #Predicate<Meeting> { $0.calendarEventID == recurrenceID },
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        return (try? context.fetch(descriptor)) ?? []
+    }
+
     /// Find existing meetings with the same recurring event ID and assign a shared series.
     func matchToSeries(
         event: CalendarEvent,

@@ -204,8 +204,7 @@ private struct CalendarMatchMenu: View {
                         } label: {
                             let isMatched = event.linkIdentifier == matchedEventID
                             let prefix = isMatched ? "✓ " : ""
-                            let time = event.startDate.formatted(date: .omitted, time: .shortened)
-                            Text("\(prefix)\(event.title ?? "Untitled") — \(time)")
+                            Text("\(prefix)\(event.title ?? "Untitled") — \(event.displayTime)")
                         }
                     }
                 }

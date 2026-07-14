@@ -3,10 +3,11 @@ import SwiftData
 
 struct MeetingPrepContext: Sendable {
     /// Why this card exists — drives both the UI and whether we have real
-    /// history to feed the AI prompt.
+    /// history to feed the AI prompt. Cases carry data, not rendered copy; the
+    /// view owns the wording.
     enum Provenance: Sendable, Equatable {
         /// Prior recorded occurrences of this exact meeting were found.
-        case history(summary: String)
+        case history(count: Int, mostRecent: Date?)
         /// A recurring meeting we've never recorded before — no history yet.
         case firstOccurrence(title: String)
         /// A one-off meeting: there is no "previous occurrence" to prep from.
@@ -18,6 +19,8 @@ struct MeetingPrepContext: Sendable {
     let previousTopics: [String]
     let followUps: [String]
 
+    /// Whether there is carried-over content from prior occurrences. Gates both
+    /// the populated UI sections and the AI prompt injection.
     var hasContent: Bool {
         !unresolvedItems.isEmpty || !previousTopics.isEmpty || !followUps.isEmpty
     }
@@ -30,10 +33,6 @@ struct MeetingPrepContext: Sendable {
         case .firstOccurrence, .history: return true
         }
     }
-
-    /// Gate for injecting context into the AI prompt: only when there is actual
-    /// carried-over content from prior occurrences.
-    var isEmpty: Bool { !hasContent }
 }
 
 struct PrepActionItem: Sendable, Identifiable {
@@ -66,22 +65,15 @@ final class MeetingPrepService {
 
         // Prep is anchored to the recurring series. A one-off has no prior
         // occurrence to prep from.
-        guard let recurrenceID = event.recurrenceID else {
+        guard event.recurrenceID != nil else {
             return empty(.notApplicable)
         }
 
-        // Prior recorded occurrences: meetings linked to the same recurrence key.
-        let descriptor = FetchDescriptor<Meeting>(
-            predicate: #Predicate<Meeting> { $0.calendarEventID == recurrenceID }
-        )
-        let priorOccurrences = ((try? context.fetch(descriptor)) ?? [])
-            .sorted { $0.date > $1.date }
-
-        guard !priorOccurrences.isEmpty else {
+        // Prior recorded occurrences of this same series (newest first, bounded).
+        let recent = CalendarService.priorOccurrences(of: event, limit: Self.recentMeetingLimit, in: context)
+        guard !recent.isEmpty else {
             return empty(.firstOccurrence(title: event.title ?? "this meeting"))
         }
-
-        let recent = Array(priorOccurrences.prefix(Self.recentMeetingLimit))
 
         var unresolvedItems: [PrepActionItem] = []
         var previousTopics: [String] = []
@@ -106,7 +98,7 @@ final class MeetingPrepService {
         }
 
         return MeetingPrepContext(
-            provenance: .history(summary: Self.historySummary(count: recent.count, mostRecent: recent.first?.date)),
+            provenance: .history(count: recent.count, mostRecent: recent.first?.date),
             // Newest occurrence first — the previous meeting is the priority.
             unresolvedItems: unresolvedItems.sorted { $0.meetingDate > $1.meetingDate },
             previousTopics: Self.dedupePreservingOrder(previousTopics),
@@ -115,21 +107,6 @@ final class MeetingPrepService {
     }
 
     // MARK: - Pure helpers (unit-tested without SwiftData)
-
-    /// Provenance line for the prep card when prior occurrences exist.
-    nonisolated static func historySummary(count: Int, mostRecent: Date?) -> String {
-        if count <= 1 {
-            if let mostRecent {
-                return "From the last time you recorded this meeting · \(shortDate(mostRecent))"
-            }
-            return "From the last time you recorded this meeting"
-        }
-        return "From your last \(count) recordings of this meeting"
-    }
-
-    nonisolated static func shortDate(_ date: Date) -> String {
-        date.formatted(date: .abbreviated, time: .omitted)
-    }
 
     /// Suppress diarization placeholders ("Speaker 2", "Unknown", "Me") that
     /// aren't real owners — showing them as an assignee is noise.
