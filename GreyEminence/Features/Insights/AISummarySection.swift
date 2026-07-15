@@ -133,6 +133,11 @@ private struct SectionCard: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        // SwiftUI doesn't clip transitioning views: without this, the
+        // collapsing content slides up OVER the header and neighboring
+        // sections before it finishes fading. Clipping masks the roll-up to
+        // the card's animating bounds.
+        .clipped()
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor).opacity(0.5))
