@@ -164,6 +164,7 @@
 		B26856F7F2A58BF855DA90DC /* CheckForUpdatesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5765DCC2A9C69824B80708F8 /* CheckForUpdatesViewModel.swift */; };
 		B3D94C0FABCF7BCB4A419276 /* ContactDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D71B4ACDF2860C265D2E456 /* ContactDetailView.swift */; };
 		B61817A61C272312B58CEB5B /* MicLevelMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF870910A70FECDA4849F93 /* MicLevelMonitor.swift */; };
+		B7EC2976E54189E66D97AF29 /* CalendarAttendeeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C90E4A998AC4D102675200A /* CalendarAttendeeTests.swift */; };
 		BB7633BE94F6BB761292A8B5 /* RubricEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD672DF259613086F9FC8826 /* RubricEditorView.swift */; };
 		BBB05812E8776A60C628AD0B /* MeetingIntelligenceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB5B7F2625CA891A0A4FE73 /* MeetingIntelligenceView.swift */; };
 		BCFE8F9A5D779015BD38FA97 /* FluidAsrService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0967272565AFAF7A394DB16E /* FluidAsrService.swift */; };
@@ -337,6 +338,7 @@
 		7535BE024C18AC135ACCEC9F /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
 		77CBEB9C00C6D9F952CEA6EE /* InterviewScorecardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewScorecardView.swift; sourceTree = "<group>"; };
 		7878D6C9C0D5359FBE2ED513 /* InterviewBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewBookmark.swift; sourceTree = "<group>"; };
+		7C90E4A998AC4D102675200A /* CalendarAttendeeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarAttendeeTests.swift; sourceTree = "<group>"; };
 		7EE35BB1B53FA715D0E3B606 /* CandidateListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CandidateListView.swift; sourceTree = "<group>"; };
 		7EEC658B8F68CB91638AE407 /* InterviewTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewTemplate.swift; sourceTree = "<group>"; };
 		7FACAFB70049A918A9CC576F /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarService.swift; sourceTree = "<group>"; };
@@ -648,6 +650,7 @@
 				3946643E25AD52CD5C5B4307 /* AIRetryTests.swift */,
 				C4EF91E8F82E0C8EF8ED9093 /* AudioFileWriterEncoderTests.swift */,
 				8EE1444D1BB821BCF57E37F6 /* AudioFileWriterTests.swift */,
+				7C90E4A998AC4D102675200A /* CalendarAttendeeTests.swift */,
 				3C8B4C05A02D3A4C5A814ECA /* GraphCalendarTests.swift */,
 				24E62151A7511B5FC5E32D4C /* MarkdownTextTests.swift */,
 				3EE17E978DC04D724F920A6B /* MeetingPrepServiceTests.swift */,
@@ -1320,6 +1323,7 @@
 				0B71B37A9D1D33DDB115A4C8 /* ActionItemOwnershipTests.swift in Sources */,
 				9D7653A675A0763B57614A71 /* AudioFileWriterEncoderTests.swift in Sources */,
 				D6576BB5BC20C4820836652A /* AudioFileWriterTests.swift in Sources */,
+				B7EC2976E54189E66D97AF29 /* CalendarAttendeeTests.swift in Sources */,
 				9947345F325AC7C5285ACD04 /* GraphCalendarTests.swift in Sources */,
 				AD6BEC051B8BD32839B1AA50 /* MarkdownTextTests.swift in Sources */,
 				A6D874A2BCD6A09B6EC5F7E3 /* MeetingPrepServiceTests.swift in Sources */,
@@ -1420,7 +1424,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.21.6;
+				MARKETING_VERSION = 0.21.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;
@@ -1442,7 +1446,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.21.6;
+				MARKETING_VERSION = 0.21.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.greyeminence.app;
 				PRODUCT_NAME = "Grey Eminence";
 				SDKROOT = macosx;

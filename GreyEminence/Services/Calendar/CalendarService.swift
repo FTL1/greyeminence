@@ -216,18 +216,23 @@ final class CalendarService {
         )
     }
 
-    /// Extract attendee display names (or emails) from an EventKit event.
-    private static func attendeeNames(for event: EKEvent) -> [String] {
+    /// Extract attendees (with emails) from an EventKit event. Rooms and
+    /// equipment aren't people — they never become contacts.
+    private static func attendeeNames(for event: EKEvent) -> [EventAttendee] {
         guard let attendees = event.attendees else { return [] }
         return attendees.compactMap { participant in
-            if let name = participant.name, !name.isEmpty {
-                return name
+            switch participant.participantType {
+            case .room, .resource: return nil
+            default: break
             }
-            if let url = participant.url.absoluteString.components(separatedBy: ":").last,
-               url.contains("@") {
-                return url
-            }
-            return nil
+            // EKParticipant carries the address as a mailto: URL.
+            let email = participant.url.absoluteString.components(separatedBy: ":").last
+                .flatMap { $0.contains("@") ? $0 : nil }
+            return EventAttendee.resolve(
+                name: participant.name,
+                email: email,
+                isCurrentUser: participant.isCurrentUser
+            )
         }
     }
 
@@ -288,26 +293,30 @@ final class CalendarService {
         return "\(source.title) · \(type)"
     }
 
-    /// Match attendee names to existing Contact records.
-    /// Tries exact name/email/alias match first, then falls back to first-name match.
-    func matchContacts(attendees: [String], existing: [Contact]) -> [(name: String, contact: Contact?)] {
-        attendees.map { name in
-            let lowered = name.lowercased()
+    /// Match event attendees to existing Contact records.
+    /// Email is the strongest key; then exact name/email/alias; then first name.
+    func matchContacts(attendees: [EventAttendee], existing: [Contact]) -> [(attendee: EventAttendee, contact: Contact?)] {
+        attendees.map { attendee in
+            if let email = attendee.email,
+               let byEmail = existing.first(where: { $0.email?.lowercased() == email }) {
+                return (attendee, byEmail)
+            }
 
+            let lowered = attendee.name.lowercased()
             let exact = existing.first { contact in
                 contact.name.lowercased() == lowered ||
                 contact.email?.lowercased() == lowered ||
                 contact.speakerAliases.contains(where: { $0.lowercased() == lowered })
             }
-            if let exact { return (name, exact) }
+            if let exact { return (attendee, exact) }
 
             // Fallback: first-name match (handles "Bob" matching "Bob Smith")
             let fn = firstName(from: lowered)
-            guard fn.count >= 3 else { return (name, nil) }
+            guard fn.count >= 3 else { return (attendee, nil) }
             let firstNameMatch = existing.first { contact in
                 firstName(from: contact.name.lowercased()) == fn
             }
-            return (name, firstNameMatch)
+            return (attendee, firstNameMatch)
         }
     }
 
@@ -386,7 +395,28 @@ final class CalendarService {
         let matched = matchContacts(attendees: event.attendees, existing: contacts)
         var added = 0
         var alreadyPresent = 0
-        for (_, contact) in matched {
+        var created = 0
+        // Dedupe within this event: the same unmatched person appearing twice
+        // must not produce two Contact rows.
+        var createdByKey: [String: Contact] = [:]
+        for (attendee, match) in matched {
+            var contact = match
+            if contact == nil {
+                // The invite gives us a full identity — create the contact so
+                // future matching (and speaker linking) knows this person.
+                // Never create a record for the user themself.
+                guard !attendee.isCurrentUser else { continue }
+                let key = attendee.email ?? attendee.name.lowercased()
+                if let existing = createdByKey[key] {
+                    contact = existing
+                } else {
+                    let new = Contact(name: attendee.name, email: attendee.email)
+                    context.insert(new)
+                    createdByKey[key] = new
+                    created += 1
+                    contact = new
+                }
+            }
             guard let contact else { continue }
             if meeting.attendees.contains(where: { $0.id == contact.id }) {
                 alreadyPresent += 1
@@ -398,7 +428,7 @@ final class CalendarService {
 
         matchToSeries(event: event, meeting: meeting, in: context)
         LogManager.shared.log(
-            "Calendar event linked (\(setTitle ? "title+attendees" : "attendees only")): \"\(event.title ?? "untitled")\" — \(added) added, \(alreadyPresent) already present",
+            "Calendar event linked (\(setTitle ? "title+attendees" : "attendees only")): \"\(event.title ?? "untitled")\" — \(added) added (\(created) new contact\(created == 1 ? "" : "s")), \(alreadyPresent) already present",
             category: .general
         )
         return (added, alreadyPresent)

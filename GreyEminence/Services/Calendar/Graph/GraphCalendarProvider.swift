@@ -131,7 +131,11 @@ final class GraphCalendarProvider {
         // cross-occurrence id, so series-match it as a one-off (linkIdentifier =
         // its own id) rather than keying every occurrence to a different value.
         let isRecurring = ev.seriesMasterId != nil
-        let attendees = (ev.attendees ?? []).compactMap { $0.emailAddress?.name ?? $0.emailAddress?.address }
+        let attendees = (ev.attendees ?? []).compactMap { att -> EventAttendee? in
+            // Conference rooms come through as type "resource" — not people.
+            guard att.type?.lowercased() != "resource" else { return nil }
+            return EventAttendee.resolve(name: att.emailAddress?.name, email: att.emailAddress?.address)
+        }
         return CalendarEvent(
             id: ev.id,
             linkIdentifier: ev.seriesMasterId ?? ev.id,
@@ -190,6 +194,8 @@ struct GraphDateTime: Decodable {
 }
 
 struct GraphAttendee: Decodable {
+    /// "required" | "optional" | "resource" (rooms/equipment).
+    let type: String?
     let emailAddress: GraphEmailAddress?
 }
 

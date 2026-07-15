@@ -45,11 +45,26 @@ final class GraphCalendarTests: XCTestCase {
         XCTAssertFalse(e.isRecurring)
         XCTAssertEqual(e.title, "1:1 with Sam")
         XCTAssertEqual(e.source, .microsoftGraph)
-        XCTAssertEqual(e.attendees, ["Sam Lee", "noname@org.com"])  // name, else address
+        XCTAssertEqual(e.attendees.map(\.name), ["Sam Lee", "Noname"])  // name, else derived from address
+        XCTAssertEqual(e.attendees.map(\.email), ["sam@org.com", "noname@org.com"])
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
         let expectedStart = cal.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 15, minute: 0, second: 0))!
         XCTAssertEqual(e.startDate, expectedStart)  // parsed as UTC, fractional seconds dropped
+    }
+
+    func testResourceAttendeesAreExcluded() throws {
+        let json = """
+        {"value":[
+          {"id":"AAA","subject":"Planning","type":"singleInstance",
+           "start":{"dateTime":"2026-06-01T15:00:00.0000000","timeZone":"UTC"},
+           "end":{"dateTime":"2026-06-01T15:30:00.0000000","timeZone":"UTC"},
+           "attendees":[{"type":"required","emailAddress":{"name":"Sam Lee","address":"sam@org.com"}},
+                        {"type":"resource","emailAddress":{"name":"Room 4B","address":"room4b@org.com"}}]}
+        ]}
+        """
+        let e = try XCTUnwrap(try GraphCalendarProvider.decodeEvents(from: Data(json.utf8)).first)
+        XCTAssertEqual(e.attendees.map(\.name), ["Sam Lee"])  // room dropped
     }
 
     func testRecurringOccurrenceUsesSeriesMasterAsLinkIdentifier() throws {

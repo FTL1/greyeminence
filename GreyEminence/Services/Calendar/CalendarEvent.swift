@@ -1,5 +1,63 @@
 import Foundation
 
+/// Provider-neutral event attendee: a person on the invite, with whatever
+/// identity the calendar source supplied. Carries the email so linking a
+/// meeting can create real Contact records for people we haven't met yet.
+struct EventAttendee: Sendable, Hashable {
+    let name: String
+    /// Normalized (lowercased) address, or nil when the provider had none.
+    let email: String?
+    /// True when the provider identified this attendee as the signed-in user
+    /// (EventKit only — Graph can't tell). Guards against creating a duplicate
+    /// contact for the user themself.
+    let isCurrentUser: Bool
+
+    init(name: String, email: String? = nil, isCurrentUser: Bool = false) {
+        self.name = name
+        self.email = email
+        self.isCurrentUser = isCurrentUser
+    }
+
+    /// Best name/email pair from whatever the provider supplied. Providers
+    /// sometimes put the address in the display-name slot — detect that and
+    /// derive a readable name from the local part. nil when there's neither
+    /// a usable name nor an address.
+    static func resolve(name rawName: String?, email rawEmail: String?, isCurrentUser: Bool = false) -> EventAttendee? {
+        let email = normalize(rawEmail)
+        let name = rawName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if name.contains("@") {
+            let asEmail = normalize(name)
+            return EventAttendee(
+                name: displayName(fromEmail: asEmail ?? name),
+                email: email ?? asEmail,
+                isCurrentUser: isCurrentUser
+            )
+        }
+        if !name.isEmpty {
+            return EventAttendee(name: name, email: email, isCurrentUser: isCurrentUser)
+        }
+        if let email {
+            return EventAttendee(name: displayName(fromEmail: email), email: email, isCurrentUser: isCurrentUser)
+        }
+        return nil
+    }
+
+    /// "sam.lee@org.com" → "Sam Lee". Best-effort readable name for
+    /// attendees the provider only identified by address.
+    static func displayName(fromEmail email: String) -> String {
+        let local = email.split(separator: "@").first.map(String.init) ?? email
+        let words = local.split(whereSeparator: { ".-_".contains($0) })
+        guard !words.isEmpty else { return email }
+        return words.map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
+    private static func normalize(_ email: String?) -> String? {
+        guard let value = email?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              value.contains("@") else { return nil }
+        return value
+    }
+}
+
 /// Provider-neutral calendar event. Lets the recording flow work the same way
 /// whether an event came from the local EventKit store or Microsoft Graph.
 struct CalendarEvent: Identifiable, Sendable, Hashable {
@@ -28,8 +86,9 @@ struct CalendarEvent: Identifiable, Sendable, Hashable {
     let title: String?
     let startDate: Date
     let endDate: Date
-    /// Attendee display names (or emails), already extracted at fetch time.
-    let attendees: [String]
+    /// Attendees (people only — rooms/resources are filtered at fetch time),
+    /// already extracted from the provider's participant objects.
+    let attendees: [EventAttendee]
     let isRecurring: Bool
     let source: Source
 
