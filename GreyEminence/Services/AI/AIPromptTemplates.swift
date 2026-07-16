@@ -143,21 +143,25 @@ enum AIPromptTemplates {
         }
 
         if !prep.followUps.isEmpty {
-            contextBlock += "\nOpen follow-up questions:\n"
+            contextBlock += "\nFollow-up questions left open by prior occurrences:\n"
             for q in prep.followUps {
                 contextBlock += "- \(q)\n"
             }
         }
 
         if !prep.previousTopics.isEmpty {
-            contextBlock += "\nPreviously discussed topics: \(prep.previousTopics.joined(separator: ", "))\n"
+            contextBlock += "\nTopics discussed in prior occurrences: \(prep.previousTopics.joined(separator: ", "))\n"
         }
 
         contextBlock += """
 
-        Watch for any of these items being discussed or resolved during the meeting. \
-        If an unresolved item is addressed, note it in the summary. If an open question \
-        is answered, remove it from follow_ups.
+        NONE of the above was said in the current meeting — it is background carried \
+        over from prior occurrences, for reference only. Do NOT copy these questions \
+        into "follow_ups", these topics into "topics", or these items into \
+        "action_items": everything you output must be grounded in what is actually \
+        said in the current transcript. Use this background only to recognize \
+        continuity — if the discussion resolves an unresolved item or answers an open \
+        question, note that in the summary.
         """
 
         return base + contextBlock

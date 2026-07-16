@@ -114,30 +114,33 @@ private struct SectionCard: View {
             .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }
             .onHover { isHovered = $0 }
 
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let intro = section.intro {
-                        Text(intro)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .italic()
-                            .padding(.horizontal, 10)
-                            .padding(.bottom, 6)
-                    }
+            // SwiftUI doesn't clip transitioning views, so the collapsing
+            // content would slide up over the header (and neighboring cards)
+            // while it fades. This wrapper is a stable parent whose bounds
+            // shrink with the collapse — clipping to it masks the roll-up at
+            // the header/content boundary.
+            VStack(alignment: .leading, spacing: 0) {
+                if isExpanded {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let intro = section.intro {
+                            Text(intro)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .italic()
+                                .padding(.horizontal, 10)
+                                .padding(.bottom, 6)
+                        }
 
-                    ForEach(Array(section.points.enumerated()), id: \.offset) { _, point in
-                        PointRow(point: point)
+                        ForEach(Array(section.points.enumerated()), id: \.offset) { _, point in
+                            PointRow(point: point)
+                        }
                     }
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .padding(.bottom, 8)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
+            .clipped()
         }
-        // SwiftUI doesn't clip transitioning views: without this, the
-        // collapsing content slides up OVER the header and neighboring
-        // sections before it finishes fading. Clipping masks the roll-up to
-        // the card's animating bounds.
-        .clipped()
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color(nsColor: .windowBackgroundColor).opacity(0.5))
