@@ -5,11 +5,15 @@ struct TranscriptPanelView: View {
     @Bindable var meeting: Meeting
     var onSplitMeeting: ((Meeting) -> Void)?
     @Binding var scrollToSegmentID: UUID?
+    /// When set, segment timestamps become click targets that seek the
+    /// screen-share player.
+    var onSeekToTime: ((TimeInterval) -> Void)?
 
-    init(meeting: Meeting, onSplitMeeting: ((Meeting) -> Void)? = nil, scrollToSegmentID: Binding<UUID?> = .constant(nil)) {
+    init(meeting: Meeting, onSplitMeeting: ((Meeting) -> Void)? = nil, scrollToSegmentID: Binding<UUID?> = .constant(nil), onSeekToTime: ((TimeInterval) -> Void)? = nil) {
         self._meeting = Bindable(wrappedValue: meeting)
         self.onSplitMeeting = onSplitMeeting
         self._scrollToSegmentID = scrollToSegmentID
+        self.onSeekToTime = onSeekToTime
     }
 
     @Environment(\.modelContext) private var modelContext
@@ -326,7 +330,8 @@ struct TranscriptPanelView: View {
                     },
                     onToggleSelection: isSelectionMode ? {
                         toggleSelection(segment)
-                    } : nil
+                    } : nil,
+                    onSeekToTime: onSeekToTime
                 )
             } else {
                 TranscriptSegmentRow(segment: segment)

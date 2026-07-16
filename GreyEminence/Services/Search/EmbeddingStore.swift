@@ -132,6 +132,15 @@ final class EmbeddingStore {
         return count
     }
 
+    /// Remove one record by its composite id (e.g. "frame:<uuid>"). Used when
+    /// a single source item (a screen frame) is deleted without touching the
+    /// rest of the meeting's embeddings.
+    func deleteRecord(id: String) {
+        let predicate = #Predicate<EmbeddingRecord> { $0.id == id }
+        try? context.delete(model: EmbeddingRecord.self, where: predicate)
+        save()
+    }
+
     /// Bulk variant for maintenance — keep only embeddings whose meetingID is
     /// in the supplied set. Returns the number of records pruned.
     @discardableResult

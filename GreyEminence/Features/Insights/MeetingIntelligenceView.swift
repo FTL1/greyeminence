@@ -3,6 +3,10 @@ import SwiftData
 
 struct MeetingIntelligenceView: View {
     @Bindable var meeting: Meeting
+    /// Screen-share player sync (optional — only the meeting/archive detail
+    /// panes wire these; other hosts get a self-contained player).
+    var pendingSeekTime: Binding<TimeInterval?> = .constant(nil)
+    var onPlayheadSegment: ((UUID) -> Void)? = nil
     @Environment(\.modelContext) private var modelContext
     @State private var isReanalyzing = false
     @State private var reanalysisError: String?
@@ -84,6 +88,12 @@ struct MeetingIntelligenceView: View {
                     }
                     .padding(.horizontal)
                 }
+
+                ScreenSharePlayerSection(
+                    meeting: meeting,
+                    pendingSeekTime: pendingSeekTime,
+                    onPlayheadSegment: onPlayheadSegment
+                )
 
                 if let insight = meeting.latestInsight {
                     FollowUpQuestionsSection(questions: insight.followUpQuestions) { index in

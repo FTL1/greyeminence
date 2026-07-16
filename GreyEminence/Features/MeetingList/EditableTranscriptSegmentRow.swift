@@ -11,6 +11,9 @@ struct EditableTranscriptSegmentRow: View {
     var onSplitMeeting: (() -> Void)?
     var onChangeSpeakerForAll: ((Speaker) -> Void)?
     var onToggleSelection: (() -> Void)?
+    /// When set (meeting has captured screen frames), the timestamp becomes
+    /// a click target that seeks the screen-share player to this moment.
+    var onSeekToTime: ((TimeInterval) -> Void)?
 
     @State private var isEditingText = false
     @State private var editedText: String = ""
@@ -33,12 +36,26 @@ struct EditableTranscriptSegmentRow: View {
                 .buttonStyle(.plain)
             }
 
-            // Timestamp
-            Text(segment.formattedTimestamp)
-                .font(.caption)
-                .fontDesign(.monospaced)
-                .foregroundStyle(.tertiary)
-                .frame(width: 40, alignment: .trailing)
+            // Timestamp — clickable when a screen-share player is present
+            if let onSeekToTime {
+                Button {
+                    onSeekToTime(segment.startTime)
+                } label: {
+                    Text(segment.formattedTimestamp)
+                        .font(.caption)
+                        .fontDesign(.monospaced)
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 40, alignment: .trailing)
+                }
+                .buttonStyle(.plain)
+                .help("Show the shared screen at this moment")
+            } else {
+                Text(segment.formattedTimestamp)
+                    .font(.caption)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 40, alignment: .trailing)
+            }
 
             // Speaker badge
             speakerBadgeView

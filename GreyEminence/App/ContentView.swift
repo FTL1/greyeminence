@@ -63,6 +63,9 @@ struct ContentView: View {
     @State private var topicMapViewModel = TopicMapViewModel()
     @State private var askViewModel = AskViewModel()
     @State private var pendingScrollSegmentID: UUID?
+    /// Transcript → screen-share player: set by a timestamp tap or an Ask
+    /// deep link; consumed by ScreenSharePlayerSection (expand, seek, clear).
+    @State private var pendingSeekTime: TimeInterval?
     @AppStorage("showInspector") private var showInspector = true
     @State private var sidebarExpanded = false
     @State private var inspectorWidth: CGFloat?
@@ -407,7 +410,11 @@ struct ContentView: View {
                             VStack(spacing: 0) {
                                 MeetingHeaderBar(meeting: meeting)
                                 Divider()
-                                MeetingIntelligenceView(meeting: meeting)
+                                MeetingIntelligenceView(
+                                    meeting: meeting,
+                                    pendingSeekTime: $pendingSeekTime,
+                                    onPlayheadSegment: { pendingScrollSegmentID = $0 }
+                                )
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .layoutPriority(2)
@@ -418,7 +425,8 @@ struct ContentView: View {
                                     onSplitMeeting: { newMeeting in
                                         selectedMeeting = newMeeting
                                     },
-                                    scrollToSegmentID: $pendingScrollSegmentID
+                                    scrollToSegmentID: $pendingScrollSegmentID,
+                                    onSeekToTime: meeting.screenFrames.isEmpty ? nil : { pendingSeekTime = $0 }
                                 )
                                 .frame(width: clampedWidth)
                                 .layoutPriority(0)
@@ -448,7 +456,11 @@ struct ContentView: View {
                             VStack(spacing: 0) {
                                 MeetingHeaderBar(meeting: meeting)
                                 Divider()
-                                MeetingIntelligenceView(meeting: meeting)
+                                MeetingIntelligenceView(
+                                    meeting: meeting,
+                                    pendingSeekTime: $pendingSeekTime,
+                                    onPlayheadSegment: { pendingScrollSegmentID = $0 }
+                                )
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .layoutPriority(2)
@@ -459,7 +471,8 @@ struct ContentView: View {
                                     onSplitMeeting: { newMeeting in
                                         selectedMeeting = newMeeting
                                     },
-                                    scrollToSegmentID: $pendingScrollSegmentID
+                                    scrollToSegmentID: $pendingScrollSegmentID,
+                                    onSeekToTime: meeting.screenFrames.isEmpty ? nil : { pendingSeekTime = $0 }
                                 )
                                 .frame(width: clampedWidth)
                                 .layoutPriority(0)
