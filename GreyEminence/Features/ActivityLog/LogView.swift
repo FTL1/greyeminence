@@ -169,6 +169,7 @@ struct LogView: View {
         case .audio: .blue
         case .transcription: .purple
         case .ai: .green
+        case .screen: .cyan
         case .obsidian: .indigo
         case .update: .teal
         case .general: .gray

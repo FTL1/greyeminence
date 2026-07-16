@@ -138,6 +138,39 @@ final class StorageManager: Sendable {
         return (count, bytes)
     }
 
+    // MARK: - Screen-Share Frames
+
+    /// Per-meeting directory for captured screen-share frames. Lives inside
+    /// the recording directory, so deletion/purge/orphan cleanup of the
+    /// meeting folder covers frames with no extra work. Created lazily.
+    func framesDirectory(for meetingID: UUID) -> URL {
+        let dir = recordingDirectory(for: meetingID).appendingPathComponent("frames", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    /// Resolve a `ScreenShareFrame.imagePath` (relative to the recording
+    /// directory) to an on-disk URL. Doesn't check existence.
+    func frameURL(for meetingID: UUID, relativePath: String) -> URL {
+        recordingDirectory(for: meetingID).appendingPathComponent(relativePath)
+    }
+
+    /// Write one frame's JPEG data and return the path relative to the
+    /// recording directory (what `ScreenShareFrame.imagePath` stores).
+    /// Frames are grouped by a session-directory (first 8 hex chars of the
+    /// session UUID) to keep listings manageable.
+    func writeFrame(_ jpeg: Data, meetingID: UUID, sessionID: UUID, sequence: Int) throws -> String {
+        let sessionDir = String(sessionID.uuidString.replacingOccurrences(of: "-", with: "").prefix(8)).lowercased()
+        let relative = "frames/\(sessionDir)/\(String(format: "%06d", sequence)).jpg"
+        let url = recordingDirectory(for: meetingID).appendingPathComponent(relative)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try jpeg.write(to: url, options: .atomic)
+        return relative
+    }
+
     // MARK: - Candidate Resumes
 
     /// Per-candidate directory for attached files (currently just resumes).

@@ -1,0 +1,450 @@
+import CoreGraphics
+import Foundation
+import ImageIO
+import ScreenCaptureKit
+import UniformTypeIdentifiers
+
+// MARK: - Events & value types
+
+enum SessionEndReason: String, Sendable {
+    case windowGone
+    case recordingStopped
+    case capReached
+}
+
+/// A window the picker can offer. `score` reflects the Teams pop-out
+/// heuristics; the picker sorts by it and badges high scorers.
+struct WindowCandidate: Sendable, Identifiable, Equatable {
+    let id: CGWindowID
+    let title: String
+    let appName: String
+    let bundleID: String
+    let frame: CGRect
+    let score: Int
+}
+
+/// One frame that survived change detection, already written to disk.
+struct KeptFrame: Sendable {
+    let id: UUID
+    let sessionID: UUID
+    let sequence: Int
+    let capturedAt: Date
+    /// Relative to the meeting's recording directory.
+    let relativeImagePath: String
+    /// Retained so the analysis service can upload without re-reading disk.
+    let jpegData: Data
+    let dHash: UInt64
+    let ocrText: String?
+    let isVisualOnlyChange: Bool
+    let windowTitle: String
+}
+
+enum ScreenCaptureEvent: Sendable {
+    case sessionStarted(sessionID: UUID, windowTitle: String, appBundleID: String)
+    case frameKept(KeptFrame)
+    case frameDropped(sessionID: UUID)
+    case sessionEnded(sessionID: UUID, reason: SessionEndReason)
+    /// Emitted once per recording; capture goes inert afterwards.
+    case permissionDenied
+    /// Auto-detect found multiple plausible share windows; the UI can offer
+    /// the picker. Sorted by score, best first.
+    case candidatesChanged([WindowCandidate])
+}
+
+// MARK: - Capture service
+
+/// Watches for a popped-out Teams screen-share window during a recording and
+/// periodically screenshots it. Owns all ScreenCaptureKit access, change
+/// detection, OCR, and JPEG writing; emits `Sendable` events for the
+/// recording view model to consume. No SwiftData, no AI — track 1 only.
+actor ScreenShareCaptureService {
+
+    struct Config: Sendable {
+        var intervalSeconds: Double = ScreenShareSettings.defaultIntervalSeconds
+        var autoDetect: Bool = true
+        var changeThreshold: Int = ScreenShareSettings.defaultChangeThreshold
+        var maxKeptFrames: Int = ScreenShareSettings.defaultMaxKeptFrames
+        /// ~1.15 MP — Claude vision's cost/quality sweet spot; plenty for OCR.
+        var targetPixelCount: Int = 1_150_000
+        var jpegQuality: Double = 0.7
+    }
+
+    // MARK: Teams pop-out heuristics (data-driven — cheap to update when
+    // Teams changes; empirical verification tracked as a spike)
+
+    static let teamsBundleIDs: Set<String> = [
+        "com.microsoft.teams2",   // "new" Teams
+        "com.microsoft.teams",    // classic
+    ]
+
+    /// Lowercased substrings that suggest a window is the popped-out share
+    /// content rather than the main meeting window.
+    static let shareTitlePatterns: [String] = [
+        "is presenting",
+        "is sharing",
+        "screen shar",       // "screen share" / "screen sharing"
+        "shared content",
+        "content shared",
+    ]
+
+    /// Lowercased substrings that mark the main Teams app windows we must
+    /// never capture (chat, activity, the meeting stage itself).
+    static let mainWindowPatterns: [String] = [
+        "| microsoft teams",
+        "microsoft teams",
+    ]
+
+    private static let discoveryInterval: Double = 3.0
+    /// Consecutive failed polls before the session is declared over
+    /// (~6–10s grace for compositor hiccups and brief occlusion).
+    private static let missedPollLimit = 2
+
+    // MARK: State
+
+    private var continuation: AsyncStream<ScreenCaptureEvent>.Continuation?
+    private var loopTask: Task<Void, Never>?
+    private var meetingID: UUID?
+    private var config = Config()
+    private var suspended = false
+    private var permissionDenied = false
+    private var frameCapReached = false
+
+    /// Manual picker override; wins over auto-detect. `nil` = auto.
+    private var manualWindowID: CGWindowID?
+    private var currentWindowID: CGWindowID?
+    private var currentSessionID: UUID?
+    private var currentWindowTitle: String = ""
+    private var sequence = 0
+    private var lastKeptHash: UInt64?
+    private var lastKeptOCR: String?
+    private var keptCount = 0
+    private var missedPolls = 0
+    private var lastCaptureAt: Date?
+    private var lastReportedCandidateIDs: [CGWindowID] = []
+
+    // MARK: Lifecycle
+
+    func start(meetingID: UUID, config: Config) -> AsyncStream<ScreenCaptureEvent> {
+        stopInternal(reason: .recordingStopped)  // defensive: clear any stale run
+        self.meetingID = meetingID
+        self.config = config
+        self.suspended = false
+        self.permissionDenied = false
+        self.frameCapReached = false
+        self.manualWindowID = nil
+        self.keptCount = 0
+
+        let (stream, continuation) = AsyncStream.makeStream(of: ScreenCaptureEvent.self)
+        self.continuation = continuation
+        loopTask = Task { await self.runLoop() }
+        LogManager.send("Screen-share capture watching (interval \(Int(config.intervalSeconds))s)", category: .screen, meetingID: meetingID)
+        return stream
+    }
+
+    func stop() {
+        stopInternal(reason: .recordingStopped)
+    }
+
+    func suspend() {
+        suspended = true
+    }
+
+    func resume() {
+        suspended = false
+    }
+
+    /// Manual window selection from the picker. `nil` returns to auto-detect.
+    func selectWindow(_ windowID: CGWindowID?) {
+        manualWindowID = windowID
+        // Force re-evaluation: end the current session so the next poll
+        // starts one on the newly selected window.
+        if let sessionID = currentSessionID, windowID != currentWindowID {
+            endSession(sessionID, reason: .windowGone)
+        }
+    }
+
+    /// All plausible windows for the manual picker, best-scored first.
+    func currentCandidates() async -> [WindowCandidate] {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(
+            true, onScreenWindowsOnly: false
+        ) else { return [] }
+        return Self.candidates(from: content.windows).sorted { $0.score > $1.score }
+    }
+
+    private func stopInternal(reason: SessionEndReason) {
+        if let sessionID = currentSessionID {
+            endSession(sessionID, reason: reason)
+        }
+        loopTask?.cancel()
+        loopTask = nil
+        continuation?.finish()
+        continuation = nil
+        meetingID = nil
+    }
+
+    // MARK: Main loop
+
+    /// Single loop, 1s granularity: discovery every 3s, capture whenever the
+    /// configured interval has elapsed while a window is selected. One place
+    /// owns the state machine — no cross-task coordination.
+    private func runLoop() async {
+        var lastDiscoveryAt = Date.distantPast
+        while !Task.isCancelled {
+            if !suspended && !permissionDenied && !frameCapReached {
+                let now = Date()
+                if now.timeIntervalSince(lastDiscoveryAt) >= Self.discoveryInterval {
+                    lastDiscoveryAt = now
+                    await discoverWindow()
+                }
+                if currentWindowID != nil,
+                   now.timeIntervalSince(lastCaptureAt ?? .distantPast) >= config.intervalSeconds {
+                    lastCaptureAt = now
+                    await captureFrame()
+                }
+            }
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    // MARK: Discovery
+
+    private func discoverWindow() async {
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        } catch {
+            // Most common cause is TCC denial; SCK throws the same way for
+            // transient failures, so only latch denial when we've never
+            // captured anything (a mid-recording revoke also lands here).
+            handleDiscoveryFailure(error)
+            return
+        }
+
+        let candidates = Self.candidates(from: content.windows)
+        reportCandidatesIfChanged(candidates)
+
+        let selected: WindowCandidate?
+        if let manualID = manualWindowID {
+            selected = candidates.first { $0.id == manualID }
+        } else if config.autoDetect {
+            selected = candidates.filter { $0.score >= 100 }.max { $0.score < $1.score }
+        } else {
+            selected = nil
+        }
+
+        if let selected {
+            missedPolls = 0
+            if selected.id != currentWindowID {
+                if let sessionID = currentSessionID {
+                    endSession(sessionID, reason: .windowGone)
+                }
+                startSession(with: selected)
+            }
+        } else if currentWindowID != nil {
+            missedPolls += 1
+            if missedPolls >= Self.missedPollLimit, let sessionID = currentSessionID {
+                endSession(sessionID, reason: .windowGone)
+            }
+        }
+    }
+
+    private func handleDiscoveryFailure(_ error: Error) {
+        guard !permissionDenied else { return }
+        permissionDenied = true
+        if let sessionID = currentSessionID {
+            endSession(sessionID, reason: .windowGone)
+        }
+        continuation?.yield(.permissionDenied)
+        LogManager.send("Screen-share capture disabled: \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
+    }
+
+    private func startSession(with candidate: WindowCandidate) {
+        let sessionID = UUID()
+        currentSessionID = sessionID
+        currentWindowID = candidate.id
+        currentWindowTitle = candidate.title
+        sequence = 0
+        lastKeptHash = nil
+        lastKeptOCR = nil
+        missedPolls = 0
+        lastCaptureAt = nil  // capture immediately on the next tick
+        continuation?.yield(.sessionStarted(
+            sessionID: sessionID,
+            windowTitle: candidate.title,
+            appBundleID: candidate.bundleID
+        ))
+        LogManager.send("Share session started: \"\(candidate.title)\" (\(candidate.appName))", category: .screen, meetingID: meetingID)
+    }
+
+    private func endSession(_ sessionID: UUID, reason: SessionEndReason) {
+        currentSessionID = nil
+        currentWindowID = nil
+        currentWindowTitle = ""
+        missedPolls = 0
+        continuation?.yield(.sessionEnded(sessionID: sessionID, reason: reason))
+        LogManager.send("Share session ended (\(reason.rawValue))", category: .screen, meetingID: meetingID)
+    }
+
+    private func reportCandidatesIfChanged(_ candidates: [WindowCandidate]) {
+        let plausible = candidates.filter { $0.score > 0 }.sorted { $0.score > $1.score }
+        let ids = plausible.map(\.id)
+        guard ids != lastReportedCandidateIDs else { return }
+        lastReportedCandidateIDs = ids
+        continuation?.yield(.candidatesChanged(plausible))
+    }
+
+    // MARK: Scoring (pure — unit-tested via scoreWindow)
+
+    static func candidates(from windows: [SCWindow]) -> [WindowCandidate] {
+        windows.compactMap { window in
+            guard let app = window.owningApplication else { return nil }
+            let title = window.title ?? ""
+            let score = scoreWindow(
+                title: title,
+                bundleID: app.bundleIdentifier,
+                frame: window.frame
+            )
+            // Windows failing the size floor are never candidates at all.
+            guard window.frame.width >= 300, window.frame.height >= 200 else { return nil }
+            return WindowCandidate(
+                id: window.windowID,
+                title: title,
+                appName: app.applicationName,
+                bundleID: app.bundleIdentifier,
+                frame: window.frame,
+                score: score
+            )
+        }
+    }
+
+    /// Heuristic score for "is this the popped-out Teams share window".
+    /// ≥100 auto-captures; 1–99 shows in the picker as plausible; 0 is
+    /// picker-only filler.
+    static func scoreWindow(title: String, bundleID: String, frame: CGRect) -> Int {
+        guard frame.width >= 300, frame.height >= 200 else { return 0 }
+        guard teamsBundleIDs.contains(bundleID) else { return 0 }
+
+        let lower = title.lowercased()
+        var score = 60  // any adequately-sized Teams window is plausible
+
+        if shareTitlePatterns.contains(where: { lower.contains($0) }) {
+            score += 100
+        } else if mainWindowPatterns.contains(where: { lower.contains($0) }) {
+            // The main meeting/chat window — plausible for the picker but
+            // never auto-selected.
+            score -= 40
+        } else {
+            // Teams window with an unrecognized title: the pop-out content
+            // window often carries just the shared app/monitor name, so an
+            // unbranded title is itself a share signal.
+            score += 40
+        }
+        return score
+    }
+
+    // MARK: Capture
+
+    private func captureFrame() async {
+        guard let windowID = currentWindowID,
+              let sessionID = currentSessionID,
+              let meetingID else { return }
+
+        // Fresh SCWindow each time — stale references go invalid when the
+        // window server recycles state.
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false),
+              let window = content.windows.first(where: { $0.windowID == windowID }) else {
+            missedPolls += 1
+            if missedPolls >= Self.missedPollLimit {
+                endSession(sessionID, reason: .windowGone)
+            }
+            return
+        }
+
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        let pixelSize = ScreenFrameTriage.scaledSize(
+            for: CGSize(width: window.frame.width * 2, height: window.frame.height * 2),
+            targetPixelCount: config.targetPixelCount
+        )
+        configuration.width = Int(pixelSize.width)
+        configuration.height = Int(pixelSize.height)
+        configuration.showsCursor = false
+
+        let image: CGImage
+        do {
+            image = try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: configuration
+            )
+        } catch {
+            missedPolls += 1
+            LogManager.send("Frame capture failed: \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
+            if missedPolls >= Self.missedPollLimit {
+                endSession(sessionID, reason: .windowGone)
+            }
+            return
+        }
+        missedPolls = 0
+
+        let hash = ScreenFrameTriage.dHash(image)
+        guard ScreenFrameTriage.shouldKeep(hash: hash, lastKeptHash: lastKeptHash, threshold: config.changeThreshold) else {
+            continuation?.yield(.frameDropped(sessionID: sessionID))
+            return
+        }
+
+        let ocrText = try? await ScreenFrameTriage.recognizeText(in: image)
+        let visualOnly = lastKeptHash != nil
+            && ScreenFrameTriage.isVisualOnlyChange(previousOCR: lastKeptOCR, currentOCR: ocrText ?? nil)
+
+        guard let jpeg = Self.encodeJPEG(image, quality: config.jpegQuality) else {
+            LogManager.send("Frame JPEG encode failed", category: .screen, level: .warning, meetingID: meetingID)
+            return
+        }
+
+        let relativePath: String
+        do {
+            relativePath = try StorageManager.shared.writeFrame(
+                jpeg, meetingID: meetingID, sessionID: sessionID, sequence: sequence
+            )
+        } catch {
+            LogManager.send("Frame write failed: \(error.localizedDescription)", category: .screen, level: .error, meetingID: meetingID)
+            return
+        }
+
+        let frame = KeptFrame(
+            id: UUID(),
+            sessionID: sessionID,
+            sequence: sequence,
+            capturedAt: Date(),
+            relativeImagePath: relativePath,
+            jpegData: jpeg,
+            dHash: hash,
+            ocrText: ocrText ?? nil,
+            isVisualOnlyChange: visualOnly,
+            windowTitle: currentWindowTitle
+        )
+        sequence += 1
+        keptCount += 1
+        lastKeptHash = hash
+        lastKeptOCR = ocrText ?? nil
+        continuation?.yield(.frameKept(frame))
+
+        if keptCount >= config.maxKeptFrames {
+            frameCapReached = true
+            endSession(sessionID, reason: .capReached)
+            LogManager.send("Frame cap reached (\(keptCount)) — capture stopped for this recording", category: .screen, level: .warning, meetingID: meetingID)
+        }
+    }
+
+    private static func encodeJPEG(_ image: CGImage, quality: Double) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, [
+            kCGImageDestinationLossyCompressionQuality: quality
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+}

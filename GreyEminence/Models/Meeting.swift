@@ -77,6 +77,9 @@ final class Meeting {
     @Relationship(deleteRule: .cascade, inverse: \MeetingInsight.meeting)
     var insights: [MeetingInsight]
 
+    @Relationship(deleteRule: .cascade, inverse: \ScreenShareFrame.meeting)
+    var screenFrames: [ScreenShareFrame] = []
+
     @Relationship(deleteRule: .nullify)
     var attendees: [Contact] = []
 

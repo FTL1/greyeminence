@@ -85,6 +85,25 @@ final class RecordingViewModel {
     /// selection.
     private var autoDetectedRecordingStart: Bool = false
 
+    // Screen-share capture
+    enum ScreenCaptureState: Equatable {
+        case off
+        /// Enabled and scanning for a share window.
+        case watching
+        case capturing(windowTitle: String)
+        /// Screen Recording TCC denied — inert for the rest of the recording.
+        case denied
+    }
+    private(set) var screenCaptureState: ScreenCaptureState = .off
+    private(set) var screenShareFrameCount = 0
+    /// Plausible share windows from the last discovery poll, best first —
+    /// drives the manual picker (M3).
+    private(set) var screenShareCandidates: [WindowCandidate] = []
+    let screenCapture = ScreenShareCaptureService()
+    /// Frames received from the capture actor but not yet flushed into
+    /// SwiftData rows, each stamped with its elapsed-seconds timestamp.
+    private var pendingScreenFrames: [(frame: KeptFrame, timestamp: TimeInterval)] = []
+
     // Transcription
     private let coordinator = TranscriptionCoordinator()
     private let vocabularyManager = VocabularyManager()
@@ -299,6 +318,7 @@ final class RecordingViewModel {
         startRealCapture(meetingID: meeting.id)
         startIntelligenceService()
         startPeriodicPersistence()
+        startScreenShareCapture(meetingID: meeting.id)
     }
 
     /// Wires detector callbacks once; safe to call repeatedly.
@@ -424,6 +444,7 @@ final class RecordingViewModel {
         startRealCapture(meetingID: meeting.id)
         startIntelligenceService()
         startPeriodicPersistence()
+        startScreenShareCapture(meetingID: meeting.id)
 
         if existing == nil {
             matchCalendarAtStart(for: meeting, in: modelContext)
@@ -478,6 +499,7 @@ final class RecordingViewModel {
         Task {
             await micCapture.suspendCapture()
             await systemCapture.suspendCapture()
+            await screenCapture.suspend()
         }
         log.log("Recording paused", category: .audio)
     }
@@ -493,6 +515,7 @@ final class RecordingViewModel {
         Task {
             await micCapture.resumeCapture()
             await systemCapture.resumeCapture()
+            await screenCapture.resume()
         }
         log.log("Recording resumed", category: .audio)
     }
@@ -517,6 +540,7 @@ final class RecordingViewModel {
 
         await micCapture.stopCapture()
         await systemCapture.stopCapture()
+        await screenCapture.stop()
         let micWriter = self.micFileWriter
         let sysWriter = self.systemFileWriter
         self.micFileWriter = nil
@@ -550,6 +574,8 @@ final class RecordingViewModel {
             persisted.meeting = meeting
             meeting.segments.append(persisted)
         }
+
+        flushPendingScreenFrames(to: meeting)
 
         // The meeting stays `.recording` so launch-time orphan recovery picks
         // it up and marks it `(interrupted)` — that's the contract for an
@@ -609,6 +635,7 @@ final class RecordingViewModel {
                 guard let self else { return }
                 await self.micCapture.stopCapture()
                 await self.systemCapture.stopCapture()
+                await self.screenCapture.stop()
                 await micWriter?.stop()
                 await sysWriter?.stop()
                 await self.coordinator.stop()
@@ -633,6 +660,10 @@ final class RecordingViewModel {
             self.systemFileWriter = nil
             await finalMicWriter?.stop()
             await finalSysWriter?.stop()
+
+            // Stop screen capture — ends any open share session and finishes
+            // the event stream. Frames already received are flushed below.
+            await screenCapture.stop()
 
             // Stop coordinator — drains remaining recognition results and diarization
             await coordinator.stop()
@@ -669,6 +700,8 @@ final class RecordingViewModel {
                 persistedSegment.meeting = meeting
                 meeting.segments.append(persistedSegment)
             }
+
+            self.flushPendingScreenFrames(to: meeting)
 
             let finalSegmentsOK = PersistenceGate.save(
                 modelContext,
@@ -835,6 +868,92 @@ final class RecordingViewModel {
         currentSectionTag = nil
         currentSectionTagID = nil
         aiActivityState = .idle
+        screenCaptureState = .off
+        screenShareFrameCount = 0
+        screenShareCandidates = []
+        pendingScreenFrames = []
+    }
+
+    // MARK: - Screen-Share Capture
+
+    /// Start watching for a popped-out share window. No-op when the feature
+    /// is disabled. The consumer task joins `processingTasks` so stop/flush
+    /// cancels it uniformly with everything else.
+    private func startScreenShareCapture(meetingID: UUID) {
+        guard ScreenShareSettings.isEnabled else { return }
+        let service = screenCapture
+        let config = ScreenShareCaptureService.Config(
+            intervalSeconds: ScreenShareSettings.intervalSeconds,
+            autoDetect: ScreenShareSettings.autoDetect,
+            changeThreshold: ScreenShareSettings.changeThreshold,
+            maxKeptFrames: ScreenShareSettings.maxKeptFrames
+        )
+        let task = Task { [weak self] in
+            guard let self else { return }
+            let stream = await service.start(meetingID: meetingID, config: config)
+            await MainActor.run { self.screenCaptureState = .watching }
+            for await event in stream {
+                if Task.isCancelled { break }
+                await MainActor.run { self.handleScreenCaptureEvent(event) }
+            }
+        }
+        processingTasks.append(task)
+    }
+
+    private func handleScreenCaptureEvent(_ event: ScreenCaptureEvent) {
+        switch event {
+        case .sessionStarted(_, let windowTitle, _):
+            screenCaptureState = .capturing(windowTitle: windowTitle)
+
+        case .frameKept(let frame):
+            // Stamp elapsed seconds on the same clock as segment.startTime.
+            // Capture is suspended while paused, so the accumulated pause
+            // duration at receipt time is correct for the capture moment.
+            guard let start = recordingStartDate else { return }
+            let elapsed = max(0, frame.capturedAt.timeIntervalSince(start) - accumulatedPauseDuration)
+            pendingScreenFrames.append((frame, elapsed))
+            screenShareFrameCount += 1
+
+        case .frameDropped:
+            break
+
+        case .sessionEnded:
+            if case .capturing = screenCaptureState {
+                screenCaptureState = .watching
+            }
+
+        case .permissionDenied:
+            screenCaptureState = .denied
+            errorMessage = "Screen Recording permission is off — shared-screen capture is disabled for this recording. Enable it in System Settings → Privacy & Security → Screen Recording."
+
+        case .candidatesChanged(let candidates):
+            screenShareCandidates = candidates
+        }
+    }
+
+    /// Flush buffered frames into SwiftData rows on `meeting`. Runs inside
+    /// the caller's save (periodic loop, stop, or termination flush) — this
+    /// only appends rows, it does not save.
+    private func flushPendingScreenFrames(to meeting: Meeting) {
+        guard !pendingScreenFrames.isEmpty else { return }
+        for (frame, timestamp) in pendingScreenFrames {
+            let row = ScreenShareFrame(
+                id: frame.id,
+                sessionID: frame.sessionID,
+                sequence: frame.sequence,
+                timestamp: timestamp,
+                capturedAt: frame.capturedAt,
+                imagePath: frame.relativeImagePath,
+                windowTitle: frame.windowTitle,
+                ocrText: frame.ocrText,
+                dedupeHash: Int64(bitPattern: frame.dHash),
+                isVisualOnlyChange: frame.isVisualOnlyChange
+            )
+            row.meeting = meeting
+            meeting.screenFrames.append(row)
+        }
+        log.log("Persisted \(pendingScreenFrames.count) screen frame(s) (total: \(meeting.screenFrames.count))", category: .screen)
+        pendingScreenFrames = []
     }
 
     func addManualNote() {
@@ -1300,6 +1419,10 @@ final class RecordingViewModel {
 
         // Update duration
         meeting.duration = elapsedTime
+
+        // Screen frames flush on every tick — they arrive independently of
+        // speech, so the segment-count guard below must not gate them.
+        flushPendingScreenFrames(to: meeting)
 
         // Persist only new segments since last save
         let newSegments = Array(segments.dropFirst(lastPersistedSegmentCount))

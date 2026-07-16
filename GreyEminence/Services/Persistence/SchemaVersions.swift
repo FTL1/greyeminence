@@ -235,9 +235,21 @@ enum SchemaV16: VersionedSchema {
     static var models: [any PersistentModel.Type] { SchemaV15.models }
 }
 
+/// SchemaV17 adds `ScreenShareFrame` — kept screenshots of a shared-screen
+/// window during a recording, with a cascade relationship from `Meeting`
+/// (`Meeting.screenFrames`). Image bytes live on the file system; the row
+/// carries metadata, OCR text, and the AI observation. New model + optional
+/// relationship — lightweight migration.
+enum SchemaV17: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(17, 0, 0) }
+    static var models: [any PersistentModel.Type] {
+        SchemaV16.models + [ScreenShareFrame.self]
+    }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self, SchemaV17.self]
     }
 
     static var stages: [MigrationStage] {
@@ -256,7 +268,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV12.self, toVersion: SchemaV13.self),
             .lightweight(fromVersion: SchemaV13.self, toVersion: SchemaV14.self),
             .lightweight(fromVersion: SchemaV14.self, toVersion: SchemaV15.self),
-            .lightweight(fromVersion: SchemaV15.self, toVersion: SchemaV16.self)
+            .lightweight(fromVersion: SchemaV15.self, toVersion: SchemaV16.self),
+            .lightweight(fromVersion: SchemaV16.self, toVersion: SchemaV17.self)
         ]
     }
 }

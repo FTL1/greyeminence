@@ -13,6 +13,7 @@ struct LogEntry: Identifiable {
         case audio
         case transcription
         case ai
+        case screen
         case obsidian
         case update
         case general
