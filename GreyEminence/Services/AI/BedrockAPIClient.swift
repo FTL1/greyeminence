@@ -14,16 +14,39 @@ struct BedrockAPIClient: AIClient, Sendable {
         self.model = model
     }
 
+    var supportsImages: Bool { true }
+
     func sendMessage(
         system: String,
         userContent: String,
         maxTokens: Int = 8192
     ) async throws -> String {
+        try await send(system: system, blocks: [.text(userContent)], maxTokens: maxTokens)
+    }
+
+    func sendMessage(
+        system: String,
+        userContent: String,
+        images: [AIImageContent],
+        maxTokens: Int
+    ) async throws -> String {
+        try await send(
+            system: system,
+            blocks: AIMessageContentBlock.blocks(images: images, text: userContent),
+            maxTokens: maxTokens
+        )
+    }
+
+    private func send(
+        system: String,
+        blocks: [AIMessageContentBlock],
+        maxTokens: Int
+    ) async throws -> String {
         let body = RequestBody(
             anthropic_version: "bedrock-2023-05-31",
             max_tokens: maxTokens,
             system: system,
-            messages: [Message(role: "user", content: userContent)]
+            messages: [Message(role: "user", content: blocks)]
         )
 
         let bodyData = try JSONEncoder().encode(body)
@@ -42,7 +65,17 @@ struct BedrockAPIClient: AIClient, Sendable {
 
         request = try signRequest(request: request, body: bodyData, host: host, path: path)
 
-        if let jsonObject = try? JSONSerialization.jsonObject(with: bodyData),
+        // Image requests skip the pretty JSON dump — base64 payloads would
+        // swamp the activity log. Log a size summary + prompt text instead.
+        let imageCount = blocks.count(where: { if case .image = $0 { true } else { false } })
+        if imageCount > 0 {
+            let text = blocks.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined(separator: "\n")
+            LogManager.send(
+                "Bedrock request payload (\(imageCount) images, \(bodyData.count / 1024) KB)",
+                category: .ai,
+                detail: text
+            )
+        } else if let jsonObject = try? JSONSerialization.jsonObject(with: bodyData),
            let pretty = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
            let prettyString = String(data: pretty, encoding: .utf8) {
             LogManager.send("Bedrock request payload", category: .ai, detail: prettyString)
@@ -191,7 +224,7 @@ struct BedrockAPIClient: AIClient, Sendable {
 
     private struct Message: Encodable {
         let role: String
-        let content: String
+        let content: [AIMessageContentBlock]
     }
 
     private struct APIResponse: Decodable {

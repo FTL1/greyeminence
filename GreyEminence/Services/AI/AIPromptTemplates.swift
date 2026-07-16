@@ -114,7 +114,28 @@ enum AIPromptTemplates {
         case .meetingInitial: defaultInitialAnalysisPrompt
         case .meetingRolling: defaultRollingAnalysisPrompt
         case .meetingFinal:   defaultFinalCleanupPrompt
+        case .screenSystem:   defaultScreenSystemPrompt
+        case .screenAnalysis: defaultScreenAnalysisPrompt
         }
+    }
+
+    // MARK: - Screen-frame analysis
+
+    static var screenSystemPrompt: String {
+        PromptStore.shared.get(.screenSystem, default: defaultScreenSystemPrompt)
+    }
+
+    static func screenAnalysisPrompt(
+        frameCount: Int,
+        frameManifest: String,
+        recentTopics: [String]
+    ) -> String {
+        let template = PromptStore.shared.get(.screenAnalysis, default: defaultScreenAnalysisPrompt)
+        return PromptStore.render(template, values: [
+            "frameCount": "\(frameCount)",
+            "frameManifest": frameManifest,
+            "recentTopics": recentTopics.isEmpty ? "(none yet)" : recentTopics.joined(separator: ", "),
+        ])
     }
 
     // MARK: - Helpers
@@ -366,5 +387,47 @@ enum AIPromptTemplates {
         {{fullTranscript}}
         {{relatedContext}}
         {{suppressionBlock}}
+        """
+
+    private static let defaultScreenSystemPrompt: String = """
+        You are analyzing screenshots of content shared on screen during a live \
+        meeting (slides, code, diagrams, dashboards, documents). For each image you \
+        receive, describe concisely what it shows so a meeting assistant can weave \
+        screen context into its notes.
+
+        You MUST respond with ONLY valid JSON matching this exact schema — no prose, \
+        no markdown, no explanation before or after:
+
+        {
+          "frames": [
+            {
+              "index": 0,
+              "observation": "1-2 sentences: what the frame shows, and what changed versus the previous frame when that's apparent",
+              "content_type": "slide|code|diagram|dashboard|document|terminal|video|other",
+              "key_entities": ["specific named things visible: systems, projects, tickets, people, metrics"],
+              "notable_text": "short verbatim text that carries meaning beyond the OCR excerpt you were given, or null"
+            }
+          ]
+        }
+
+        Rules:
+        - One entry per image, "index" matching the order the images were provided.
+        - Observations must be concrete ("Q3 roadmap slide showing auth-service GA \
+        slipping to November") — never generic ("a slide with text").
+        - Extract key_entities in canonical form; they feed cross-meeting search.
+        - If an image is unreadable or blank, say so in the observation and use \
+        content_type "other".
+        """
+
+    private static let defaultScreenAnalysisPrompt: String = """
+        {{frameCount}} screenshot(s) captured from a screen share during the meeting, \
+        in chronological order. For context, the meeting's topics so far: {{recentTopics}}
+
+        For each image, on-device OCR extracted the following text (may be partial \
+        or noisy — trust the image over the OCR):
+
+        {{frameManifest}}
+
+        Analyze each image and respond with the JSON schema from your instructions.
         """
 }

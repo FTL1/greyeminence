@@ -11,22 +11,56 @@ struct ClaudeAPIClient: AIClient, Sendable {
         self.model = model
     }
 
+    var supportsImages: Bool { true }
+
     func sendMessage(
         system: String,
         userContent: String,
         maxTokens: Int = 8192
     ) async throws -> String {
+        try await send(system: system, blocks: [.text(userContent)], maxTokens: maxTokens)
+    }
+
+    func sendMessage(
+        system: String,
+        userContent: String,
+        images: [AIImageContent],
+        maxTokens: Int
+    ) async throws -> String {
+        try await send(
+            system: system,
+            blocks: AIMessageContentBlock.blocks(images: images, text: userContent),
+            maxTokens: maxTokens
+        )
+    }
+
+    private func send(
+        system: String,
+        blocks: [AIMessageContentBlock],
+        maxTokens: Int
+    ) async throws -> String {
         let body = RequestBody(
             model: model,
             max_tokens: maxTokens,
             system: system,
-            messages: [Message(role: "user", content: userContent)]
+            messages: [Message(role: "user", content: blocks)]
         )
 
         let request = try buildRequest(body: body)
 
-        // Log outgoing payload
-        if let jsonData = request.httpBody,
+        // Log outgoing payload. Requests with images skip the pretty JSON
+        // dump — megabytes of base64 would swamp the activity log — and log
+        // a size summary plus the text prompt instead.
+        let imageCount = blocks.count(where: { if case .image = $0 { true } else { false } })
+        if imageCount > 0 {
+            let bytes = request.httpBody?.count ?? 0
+            let text = blocks.compactMap { if case .text(let t) = $0 { t } else { nil } }.joined(separator: "\n")
+            LogManager.send(
+                "API request payload (\(imageCount) images, \(bytes / 1024) KB)",
+                category: .ai,
+                detail: text
+            )
+        } else if let jsonData = request.httpBody,
            let jsonObject = try? JSONSerialization.jsonObject(with: jsonData),
            let pretty = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
            let prettyString = String(data: pretty, encoding: .utf8) {
@@ -95,7 +129,7 @@ struct ClaudeAPIClient: AIClient, Sendable {
 
     private struct Message: Encodable {
         let role: String
-        let content: String
+        let content: [AIMessageContentBlock]
     }
 
     // MARK: - Response Types

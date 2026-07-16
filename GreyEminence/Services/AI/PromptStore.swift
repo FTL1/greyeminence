@@ -7,6 +7,8 @@ enum PromptKey: String, CaseIterable, Identifiable, Sendable {
     case meetingInitial       = "meeting.initial"
     case meetingRolling       = "meeting.rolling"
     case meetingFinal         = "meeting.final"
+    case screenSystem         = "screen.system"
+    case screenAnalysis       = "screen.analysis"
 
     var id: String { rawValue }
 
@@ -16,6 +18,8 @@ enum PromptKey: String, CaseIterable, Identifiable, Sendable {
         case .meetingInitial: "Meeting — Initial Analysis"
         case .meetingRolling: "Meeting — Rolling Analysis"
         case .meetingFinal:   "Meeting — Final Cleanup"
+        case .screenSystem:   "Screen Share — System Prompt"
+        case .screenAnalysis: "Screen Share — Frame Analysis"
         }
     }
 
@@ -31,6 +35,10 @@ enum PromptKey: String, CaseIterable, Identifiable, Sendable {
             ["previousSummary", "previousActionItems", "previousFollowUps", "previousTopics", "newTranscript"]
         case .meetingFinal:
             ["fullTranscript", "currentSummary", "currentActionItems", "currentFollowUps", "currentTopics"]
+        case .screenSystem:
+            []
+        case .screenAnalysis:
+            ["frameCount", "frameManifest", "recentTopics"]
         }
     }
 }

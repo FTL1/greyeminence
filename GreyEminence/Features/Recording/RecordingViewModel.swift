@@ -110,6 +110,12 @@ final class RecordingViewModel {
     /// Frames received from the capture actor but not yet flushed into
     /// SwiftData rows, each stamped with its elapsed-seconds timestamp.
     private var pendingScreenFrames: [(frame: KeptFrame, timestamp: TimeInterval)] = []
+    /// Out-of-band vision analysis. `nil` when analysis is off, the AI is
+    /// unconfigured, or the client can't send images — capture still runs.
+    private var frameAnalysis: ScreenFrameAnalysisService?
+    /// Rolling log of Claude's frame observations, in arrival order. Feeds
+    /// the live UI and (M5) the transcript-intelligence injection.
+    private(set) var screenObservationLog: [ScreenFrameAnalysisService.FrameObservation] = []
 
     // Transcription
     private let coordinator = TranscriptionCoordinator()
@@ -634,6 +640,8 @@ final class RecordingViewModel {
 
         let service = intelligenceService
         intelligenceService = nil
+        let frameService = frameAnalysis
+        frameAnalysis = nil
 
         guard let meeting = currentMeeting else {
             // No meeting — just clean up
@@ -765,6 +773,23 @@ final class RecordingViewModel {
             // Navigate to completed meeting
             self.completedMeeting = meeting
 
+            // Best-effort final screen-frame batch — the last captured
+            // changes get their observations before the final transcript
+            // pass runs, so it can see them. Failure just leaves OCR-only
+            // frames.
+            if let frameService {
+                let batch = await frameService.analyzePendingBatch(recentTopics: resultTopics)
+                self.applyFrameAnalysis(batch, to: meeting)
+                if !batch.observations.isEmpty {
+                    PersistenceGate.save(
+                        modelContext,
+                        site: "stopRecording/frameObservations",
+                        critical: false,
+                        meetingID: meeting.id
+                    )
+                }
+            }
+
             // Try final AI analysis (may fail or return nil — that's OK)
             if let service {
                 do {
@@ -885,6 +910,9 @@ final class RecordingViewModel {
         screenShareLatestFrameAt = nil
         screenCaptureUserPaused = false
         pendingScreenFrames = []
+        frameAnalysis = nil
+        screenObservationLog = []
+        budgetRefusedFrameIDs = []
     }
 
     // MARK: - Screen-Share Capture
@@ -911,6 +939,78 @@ final class RecordingViewModel {
             }
         }
         processingTasks.append(task)
+        startScreenFrameAnalysis(meetingID: meetingID)
+    }
+
+    /// Build the vision analysis service and its cadence loop. Degrades to
+    /// capture-only (frames keep OCR text) when analysis is off, the AI is
+    /// unconfigured, or the provider can't send images.
+    private func startScreenFrameAnalysis(meetingID: UUID) {
+        guard ScreenShareSettings.analysisEnabled else { return }
+        let maxAnalyzed = ScreenShareSettings.maxAnalyzedFrames
+        let task = Task { [weak self] in
+            guard let client = try? await AIClientFactory.makeClient() else {
+                LogManager.send("Screen-frame analysis skipped: AI not configured", category: .screen, level: .warning, meetingID: meetingID)
+                return
+            }
+            guard client.supportsImages else {
+                LogManager.send("Screen-frame analysis skipped: \(client.modelIdentifier) has no image support", category: .screen, level: .warning, meetingID: meetingID)
+                return
+            }
+            let service = ScreenFrameAnalysisService(
+                client: client,
+                meetingID: meetingID,
+                maxAnalyzedPerMeeting: maxAnalyzed
+            )
+            await MainActor.run { self?.frameAnalysis = service }
+
+            // Offset from the transcript loop's 30s/45s cadence so screen
+            // observations land between rolling passes.
+            try? await Task.sleep(for: .seconds(60))
+            while !Task.isCancelled {
+                if await MainActor.run(body: { self?.state == .recording }) {
+                    let topics = await MainActor.run { self?.topics ?? [] }
+                    let result = await service.analyzePendingBatch(recentTopics: topics)
+                    await MainActor.run { self?.applyFrameAnalysis(result) }
+                }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        processingTasks.append(task)
+    }
+
+    /// Write a batch's outcomes onto the persisted rows and the observation
+    /// log. Rows are matched by frame ID; the 10s persistence loop has long
+    /// since flushed them by the time a 60s-cadence batch returns.
+    private func applyFrameAnalysis(_ result: ScreenFrameAnalysisService.BatchResult) {
+        guard let meeting = currentMeeting else { return }
+        applyFrameAnalysis(result, to: meeting)
+    }
+
+    private func applyFrameAnalysis(_ result: ScreenFrameAnalysisService.BatchResult, to meeting: Meeting) {
+        guard !result.observations.isEmpty || !result.failedIDs.isEmpty || !result.skippedIDs.isEmpty else { return }
+        var rowsByID: [UUID: ScreenShareFrame] = [:]
+        for row in meeting.screenFrames {
+            rowsByID[row.id] = row
+        }
+        for observation in result.observations {
+            guard let row = rowsByID[observation.frameID] else { continue }
+            row.observation = observation.observation
+            row.contentTypeRaw = observation.contentType
+            row.keyEntities = observation.keyEntities
+            row.analysisState = .analyzed
+            row.analysisModelIdentifier = aiModelIdentifier
+        }
+        for id in result.failedIDs {
+            rowsByID[id]?.analysisState = .failed
+        }
+        for id in result.skippedIDs {
+            rowsByID[id]?.analysisState = .skipped
+        }
+        screenObservationLog.append(contentsOf: result.observations)
+        if !result.observations.isEmpty {
+            log.log("Applied \(result.observations.count) screen observation(s)", category: .screen)
+        }
     }
 
     private func handleScreenCaptureEvent(_ event: ScreenCaptureEvent) {
@@ -928,6 +1028,7 @@ final class RecordingViewModel {
             screenShareFrameCount += 1
             screenShareLatestFramePath = frame.relativeImagePath
             screenShareLatestFrameAt = frame.capturedAt
+            enqueueForAnalysis(frame, elapsed: elapsed)
 
         case .frameDropped:
             break
@@ -970,6 +1071,37 @@ final class RecordingViewModel {
         }
     }
 
+    /// Hand a kept frame to the vision service. Budget refusals are recorded
+    /// so the row is flushed as `skipped` instead of `pendingVision`.
+    private func enqueueForAnalysis(_ frame: KeptFrame, elapsed: TimeInterval) {
+        guard let frameAnalysis else { return }
+        let snapshot = ScreenFrameAnalysisService.FrameSnapshot(
+            frameID: frame.id,
+            sessionID: frame.sessionID,
+            timestamp: elapsed,
+            formattedTimestamp: Self.formatElapsed(elapsed),
+            jpegData: frame.jpegData,
+            ocrExcerpt: frame.ocrText,
+            isVisualOnlyChange: frame.isVisualOnlyChange
+        )
+        Task { [weak self] in
+            let refused = await frameAnalysis.enqueue([snapshot])
+            if !refused.isEmpty {
+                await MainActor.run {
+                    self?.budgetRefusedFrameIDs.formUnion(refused)
+                }
+            }
+        }
+    }
+
+    private static func formatElapsed(_ elapsed: TimeInterval) -> String {
+        String(format: "%d:%02d", Int(elapsed) / 60, Int(elapsed) % 60)
+    }
+
+    /// Frame IDs the analysis service refused for budget — flushed as
+    /// `skipped` rows rather than leaving them `pendingVision` forever.
+    private var budgetRefusedFrameIDs: Set<UUID> = []
+
     /// Flush buffered frames into SwiftData rows on `meeting`. Runs inside
     /// the caller's save (periodic loop, stop, or termination flush) — this
     /// only appends rows, it does not save.
@@ -986,13 +1118,19 @@ final class RecordingViewModel {
                 windowTitle: frame.windowTitle,
                 ocrText: frame.ocrText,
                 dedupeHash: Int64(bitPattern: frame.dHash),
-                isVisualOnlyChange: frame.isVisualOnlyChange
+                isVisualOnlyChange: frame.isVisualOnlyChange,
+                analysisState: initialAnalysisState(for: frame.id)
             )
             row.meeting = meeting
             meeting.screenFrames.append(row)
         }
         log.log("Persisted \(pendingScreenFrames.count) screen frame(s) (total: \(meeting.screenFrames.count))", category: .screen)
         pendingScreenFrames = []
+    }
+
+    private func initialAnalysisState(for frameID: UUID) -> FrameAnalysisState {
+        if budgetRefusedFrameIDs.contains(frameID) { return .skipped }
+        return frameAnalysis != nil ? .pendingVision : .ocrOnly
     }
 
     func addManualNote() {
