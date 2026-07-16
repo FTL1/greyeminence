@@ -4,6 +4,7 @@ import Sparkle
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general
     case audio
+    case screenShare
     case ai
     case ask
     case vocabulary
@@ -19,6 +20,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "General"
         case .audio: "Audio"
+        case .screenShare: "Screen Share"
         case .ai: "AI"
         case .ask: "Ask"
         case .vocabulary: "Vocabulary"
@@ -34,6 +36,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: "gear"
         case .audio: "mic"
+        case .screenShare: "rectangle.dashed.badge.record"
         case .ai: "brain"
         case .ask: "sparkles.square.filled.on.square"
         case .vocabulary: "textformat.abc"
@@ -49,6 +52,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         switch self {
         case .general: .gray
         case .audio: .blue
+        case .screenShare: .mint
         case .ai: .purple
         case .ask: .pink
         case .vocabulary: .teal
@@ -105,6 +109,8 @@ struct SettingsView: View {
             GeneralSettingsView(updater: updater)
         case .audio:
             AudioSettingsView()
+        case .screenShare:
+            ScreenShareSettingsView()
         case .ai:
             APIKeySettingsView()
         case .ask:
