@@ -59,10 +59,15 @@ struct ScreenCaptureIndicator: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 140)
+                // Fixed-width counter: the chip lives in a ViewThatFits
+                // cluster, and a width change mid-recording can swap the
+                // cluster variant — tearing down sibling menu anchors. A
+                // stable frame up to 3 digits keeps ticks layout-neutral.
                 Text("\(viewModel.screenShareFrameCount)")
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: 24, alignment: .trailing)
             }
             .foregroundStyle(.cyan)
             .fixedSize(horizontal: false, vertical: true)

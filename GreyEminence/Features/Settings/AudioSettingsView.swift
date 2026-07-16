@@ -25,20 +25,12 @@ struct AudioSettingsView: View {
                         .frame(width: 36)
                 }
 
-                HStack(spacing: 2) {
-                    Text("Level")
-                        .font(.caption)
-                    ForEach(0..<20, id: \.self) { i in
-                        Rectangle()
-                            .fill(i < 14 ? .green : (i < 17 ? .yellow : .red))
-                            .frame(width: 8, height: 12)
-                            .opacity(Double(i) / 20.0 < Double(monitor.level) ? 1.0 : 0.2)
-                    }
-                    Text(String(format: "%.3f", monitor.level))
-                        .font(.caption)
-                        .fontDesign(.monospaced)
-                        .foregroundStyle(.secondary)
-                }
+                // Isolated subview: `monitor.level` updates on every audio
+                // buffer, and reading it in THIS body re-rendered the whole
+                // form dozens of times a second — rebuilding the Input Device
+                // picker's menu items while the menu was open and wedging the
+                // app in an orphaned menu-tracking loop.
+                MicLevelMeter(monitor: monitor)
             } header: {
                 Label("Microphone", systemImage: "mic")
                     .font(.subheadline.weight(.semibold))
@@ -116,6 +108,29 @@ struct AudioSettingsView: View {
         }
         .onChange(of: inputGain, initial: true) { _, newGain in
             monitor.gain = Float(newGain)
+        }
+    }
+}
+
+/// Level bars in their own view so the per-buffer `level` updates only
+/// invalidate this subtree — never the surrounding form and its picker.
+private struct MicLevelMeter: View {
+    let monitor: MicLevelMonitor
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Text("Level")
+                .font(.caption)
+            ForEach(0..<20, id: \.self) { i in
+                Rectangle()
+                    .fill(i < 14 ? .green : (i < 17 ? .yellow : .red))
+                    .frame(width: 8, height: 12)
+                    .opacity(Double(i) / 20.0 < Double(monitor.level) ? 1.0 : 0.2)
+            }
+            Text(String(format: "%.3f", monitor.level))
+                .font(.caption)
+                .fontDesign(.monospaced)
+                .foregroundStyle(.secondary)
         }
     }
 }
