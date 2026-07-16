@@ -171,6 +171,19 @@ actor ScreenShareCaptureService {
         return Self.candidates(from: content.windows).sorted { $0.score > $1.score }
     }
 
+    /// Small one-off screenshot of a candidate window for the picker grid.
+    func thumbnail(for windowID: CGWindowID, maxPixel: CGFloat = 400) async -> CGImage? {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false),
+              let window = content.windows.first(where: { $0.windowID == windowID }) else { return nil }
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        let scale = min(1, maxPixel / max(window.frame.width, window.frame.height, 1))
+        configuration.width = max(Int(window.frame.width * scale), 1)
+        configuration.height = max(Int(window.frame.height * scale), 1)
+        configuration.showsCursor = false
+        return try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
     private func stopInternal(reason: SessionEndReason) {
         if let sessionID = currentSessionID {
             endSession(sessionID, reason: reason)

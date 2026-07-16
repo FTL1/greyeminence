@@ -99,6 +99,13 @@ final class RecordingViewModel {
     /// Plausible share windows from the last discovery poll, best first —
     /// drives the manual picker (M3).
     private(set) var screenShareCandidates: [WindowCandidate] = []
+    /// Relative path + capture time of the newest kept frame, for the
+    /// toolbar popover preview.
+    private(set) var screenShareLatestFramePath: String?
+    private(set) var screenShareLatestFrameAt: Date?
+    /// True when the user paused capture from the popover (independent of
+    /// recording pause — resuming the recording must not undo it).
+    private(set) var screenCaptureUserPaused = false
     let screenCapture = ScreenShareCaptureService()
     /// Frames received from the capture actor but not yet flushed into
     /// SwiftData rows, each stamped with its elapsed-seconds timestamp.
@@ -512,10 +519,13 @@ final class RecordingViewModel {
         }
         state = .recording
         startTimer()
+        let keepScreenCapturePaused = screenCaptureUserPaused
         Task {
             await micCapture.resumeCapture()
             await systemCapture.resumeCapture()
-            await screenCapture.resume()
+            if !keepScreenCapturePaused {
+                await screenCapture.resume()
+            }
         }
         log.log("Recording resumed", category: .audio)
     }
@@ -871,6 +881,9 @@ final class RecordingViewModel {
         screenCaptureState = .off
         screenShareFrameCount = 0
         screenShareCandidates = []
+        screenShareLatestFramePath = nil
+        screenShareLatestFrameAt = nil
+        screenCaptureUserPaused = false
         pendingScreenFrames = []
     }
 
@@ -913,6 +926,8 @@ final class RecordingViewModel {
             let elapsed = max(0, frame.capturedAt.timeIntervalSince(start) - accumulatedPauseDuration)
             pendingScreenFrames.append((frame, elapsed))
             screenShareFrameCount += 1
+            screenShareLatestFramePath = frame.relativeImagePath
+            screenShareLatestFrameAt = frame.capturedAt
 
         case .frameDropped:
             break
@@ -928,6 +943,30 @@ final class RecordingViewModel {
 
         case .candidatesChanged(let candidates):
             screenShareCandidates = candidates
+        }
+    }
+
+    /// Popover control: pause/resume frame capture without touching the
+    /// recording itself. Recording-pause also suspends capture, so resuming
+    /// the recording re-suspends when the user's own pause is still active
+    /// (see `resumeRecording`).
+    func toggleScreenCapturePause() {
+        screenCaptureUserPaused.toggle()
+        let paused = screenCaptureUserPaused
+        Task {
+            if paused {
+                await screenCapture.suspend()
+            } else if state == .recording {
+                await screenCapture.resume()
+            }
+        }
+    }
+
+    /// Manual window selection from the picker sheet. `nil` returns to
+    /// auto-detect.
+    func selectShareWindow(_ windowID: CGWindowID?) {
+        Task {
+            await screenCapture.selectWindow(windowID)
         }
     }
 

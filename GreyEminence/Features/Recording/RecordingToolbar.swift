@@ -92,10 +92,16 @@ struct RecordingToolbar: View {
                     HStack(spacing: 10) {
                         audioMeters
                         segmentCount
+                        ScreenCaptureIndicator(viewModel: viewModel)
                         AIActivityIndicator(state: viewModel.aiActivityState)
                     }
                     HStack(spacing: 10) {
                         segmentCount
+                        ScreenCaptureIndicator(viewModel: viewModel)
+                        AIActivityIndicator(state: viewModel.aiActivityState)
+                    }
+                    HStack(spacing: 10) {
+                        ScreenCaptureIndicator(viewModel: viewModel)
                         AIActivityIndicator(state: viewModel.aiActivityState)
                     }
                     AIActivityIndicator(state: viewModel.aiActivityState)
