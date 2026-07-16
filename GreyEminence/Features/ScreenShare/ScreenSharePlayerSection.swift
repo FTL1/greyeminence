@@ -180,6 +180,7 @@ struct ScreenSharePlayerSection: View {
             }
             Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(.white.opacity(0.92))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

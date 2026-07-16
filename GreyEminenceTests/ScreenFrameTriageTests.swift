@@ -234,6 +234,18 @@ final class ScreenFrameTriageTests: XCTestCase {
         XCTAssertEqual(score, 0)
     }
 
+    func testUntitledTeamsWindowIsNeverAutoSelected() {
+        // Share overlays and placeholder windows often carry no title —
+        // they must stay picker-only (a blank capture is worse than none).
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "",
+            bundleID: "com.microsoft.teams2",
+            frame: CGRect(x: 0, y: 0, width: 1400, height: 900)
+        )
+        XCTAssertGreaterThan(score, 0)
+        XCTAssertLessThan(score, 100)
+    }
+
     func testClassicTeamsBundleAlsoRecognized() {
         let score = ScreenShareCaptureService.scoreWindow(
             title: "Screen sharing",

@@ -232,6 +232,10 @@ actor ScreenShareCaptureService {
             handleDiscoveryFailure(error)
             return
         }
+        // The recording may have stopped while we were suspended on the
+        // SCShareableContent fetch — a session started now would be a
+        // zombie logged after "recording stopped".
+        guard continuation != nil else { return }
 
         let candidates = Self.candidates(from: content.windows)
         reportCandidatesIfChanged(candidates)
@@ -304,6 +308,15 @@ actor ScreenShareCaptureService {
         guard ids != lastReportedCandidateIDs else { return }
         lastReportedCandidateIDs = ids
         continuation?.yield(.candidatesChanged(plausible))
+        // Spike diagnostics: log what Teams exposes so the title heuristics
+        // can be tuned from real data (remove once patterns are confirmed).
+        for candidate in plausible {
+            LogManager.send(
+                "Share candidate: \"\(candidate.title)\" (\(candidate.appName), \(Int(candidate.frame.width))×\(Int(candidate.frame.height)), score \(candidate.score))",
+                category: .screen,
+                meetingID: meetingID
+            )
+        }
     }
 
     // MARK: Scoring (pure — unit-tested via scoreWindow)
@@ -311,14 +324,19 @@ actor ScreenShareCaptureService {
     static func candidates(from windows: [SCWindow]) -> [WindowCandidate] {
         windows.compactMap { window in
             guard let app = window.owningApplication else { return nil }
+            // Real, visible, normal-level windows only. This excludes hidden
+            // Electron helper windows AND share overlays like Teams' red
+            // screen-share border — a full-screen transparent window that
+            // captures as a blank frame (observed in testing 2026-07-16).
+            guard window.isOnScreen, window.windowLayer == 0 else { return nil }
+            // Windows failing the size floor are never candidates at all.
+            guard window.frame.width >= 300, window.frame.height >= 200 else { return nil }
             let title = window.title ?? ""
             let score = scoreWindow(
                 title: title,
                 bundleID: app.bundleIdentifier,
                 frame: window.frame
             )
-            // Windows failing the size floor are never candidates at all.
-            guard window.frame.width >= 300, window.frame.height >= 200 else { return nil }
             return WindowCandidate(
                 id: window.windowID,
                 title: title,
@@ -342,14 +360,14 @@ actor ScreenShareCaptureService {
 
         if shareTitlePatterns.contains(where: { lower.contains($0) }) {
             score += 100
-        } else if mainWindowPatterns.contains(where: { lower.contains($0) }) {
-            // The main meeting/chat window — plausible for the picker but
-            // never auto-selected.
+        } else if lower.isEmpty || mainWindowPatterns.contains(where: { lower.contains($0) }) {
+            // The main meeting/chat window, or an untitled window (overlays,
+            // placeholders) — plausible for the picker, never auto-selected.
             score -= 40
         } else {
-            // Teams window with an unrecognized title: the pop-out content
-            // window often carries just the shared app/monitor name, so an
-            // unbranded title is itself a share signal.
+            // Teams window with an unrecognized real title: the pop-out
+            // content window often carries just the shared app/monitor name,
+            // so an unbranded title is itself a share signal.
             score += 40
         }
         return score
