@@ -100,6 +100,10 @@ struct ContentView: View {
             ReProcessingStatusBar()
             TransientActivityStatusBar()
         }
+        .overlay(alignment: .top) {
+            DevBuildBanner()
+                .padding(.top, 4)
+        }
         .toolbar {
             if selectedDestination == .meetings || selectedDestination == .archive || selectedDestination == .recording || selectedDestination == .interviews {
                 ToolbarItem(placement: .primaryAction) {
