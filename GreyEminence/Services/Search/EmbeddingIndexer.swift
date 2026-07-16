@@ -89,7 +89,40 @@ final class EmbeddingIndexer {
             }
         }
 
+        for frame in snapshot.screenFrames {
+            guard let text = Self.frameEmbeddingText(observation: frame.observation, ocrText: frame.ocrText) else { continue }
+            guard let vec = await service.embed("Meeting: \(snapshot.title) — screen share\n\(text)") else { continue }
+            let record = EmbeddingRecord(
+                id: "frame:\(frame.id)",
+                sourceID: frame.id,
+                sourceKind: .screenObservation,
+                meetingID: snapshot.id,
+                meetingTitle: snapshot.title,
+                meetingDate: snapshot.date,
+                text: text,
+                vector: vec,
+                modelIdentifier: service.modelIdentifier
+            )
+            store.upsert(record)
+        }
+
         store.save()
+    }
+
+    /// What gets embedded for a frame: the observation (semantics) plus an
+    /// OCR excerpt (literal tokens — ticket numbers, identifiers). OCR-only
+    /// frames qualify when the text is substantial enough to be meaningful.
+    static func frameEmbeddingText(observation: String?, ocrText: String?) -> String? {
+        let ocrExcerpt = ocrText.map { String($0.prefix(300)) }
+        if let observation, !observation.isEmpty {
+            if let ocrExcerpt, !ocrExcerpt.isEmpty {
+                return "\(observation)\n\(ocrExcerpt)"
+            }
+            return observation
+        }
+        guard let ocrExcerpt,
+              ocrExcerpt.trimmingCharacters(in: .whitespacesAndNewlines).count >= 20 else { return nil }
+        return ocrExcerpt
     }
 
     private struct MeetingSnapshot {
@@ -99,6 +132,7 @@ final class EmbeddingIndexer {
         let segments: [TranscriptSegment]
         let actionItems: [ActionSnapshot]
         let insights: [InsightSnapshot]
+        let screenFrames: [FrameSnapshot]
 
         init(meeting: Meeting) {
             self.id = meeting.id
@@ -112,7 +146,16 @@ final class EmbeddingIndexer {
             self.insights = meeting.insights.map {
                 InsightSnapshot(id: $0.id, summary: $0.summary, followUpQuestions: $0.followUpQuestions)
             }
+            self.screenFrames = meeting.screenFrames.map {
+                FrameSnapshot(id: $0.id, observation: $0.observation, ocrText: $0.ocrText)
+            }
         }
+    }
+
+    private struct FrameSnapshot {
+        let id: UUID
+        let observation: String?
+        let ocrText: String?
     }
 
     private struct ActionSnapshot {

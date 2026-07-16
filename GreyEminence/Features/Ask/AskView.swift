@@ -306,10 +306,20 @@ struct AskView: View {
                     .font(.caption.monospacedDigit().weight(.medium))
                     .foregroundStyle(scoreColor(result.score))
             }
-            Text(result.text)
-                .font(.callout)
-                .lineLimit(3)
-                .foregroundStyle(.primary)
+            if result.sourceKind == .screenObservation {
+                HStack(alignment: .top, spacing: 8) {
+                    ScreenResultThumb(frameID: result.sourceID, meetingID: result.meetingID)
+                    Text(result.text)
+                        .font(.callout)
+                        .lineLimit(3)
+                        .foregroundStyle(.primary)
+                }
+            } else {
+                Text(result.text)
+                    .font(.callout)
+                    .lineLimit(3)
+                    .foregroundStyle(.primary)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -322,6 +332,7 @@ struct AskView: View {
         case .actionItem: "TASK"
         case .followUpQuestion: "QUESTION"
         case .meetingSummary: "SUMMARY"
+        case .screenObservation: "SCREEN"
         }
     }
 
@@ -331,6 +342,7 @@ struct AskView: View {
         case .actionItem: .orange
         case .followUpQuestion: .teal
         case .meetingSummary: .purple
+        case .screenObservation: .cyan
         }
     }
 
@@ -354,6 +366,49 @@ struct AskView: View {
                 contextWindow: contextWindow,
                 dateFilter: dateFilter
             )
+        }
+    }
+}
+
+/// Small thumbnail for a screen-observation search hit. Resolves the frame
+/// row at render time (imagePath isn't stored in the embedding record) and
+/// falls back to a placeholder when the frame or file is gone.
+private struct ScreenResultThumb: View {
+    let frameID: UUID
+    let meetingID: UUID
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var image: CGImage?
+    @State private var missing = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(.quaternary)
+            if let image {
+                Image(decorative: image, scale: 2)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 48, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                Image(systemName: missing ? "photo.badge.exclamationmark" : "photo")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(width: 48, height: 30)
+        .task(id: frameID) {
+            let id = frameID
+            var descriptor = FetchDescriptor<ScreenShareFrame>(predicate: #Predicate { $0.id == id })
+            descriptor.fetchLimit = 1
+            guard let frame = try? modelContext.fetch(descriptor).first else {
+                missing = true
+                return
+            }
+            let url = StorageManager.shared.frameURL(for: meetingID, relativePath: frame.imagePath)
+            image = await FrameThumbnailCache.shared.thumbnail(at: url, size: .strip)
+            missing = image == nil
         }
     }
 }

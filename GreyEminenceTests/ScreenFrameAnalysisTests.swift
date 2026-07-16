@@ -96,3 +96,35 @@ final class ScreenFrameAnalysisTests: XCTestCase {
         XCTAssertTrue(parsed.isEmpty)
     }
 }
+
+/// Embedding-text construction for screen frames.
+final class ScreenFrameEmbeddingTests: XCTestCase {
+    @MainActor
+    func testObservationPlusOCR() {
+        let text = EmbeddingIndexer.frameEmbeddingText(observation: "Roadmap slide", ocrText: "Q3 Roadmap\nAuth GA Nov")
+        XCTAssertEqual(text, "Roadmap slide\nQ3 Roadmap\nAuth GA Nov")
+    }
+
+    @MainActor
+    func testObservationOnly() {
+        XCTAssertEqual(EmbeddingIndexer.frameEmbeddingText(observation: "Roadmap slide", ocrText: nil), "Roadmap slide")
+    }
+
+    @MainActor
+    func testOCROnlyRequiresSubstance() {
+        XCTAssertNil(EmbeddingIndexer.frameEmbeddingText(observation: nil, ocrText: "menu file"))
+        XCTAssertNotNil(EmbeddingIndexer.frameEmbeddingText(observation: nil, ocrText: "A meaningful chunk of on-screen text content"))
+    }
+
+    @MainActor
+    func testNothingYieldsNil() {
+        XCTAssertNil(EmbeddingIndexer.frameEmbeddingText(observation: nil, ocrText: nil))
+    }
+
+    @MainActor
+    func testLongOCRIsCapped() {
+        let long = String(repeating: "x", count: 1000)
+        let text = EmbeddingIndexer.frameEmbeddingText(observation: "obs", ocrText: long)
+        XCTAssertEqual(text?.count, "obs\n".count + 300)
+    }
+}

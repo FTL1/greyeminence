@@ -11,6 +11,8 @@ final class EmbeddingRecord {
         case actionItem
         case followUpQuestion
         case meetingSummary
+        /// A screen-share frame's AI observation + OCR excerpt.
+        case screenObservation
     }
 
     /// Stable composite id, e.g. "segment:<uuid>" — lets us upsert in place

@@ -542,6 +542,16 @@ struct ContentView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             pendingScrollSegmentID = result.sourceID
                         }
+                    } else if result.sourceKind == .screenObservation {
+                        // Resolve the frame's timestamp at click time (the
+                        // embedding record doesn't carry it) and seek the
+                        // screen-share player there once the view mounts.
+                        let timestamp = meeting.screenFrames.first(where: { $0.id == result.sourceID })?.timestamp
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            if let timestamp {
+                                pendingSeekTime = timestamp
+                            }
+                        }
                     }
                 }
             })

@@ -135,6 +135,14 @@ enum ObsidianExportService {
             lines.append("")
         }
 
+        // Shared Content — observation text + timestamps only (images stay
+        // in the app container; copying them into the vault is a bloat and
+        // sync-conflict magnet, revisit as an opt-in later).
+        let sharedContentLines = sharedContentSection(frames: meeting.screenFrames)
+        if !sharedContentLines.isEmpty {
+            lines.append(contentsOf: sharedContentLines)
+        }
+
         // Transcript
         if includeTranscript {
             let sorted = meeting.segments.sorted { $0.startTime < $1.startTime }
@@ -149,6 +157,50 @@ enum ObsidianExportService {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// "## Shared Content" — one subsection per share session, one line per
+    /// frame that has something to say (observation, or OCR first line as a
+    /// fallback). Empty array when the meeting captured nothing.
+    @MainActor
+    private static func sharedContentSection(frames: [ScreenShareFrame]) -> [String] {
+        guard !frames.isEmpty else { return [] }
+        let sessions = ShareSession.sessions(from: frames)
+        let bySession = Dictionary(grouping: frames, by: \.sessionID)
+
+        var lines: [String] = ["## Shared Content", ""]
+        var wroteAnySession = false
+        for (index, session) in sessions.enumerated() {
+            let sessionFrames = (bySession[session.id] ?? []).sorted { $0.timestamp < $1.timestamp }
+            var entryLines: [String] = []
+            var seen = Set<String>()
+            for frame in sessionFrames {
+                if let observation = frame.observation, !observation.isEmpty {
+                    guard seen.insert(observation).inserted else { continue }
+                    entryLines.append("- **[\(frame.formattedTimestamp)]** \(observation)")
+                } else if let firstLine = frame.ocrText?.components(separatedBy: "\n").first,
+                          !firstLine.trimmingCharacters(in: .whitespaces).isEmpty {
+                    guard seen.insert(firstLine).inserted else { continue }
+                    entryLines.append("- **[\(frame.formattedTimestamp)]** (on screen) \(firstLine)")
+                }
+            }
+            let start = formatTimestamp(session.startTime)
+            let end = formatTimestamp(session.endTime)
+            lines.append("### Share session \(index + 1) (\(start)–\(end))")
+            lines.append("")
+            if entryLines.isEmpty {
+                lines.append("_\(session.frameCount) frame(s) captured — no readable content._")
+            } else {
+                lines.append(contentsOf: entryLines)
+            }
+            lines.append("")
+            wroteAnySession = true
+        }
+        return wroteAnySession ? lines : []
+    }
+
+    private static func formatTimestamp(_ time: TimeInterval) -> String {
+        String(format: "%d:%02d", Int(time) / 60, Int(time) % 60)
     }
 
     // MARK: - Helpers
