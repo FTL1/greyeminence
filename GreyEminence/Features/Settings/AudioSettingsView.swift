@@ -118,19 +118,28 @@ private struct MicLevelMeter: View {
     let monitor: MicLevelMonitor
 
     var body: some View {
-        HStack(spacing: 2) {
-            Text("Level")
-                .font(.caption)
-            ForEach(0..<20, id: \.self) { i in
-                Rectangle()
-                    .fill(i < 14 ? .green : (i < 17 ? .yellow : .red))
-                    .frame(width: 8, height: 12)
-                    .opacity(Double(i) / 20.0 < Double(monitor.level) ? 1.0 : 0.2)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 2) {
+                Text("Level")
+                    .font(.caption)
+                ForEach(0..<20, id: \.self) { i in
+                    Rectangle()
+                        .fill(i < 14 ? .green : (i < 17 ? .yellow : .red))
+                        .frame(width: 8, height: 12)
+                        .opacity(Double(i) / 20.0 < Double(monitor.level) ? 1.0 : 0.2)
+                }
+                Text(String(format: "%.3f", monitor.level))
+                    .font(.caption)
+                    .fontDesign(.monospaced)
+                    .foregroundStyle(.secondary)
             }
-            Text(String(format: "%.3f", monitor.level))
-                .font(.caption)
-                .fontDesign(.monospaced)
-                .foregroundStyle(.secondary)
+            .opacity(monitor.statusMessage == nil ? 1 : 0.4)
+
+            if let status = monitor.statusMessage {
+                Label(status, systemImage: "pause.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 }

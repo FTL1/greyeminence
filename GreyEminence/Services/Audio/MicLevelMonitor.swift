@@ -9,15 +9,37 @@ extension Notification.Name {
     static let geMicCaptureDidEnd = Notification.Name("ge.mic.capture.didEnd")
 }
 
+/// Process-wide "a recording owns the microphone" flag. The notifications
+/// above only reach monitors that exist when they fire — a monitor created
+/// AFTER a recording started (opening Audio settings mid-recording) missed
+/// them, started a second engine on the same device, and metered silence
+/// forever. New monitors consult this flag instead.
+enum MicCaptureGate {
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var active = false
+
+    static var isActive: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return active
+    }
+
+    static func set(_ value: Bool) {
+        lock.lock(); active = value; lock.unlock()
+    }
+}
+
 @Observable
 @MainActor
 final class MicLevelMonitor {
     var level: Float = 0
     var gain: Float = 1.0
+    /// Why the meter isn't metering, for the settings UI. `nil` while live.
+    private(set) var statusMessage: String?
 
     private var audioEngine: AVAudioEngine?
     private var isMonitoring = false
     private var pausedDeviceUID: String?
+    private var retryTask: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
     init() {
@@ -50,7 +72,20 @@ final class MicLevelMonitor {
     }
 
     func startMonitoring(deviceUID: String? = nil) {
+        startMonitoring(deviceUID: deviceUID, isRetry: false)
+    }
+
+    private func startMonitoring(deviceUID: String?, isRetry: Bool) {
         stopMonitoring()
+
+        // A live recording owns the input device — a second engine would
+        // meter silence AND risk starving the recording's tap. Defer: the
+        // capture-did-end notification resumes us.
+        guard !MicCaptureGate.isActive else {
+            pausedDeviceUID = deviceUID ?? ""
+            statusMessage = "Level meter is paused while a recording is using the microphone"
+            return
+        }
 
         let engine = AVAudioEngine()
 
@@ -61,7 +96,22 @@ final class MicLevelMonitor {
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
 
-        guard format.sampleRate > 0, format.channelCount > 0 else { return }
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            // USB mics can report a 0 Hz format while warming up after a
+            // device switch. Retry once before declaring the meter dead.
+            if isRetry {
+                statusMessage = "Input device isn't producing audio — try re-selecting it"
+                LogManager.send("Mic level monitor: input format still invalid after retry", category: .audio, level: .warning)
+            } else {
+                statusMessage = "Waiting for the input device…"
+                retryTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard let self, !Task.isCancelled else { return }
+                    self.startMonitoring(deviceUID: deviceUID, isRetry: true)
+                }
+            }
+            return
+        }
 
         // Handler is @Sendable so the closure doesn't inherit MainActor isolation
         Self.installMeterTap(on: inputNode, format: format) { [weak self] rms in
@@ -76,12 +126,17 @@ final class MicLevelMonitor {
             try engine.start()
             audioEngine = engine
             isMonitoring = true
+            statusMessage = nil
         } catch {
             engine.inputNode.removeTap(onBus: 0)
+            statusMessage = "Level meter couldn't start: \(error.localizedDescription)"
+            LogManager.send("Mic level monitor failed to start: \(error.localizedDescription)", category: .audio, level: .warning)
         }
     }
 
     func stopMonitoring() {
+        retryTask?.cancel()
+        retryTask = nil
         guard isMonitoring else { return }
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()

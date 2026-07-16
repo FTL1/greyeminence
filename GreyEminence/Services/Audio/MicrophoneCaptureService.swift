@@ -37,6 +37,7 @@ actor MicrophoneCaptureService {
         // Tell any other AVAudioEngine in the process (e.g. the Settings
         // mic-level monitor) to release the input device. Two engines tapping
         // the same input deliver silence to whichever started second on macOS.
+        MicCaptureGate.set(true)
         NotificationCenter.default.post(name: .geMicCaptureWillStart, object: nil)
         // Brief yield so observers process the notification before we claim the device.
         Thread.sleep(forTimeInterval: 0.05)
@@ -148,6 +149,7 @@ actor MicrophoneCaptureService {
         continuation?.finish()
         continuation = nil
         isCapturing = false
+        MicCaptureGate.set(false)
         NotificationCenter.default.post(name: .geMicCaptureDidEnd, object: nil)
         LogManager.send("Microphone capture stopped", category: .audio)
     }
