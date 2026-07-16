@@ -114,8 +114,11 @@ final class RecordingViewModel {
     /// unconfigured, or the client can't send images — capture still runs.
     private var frameAnalysis: ScreenFrameAnalysisService?
     /// Rolling log of Claude's frame observations, in arrival order. Feeds
-    /// the live UI and (M5) the transcript-intelligence injection.
+    /// the live UI and the transcript-intelligence injection.
     private(set) var screenObservationLog: [ScreenFrameAnalysisService.FrameObservation] = []
+    /// How much of `screenObservationLog` the rolling analysis has already
+    /// seen — advances only after a successful pass.
+    private var lastSentObservationIndex = 0
 
     // Transcription
     private let coordinator = TranscriptionCoordinator()
@@ -761,6 +764,7 @@ final class RecordingViewModel {
             var resultTopics = self.topics
             var resultRaw = self.latestRawResponse
             let modelID = self.aiModelIdentifier
+            var observationsAtStop = self.screenObservationLog
 
             // The transcript is durable and the rolling insights are captured,
             // and the audio actors are stopped — so the live view-model state is
@@ -780,6 +784,7 @@ final class RecordingViewModel {
             if let frameService {
                 let batch = await frameService.analyzePendingBatch(recentTopics: resultTopics)
                 self.applyFrameAnalysis(batch, to: meeting)
+                observationsAtStop.append(contentsOf: batch.observations)
                 if !batch.observations.isEmpty {
                     PersistenceGate.save(
                         modelContext,
@@ -794,7 +799,11 @@ final class RecordingViewModel {
             if let service {
                 do {
                     let roster = MeetingRoster.snapshot(for: meeting)
-                    if let result = try await service.performFinalAnalysis(segments: finalSnapshots, roster: roster) {
+                    if let result = try await service.performFinalAnalysis(
+                        segments: finalSnapshots,
+                        roster: roster,
+                        screenObservations: ScreenObservationFormatter.finalBlock(observationsAtStop)
+                    ) {
                         resultSummary = result.summary
                         resultActionItems = result.actionItems.map { parsed in
                             ActionItem(parsed: parsed, sourceSegments: meeting.segments)
@@ -912,6 +921,7 @@ final class RecordingViewModel {
         pendingScreenFrames = []
         frameAnalysis = nil
         screenObservationLog = []
+        lastSentObservationIndex = 0
         budgetRefusedFrameIDs = []
     }
 
@@ -985,8 +995,11 @@ final class RecordingViewModel {
     private func applyFrameAnalysis(_ result: ScreenFrameAnalysisService.BatchResult) {
         guard let meeting = currentMeeting else { return }
         applyFrameAnalysis(result, to: meeting)
+        screenObservationLog.append(contentsOf: result.observations)
     }
 
+    /// Row-only application — does NOT touch the live observation log, so
+    /// the stop path can apply its final batch after live state is reset.
     private func applyFrameAnalysis(_ result: ScreenFrameAnalysisService.BatchResult, to meeting: Meeting) {
         guard !result.observations.isEmpty || !result.failedIDs.isEmpty || !result.skippedIDs.isEmpty else { return }
         var rowsByID: [UUID: ScreenShareFrame] = [:]
@@ -1007,7 +1020,6 @@ final class RecordingViewModel {
         for id in result.skippedIDs {
             rowsByID[id]?.analysisState = .skipped
         }
-        screenObservationLog.append(contentsOf: result.observations)
         if !result.observations.isEmpty {
             log.log("Applied \(result.observations.count) screen observation(s)", category: .screen)
         }
@@ -1488,8 +1500,22 @@ final class RecordingViewModel {
                     self.log.log("AI sending \(snapshots.count) segments to Claude API", category: .ai)
                 }
 
+                // New screen observations since the last successful pass.
+                // The index only advances on success, so a failed pass
+                // re-sends its observations next time.
+                let observationBatch = await MainActor.run {
+                    ScreenObservationFormatter.rollingBlock(
+                        self.screenObservationLog,
+                        afterIndex: self.lastSentObservationIndex
+                    )
+                }
+
                 do {
-                    if let result = try await service.analyze(segments: snapshots, roster: roster) {
+                    if let result = try await service.analyze(
+                        segments: snapshots,
+                        roster: roster,
+                        screenObservations: observationBatch?.block
+                    ) {
                         await MainActor.run {
                             self.streamingSummary = result.summary
                             self.actionItems = result.actionItems.map { parsed in
@@ -1498,6 +1524,9 @@ final class RecordingViewModel {
                             self.followUpQuestions = result.followUps
                             self.topics = result.topics
                             self.latestRawResponse = result.rawResponse
+                            if let observationBatch {
+                                self.lastSentObservationIndex = observationBatch.endIndex
+                            }
                             self.log.log("AI analysis complete (\(result.actionItems.count) actions, \(result.topics.count) topics)", category: .ai)
                         }
                     }

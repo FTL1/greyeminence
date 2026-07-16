@@ -41,7 +41,11 @@ struct RecordingView: View {
                     actionItems: viewModel.actionItems,
                     followUpQuestions: viewModel.followUpQuestions,
                     topics: viewModel.topics,
-                    aiActivityState: viewModel.aiActivityState
+                    aiActivityState: viewModel.aiActivityState,
+                    shareObservations: viewModel.screenObservationLog,
+                    isCapturingShare: {
+                        if case .capturing = viewModel.screenCaptureState { true } else { false }
+                    }()
                 )
             }
 

@@ -120,7 +120,10 @@ actor AIIntelligenceService {
         AIPromptTemplates.systemPromptWithContext(prep: prepContext, roster: roster)
     }
 
-    func analyze(segments: [SegmentSnapshot], roster: MeetingRoster? = nil) async throws -> AnalysisResult? {
+    /// `screenObservations` is a pre-rendered block of screen-share
+    /// observations (new-since-last-pass for rolling calls) — appended after
+    /// the rendered template so user prompt overrides keep working untouched.
+    func analyze(segments: [SegmentSnapshot], roster: MeetingRoster? = nil, screenObservations: String? = nil) async throws -> AnalysisResult? {
         let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard nonEmpty.count > lastAnalyzedSegmentCount else {
             return nil
@@ -130,7 +133,7 @@ actor AIIntelligenceService {
         guard !newSegments.isEmpty else { return nil }
 
         let transcript: String
-        let userPrompt: String
+        var userPrompt: String
 
         if previousSummary.isEmpty {
             transcript = AIPromptTemplates.formatSegments(Array(nonEmpty))
@@ -147,6 +150,7 @@ actor AIIntelligenceService {
                 suppressedFollowUps: suppressedFollowUps
             )
         }
+        userPrompt += AIPromptTemplates.screenObservationBlock(screenObservations)
 
         LogManager.send("AI analysis starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
         let capturedMeetingID = meetingID
@@ -190,14 +194,16 @@ actor AIIntelligenceService {
         )
     }
 
-    func performFinalAnalysis(segments: [SegmentSnapshot], roster: MeetingRoster? = nil) async throws -> AnalysisResult? {
+    /// `screenObservations` is the full session-grouped observation block for
+    /// the meeting (see `ScreenObservationFormatter.finalBlock`).
+    func performFinalAnalysis(segments: [SegmentSnapshot], roster: MeetingRoster? = nil, screenObservations: String? = nil) async throws -> AnalysisResult? {
         let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !nonEmpty.isEmpty else { return nil }
 
         // Single final pass with the full transcript. If we have prior accumulated context,
         // use the cleanup prompt; otherwise fall back to initial analysis.
         guard !previousSummary.isEmpty else {
-            return try await analyze(segments: segments, roster: roster)
+            return try await analyze(segments: segments, roster: roster, screenObservations: screenObservations)
         }
 
         // Related discussions from other meetings, retrieved with the topics
@@ -213,7 +219,7 @@ actor AIIntelligenceService {
 
         // Final cleanup pass: send full transcript + all accumulated insights
         let fullTranscript = AIPromptTemplates.formatSegments(nonEmpty)
-        let userPrompt = AIPromptTemplates.finalCleanupPrompt(
+        var userPrompt = AIPromptTemplates.finalCleanupPrompt(
             fullTranscript: fullTranscript,
             currentSummary: previousSummary,
             currentActionItems: previousActionItems,
@@ -223,6 +229,7 @@ actor AIIntelligenceService {
             suppressedFollowUps: suppressedFollowUps,
             relatedContext: relatedContext
         )
+        userPrompt += AIPromptTemplates.screenObservationBlock(screenObservations)
 
         LogManager.send("AI final cleanup starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
         let capturedMeetingID = meetingID

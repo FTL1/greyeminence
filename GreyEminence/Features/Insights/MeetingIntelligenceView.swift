@@ -282,6 +282,8 @@ struct LiveMeetingIntelligenceView: View {
     let followUpQuestions: [String]
     let topics: [String]
     var aiActivityState: RecordingViewModel.AIActivityState = .idle
+    var shareObservations: [ScreenFrameAnalysisService.FrameObservation] = []
+    var isCapturingShare: Bool = false
 
     private var hasResults: Bool {
         !summary.isEmpty || !actionItems.isEmpty
@@ -335,6 +337,13 @@ struct LiveMeetingIntelligenceView: View {
 
                 if !summary.isEmpty {
                     AISummarySection(summary: summary)
+                }
+
+                if !shareObservations.isEmpty {
+                    LiveSharedContentSection(
+                        observations: shareObservations,
+                        isCapturing: isCapturingShare
+                    )
                 }
 
                 if !topics.isEmpty {

@@ -85,6 +85,26 @@ enum AIPromptTemplates {
         """
     }
 
+    /// Wraps screen-share observations in instructions with the opposite
+    /// fencing from prep context: this content IS part of the meeting and
+    /// should shape the output — it just must never be attributed as speech.
+    /// Empty string when there's nothing.
+    static func screenObservationBlock(_ observations: String?) -> String {
+        guard let observations, !observations.isEmpty else { return "" }
+        return """
+
+
+        SCREEN SHARE CONTENT (visible on screen, not spoken):
+        The participants shared a screen during this meeting. The lines below are \
+        observations of that screen at the given transcript timestamps. This content \
+        IS part of the meeting — use it to inform the summary, topics, follow-up \
+        questions, and action items — but never attribute it as something a person \
+        said, and never quote it as speech.
+
+        \(observations)
+        """
+    }
+
     /// Builds a "DO NOT RE-SUGGEST" block for prompts when the user has deleted
     /// action items or follow-ups on a prior run. Returns an empty string when
     /// both lists are empty so the template renders cleanly.
