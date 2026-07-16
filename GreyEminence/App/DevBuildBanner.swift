@@ -19,7 +19,6 @@ struct DevBuildBanner: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(.orange.gradient, in: Capsule())
-        .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
         .allowsHitTesting(false)
         .accessibilityLabel("Development build")
     }
