@@ -36,6 +36,18 @@ struct APIKeySettingsView: View {
                 .onChange(of: selectedProvider) {
                     validationResult = nil
                 }
+                // This picker IS the live setting, not a tab — switching it
+                // here immediately switches every AI feature in the app.
+                // Without this callout, a validated key on one provider
+                // coexists invisibly with a broken active provider.
+                Label {
+                    Text("All AI features are using **\(isAnthropic ? "Anthropic API" : "AWS Bedrock")** right now. Changing this picker switches the whole app immediately — validating a provider only tests that provider.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } icon: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.secondary)
+                }
             } header: {
                 Label("Provider", systemImage: "cloud")
                     .font(.subheadline.weight(.semibold))
