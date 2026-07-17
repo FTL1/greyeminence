@@ -240,9 +240,12 @@ final class ScreenSharePlayerModel {
     func analyzeAllFrames(meeting: Meeting, context: ModelContext) async {
         guard !isBulkAnalyzing else { return }
         let targets = frames.filter { $0.observation == nil }
-        guard !targets.isEmpty,
-              let client = try? await AIClientFactory.makeClient(),
-              client.supportsImages else { return }
+        guard !targets.isEmpty else { return }
+        guard let client = try? await AIClientFactory.makeClient(), client.supportsImages else {
+            LogManager.shared.log("Frame backfill skipped: AI not configured or no image support", category: .screen, level: .warning, meetingID: meeting.id)
+            return
+        }
+        LogManager.shared.log("Frame backfill starting (\(targets.count) unanalyzed frame(s))", category: .screen, meetingID: meeting.id)
 
         isBulkAnalyzing = true
         defer {
@@ -318,10 +321,15 @@ final class ScreenSharePlayerModel {
 
     /// One-off vision analysis for a frame that never got an observation.
     func analyzeNow(_ frame: FrameItem, meeting: Meeting, context: ModelContext) async {
-        guard !analyzingFrameIDs.contains(frame.id),
-              let client = try? await AIClientFactory.makeClient(),
-              client.supportsImages,
-              let jpegData = try? Data(contentsOf: frame.imageURL) else { return }
+        guard !analyzingFrameIDs.contains(frame.id) else { return }
+        guard let client = try? await AIClientFactory.makeClient(), client.supportsImages else {
+            LogManager.shared.log("Analyze-frame skipped: AI not configured or no image support", category: .screen, level: .warning, meetingID: meeting.id)
+            return
+        }
+        guard let jpegData = try? Data(contentsOf: frame.imageURL) else {
+            LogManager.shared.log("Analyze-frame skipped: image file unreadable (\(frame.imageURL.lastPathComponent))", category: .screen, level: .warning, meetingID: meeting.id)
+            return
+        }
         analyzingFrameIDs.insert(frame.id)
         defer { analyzingFrameIDs.remove(frame.id) }
 
@@ -344,7 +352,10 @@ final class ScreenSharePlayerModel {
         let result = await service.analyzePendingBatch(recentTopics: topics)
 
         guard let observation = result.observations.first,
-              let row = meeting.screenFrames.first(where: { $0.id == frame.id }) else { return }
+              let row = meeting.screenFrames.first(where: { $0.id == frame.id }) else {
+            LogManager.shared.log("Analyze-frame returned no observation for #\(frame.formattedTimestamp)", category: .screen, level: .warning, meetingID: meeting.id)
+            return
+        }
         row.observation = observation.observation
         row.contentTypeRaw = observation.contentType
         row.keyEntities = observation.keyEntities
@@ -352,5 +363,6 @@ final class ScreenSharePlayerModel {
         row.analysisModelIdentifier = client.modelIdentifier
         PersistenceGate.save(context, site: "ScreenSharePlayer.analyzeNow", meetingID: meeting.id)
         refresh(from: meeting)
+        LogManager.shared.log("Analyze-frame complete for [\(frame.formattedTimestamp)] (\(observation.contentType))", category: .screen, meetingID: meeting.id)
     }
 }

@@ -799,6 +799,9 @@ final class RecordingViewModel {
             if let service {
                 do {
                     let roster = MeetingRoster.snapshot(for: meeting)
+                    if !observationsAtStop.isEmpty {
+                        self.log.log("Injecting \(observationsAtStop.count) screen observation(s) into final analysis", category: .screen)
+                    }
                     if let result = try await service.performFinalAnalysis(
                         segments: finalSnapshots,
                         roster: roster,
@@ -1504,10 +1507,14 @@ final class RecordingViewModel {
                 // The index only advances on success, so a failed pass
                 // re-sends its observations next time.
                 let observationBatch = await MainActor.run {
-                    ScreenObservationFormatter.rollingBlock(
+                    let batch = ScreenObservationFormatter.rollingBlock(
                         self.screenObservationLog,
                         afterIndex: self.lastSentObservationIndex
                     )
+                    if let batch {
+                        self.log.log("Injecting \(batch.endIndex - self.lastSentObservationIndex) screen observation(s) into rolling analysis", category: .screen)
+                    }
+                    return batch
                 }
 
                 do {

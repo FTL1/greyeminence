@@ -67,7 +67,10 @@ actor ScreenFrameAnalysisService {
     /// Queue frames for the next batch. Returns IDs refused because the
     /// per-meeting budget is exhausted (callers mark those rows `skipped`).
     func enqueue(_ frames: [FrameSnapshot]) -> [UUID] {
-        guard !budgetExhausted else { return frames.map(\.frameID) }
+        guard !budgetExhausted else {
+            LogManager.send("Frame analysis enqueue refused (\(frames.count) frame(s)): budget exhausted", category: .screen, meetingID: meetingID)
+            return frames.map(\.frameID)
+        }
         pending.append(contentsOf: frames)
         return []
     }
@@ -132,6 +135,11 @@ actor ScreenFrameAnalysisService {
         result.observations = Self.parse(response: response, batch: batch, meetingID: meetingID)
         let unparsed = batchIDs.subtracting(result.observations.map(\.frameID))
         result.failedIDs.append(contentsOf: unparsed)
+        LogManager.send(
+            "Screen-frame analysis batch complete: \(result.observations.count) observation(s), \(result.failedIDs.count) failed, \(result.skippedIDs.count) skipped (\(client.modelIdentifier))",
+            category: .screen,
+            meetingID: meetingID
+        )
 
         analyzedCount += result.observations.count
         if analyzedCount >= maxAnalyzedPerMeeting {

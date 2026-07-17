@@ -89,6 +89,7 @@ final class EmbeddingIndexer {
             }
         }
 
+        var indexedFrames = 0
         for frame in snapshot.screenFrames {
             guard let text = Self.frameEmbeddingText(observation: frame.observation, ocrText: frame.ocrText) else { continue }
             guard let vec = await service.embed("Meeting: \(snapshot.title) — screen share\n\(text)") else { continue }
@@ -104,6 +105,10 @@ final class EmbeddingIndexer {
                 modelIdentifier: service.modelIdentifier
             )
             store.upsert(record)
+            indexedFrames += 1
+        }
+        if !snapshot.screenFrames.isEmpty {
+            LogManager.send("Indexed \(indexedFrames)/\(snapshot.screenFrames.count) screen frame(s) for search", category: .screen, meetingID: snapshot.id)
         }
 
         store.save()

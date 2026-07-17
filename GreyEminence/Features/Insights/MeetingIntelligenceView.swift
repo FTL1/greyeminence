@@ -175,6 +175,9 @@ struct MeetingIntelligenceView: View {
             // stays screen-aware like the original live analysis.
             let roster = MeetingRoster.snapshot(for: meeting)
             let screenBlock = ScreenObservationFormatter.finalBlock(fromFrames: meeting.screenFrames)
+            if screenBlock != nil {
+                LogManager.shared.log("Reanalyze: injecting screen observations from \(meeting.screenFrames.count) frame(s)", category: .screen, meetingID: meeting.id)
+            }
             _ = try await service.analyze(segments: snapshots, roster: roster, screenObservations: screenBlock)
             guard let rawResult = try await service.performFinalAnalysis(segments: snapshots, roster: roster, screenObservations: screenBlock) else {
                 reanalysisError = "Analysis returned no results."

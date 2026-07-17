@@ -451,6 +451,9 @@ final class ReProcessingQueue {
             // the live insights, and without them the screen-aware summary
             // produced at stop time would be silently degraded.
             let screenBlock = ScreenObservationFormatter.finalBlock(fromFrames: meeting.screenFrames)
+            if screenBlock != nil {
+                LogManager.send("Re-analysis: injecting screen observations from \(meeting.screenFrames.count) frame(s)", category: .screen, meetingID: meeting.id)
+            }
             _ = try await service.analyze(segments: segments, roster: roster, screenObservations: screenBlock)
             guard let result = try await service.performFinalAnalysis(segments: segments, roster: roster, screenObservations: screenBlock) else { return }
             for old in meeting.insights { context.delete(old) }

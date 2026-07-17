@@ -147,15 +147,22 @@ actor ScreenShareCaptureService {
 
     func suspend() {
         suspended = true
+        LogManager.send("Screen-share capture suspended", category: .screen, meetingID: meetingID)
     }
 
     func resume() {
         suspended = false
+        LogManager.send("Screen-share capture resumed", category: .screen, meetingID: meetingID)
     }
 
     /// Manual window selection from the picker. `nil` returns to auto-detect.
     func selectWindow(_ windowID: CGWindowID?) {
         manualWindowID = windowID
+        LogManager.send(
+            windowID.map { "Manual window selected (id \($0))" } ?? "Returned to auto-detect",
+            category: .screen,
+            meetingID: meetingID
+        )
         // Force re-evaluation: end the current session so the next poll
         // starts one on the newly selected window.
         if let sessionID = currentSessionID, windowID != currentWindowID {
@@ -418,14 +425,21 @@ actor ScreenShareCaptureService {
         missedPolls = 0
 
         let hash = ScreenFrameTriage.dHash(image)
+        let distance = lastKeptHash.map { ScreenFrameTriage.hammingDistance(hash, $0) }
         guard ScreenFrameTriage.shouldKeep(hash: hash, lastKeptHash: lastKeptHash, threshold: config.changeThreshold) else {
             continuation?.yield(.frameDropped(sessionID: sessionID))
+            LogManager.send("Frame dropped: unchanged (Δ\(distance ?? 0) < \(config.changeThreshold))", category: .screen, meetingID: meetingID)
             return
         }
 
-        let ocrText = try? await ScreenFrameTriage.recognizeText(in: image)
+        var ocrText: String?
+        do {
+            ocrText = try await ScreenFrameTriage.recognizeText(in: image)
+        } catch {
+            LogManager.send("Frame OCR failed (keeping frame without text): \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
+        }
         let visualOnly = lastKeptHash != nil
-            && ScreenFrameTriage.isVisualOnlyChange(previousOCR: lastKeptOCR, currentOCR: ocrText ?? nil)
+            && ScreenFrameTriage.isVisualOnlyChange(previousOCR: lastKeptOCR, currentOCR: ocrText)
 
         guard let jpeg = Self.encodeJPEG(image, quality: config.jpegQuality) else {
             LogManager.send("Frame JPEG encode failed", category: .screen, level: .warning, meetingID: meetingID)
@@ -450,15 +464,20 @@ actor ScreenShareCaptureService {
             relativeImagePath: relativePath,
             jpegData: jpeg,
             dHash: hash,
-            ocrText: ocrText ?? nil,
+            ocrText: ocrText,
             isVisualOnlyChange: visualOnly,
             windowTitle: currentWindowTitle
         )
         sequence += 1
         keptCount += 1
         lastKeptHash = hash
-        lastKeptOCR = ocrText ?? nil
+        lastKeptOCR = ocrText
         continuation?.yield(.frameKept(frame))
+        LogManager.send(
+            "Frame kept #\(frame.sequence) (Δ\(distance.map(String.init) ?? "first"), \(jpeg.count / 1024) KB, OCR \(ocrText?.count ?? 0) chars\(visualOnly ? ", visual-only" : ""))",
+            category: .screen,
+            meetingID: meetingID
+        )
 
         if keptCount >= config.maxKeptFrames {
             frameCapReached = true
