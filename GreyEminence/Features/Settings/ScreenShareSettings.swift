@@ -13,11 +13,19 @@ enum ScreenShareSettings {
     static let maxKeptFramesKey = "screenShareMaxKeptFrames"
     /// dHash Hamming-distance keep threshold (developer setting).
     static let changeThresholdKey = "screenShareChangeThreshold"
+    /// Model for per-frame vision analysis. Empty string means "same as
+    /// the main model".
+    static let frameAnalysisModelKey = "screenShareFrameAnalysisModel"
+    /// Pixel budget for the vision payload (developer setting). Disk keeps
+    /// the full capture; only the copy sent to the API is downscaled.
+    static let analysisPixelBudgetKey = "screenShareAnalysisPixelBudget"
 
     static let defaultIntervalSeconds = 15.0
-    static let defaultMaxAnalyzedFrames = 60
+    static let defaultMaxAnalyzedFrames = 200
     static let defaultMaxKeptFrames = 400
     static let defaultChangeThreshold = 8
+    static let defaultFrameAnalysisModel = "claude-haiku-4-5-20251001"
+    static let defaultAnalysisPixelBudget = 600_000
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledKey)
@@ -49,5 +57,16 @@ enum ScreenShareSettings {
     static var changeThreshold: Int {
         let v = UserDefaults.standard.integer(forKey: changeThresholdKey)
         return v > 0 ? min(max(v, 1), 32) : defaultChangeThreshold
+    }
+
+    /// Empty string is a deliberate user choice ("same as main model"), so
+    /// only a missing key falls back to the Haiku default.
+    static var frameAnalysisModel: String {
+        UserDefaults.standard.string(forKey: frameAnalysisModelKey) ?? defaultFrameAnalysisModel
+    }
+
+    static var analysisPixelBudget: Int {
+        let v = UserDefaults.standard.integer(forKey: analysisPixelBudgetKey)
+        return v > 0 ? min(max(v, 100_000), 4_000_000) : defaultAnalysisPixelBudget
     }
 }

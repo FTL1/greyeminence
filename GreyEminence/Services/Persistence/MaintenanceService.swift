@@ -22,6 +22,7 @@ enum MaintenanceService {
         var interviewsBackfilledToPhases = 0
         var criterionGuidanceBackfilled = 0
         var roleRubricLinksBackfilled = 0
+        var usageEventsPruned = 0
         var skipped = false
 
         var summary: String {
@@ -34,7 +35,8 @@ enum MaintenanceService {
             \(actionItemsBackfilled) action item source(s) backfilled, \
             \(interviewsBackfilledToPhases) legacy interview(s) wrapped in phases, \
             \(criterionGuidanceBackfilled) evaluation note(s) migrated to guidance bullets, \
-            \(roleRubricLinksBackfilled) rubric→role link(s) backfilled
+            \(roleRubricLinksBackfilled) rubric→role link(s) backfilled, \
+            \(usageEventsPruned) old AI usage event(s) pruned
             """
         }
     }
@@ -61,6 +63,7 @@ enum MaintenanceService {
         report.interviewsBackfilledToPhases = backfillInterviewPhases(in: modelContext)
         report.criterionGuidanceBackfilled = backfillCriterionGuidance(in: modelContext)
         report.roleRubricLinksBackfilled = backfillRoleRubricLinks(in: modelContext)
+        report.usageEventsPruned = pruneOldUsageEvents(in: modelContext)
 
         UserDefaults.standard.set(Date(), forKey: lastRunKey)
         LogManager.send(report.summary, category: .general)
@@ -221,6 +224,21 @@ enum MaintenanceService {
             PersistenceGate.save(context, site: "Maintenance.backfillCriterionGuidance")
         }
         return backfilled
+    }
+
+    /// Drop AI usage-ledger events older than 90 days — the settings pane
+    /// shows 30-day totals, so anything past 90 is dead weight.
+    private static func pruneOldUsageEvents(in context: ModelContext) -> Int {
+        let cutoff = Date().addingTimeInterval(-90 * 24 * 60 * 60)
+        let descriptor = FetchDescriptor<AIUsageEvent>(
+            predicate: #Predicate { $0.timestamp < cutoff }
+        )
+        guard let stale = try? context.fetch(descriptor), !stale.isEmpty else { return 0 }
+        for event in stale {
+            context.delete(event)
+        }
+        PersistenceGate.save(context, site: "Maintenance.pruneUsageEvents")
+        return stale.count
     }
 
     /// Synthesize one `RoleRubricLink` for every rubric that has the

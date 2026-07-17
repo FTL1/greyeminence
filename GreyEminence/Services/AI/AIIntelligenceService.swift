@@ -154,13 +154,16 @@ actor AIIntelligenceService {
 
         LogManager.send("AI analysis starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
         let capturedMeetingID = meetingID
+        let purpose: AIUsagePurpose = previousSummary.isEmpty ? .transcriptInitial : .transcriptRolling
         let systemPrompt = effectiveSystemPrompt(roster: roster)
-        let response = try await AIRetry.run(label: "analyze", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
-            try await withTimeout(seconds: 90) {
-                try await client.sendMessage(
-                    system: systemPrompt,
-                    userContent: userPrompt
-                )
+        let response = try await AIUsageContext.attribute(purpose, meetingID: capturedMeetingID) {
+            try await AIRetry.run(label: "analyze", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
+                try await withTimeout(seconds: 90) {
+                    try await client.sendMessage(
+                        system: systemPrompt,
+                        userContent: userPrompt
+                    )
+                }
             }
         }
         LogManager.send("AI raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
@@ -234,12 +237,14 @@ actor AIIntelligenceService {
         LogManager.send("AI final cleanup starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
         let capturedMeetingID = meetingID
         let systemPrompt = effectiveSystemPrompt(roster: roster)
-        let response = try await AIRetry.run(label: "finalCleanup", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
-            try await withTimeout(seconds: 90) {
-                try await client.sendMessage(
-                    system: systemPrompt,
-                    userContent: userPrompt
-                )
+        let response = try await AIUsageContext.attribute(.transcriptFinal, meetingID: capturedMeetingID) {
+            try await AIRetry.run(label: "finalCleanup", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
+                try await withTimeout(seconds: 90) {
+                    try await client.sendMessage(
+                        system: systemPrompt,
+                        userContent: userPrompt
+                    )
+                }
             }
         }
         LogManager.send("AI final cleanup raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)

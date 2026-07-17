@@ -450,8 +450,11 @@ struct TopicMapView: View {
             do {
                 // Seed with first pass, then final
                 let roster = MeetingRoster.snapshot(for: meeting)
-                _ = try await service.analyze(segments: snapshots, roster: roster)
-                guard let result = try await service.performFinalAnalysis(segments: snapshots, roster: roster) else {
+                let finalResult = try await AIUsageContext.attribute(.reanalysis, meetingID: meeting.id) {
+                    _ = try await service.analyze(segments: snapshots, roster: roster)
+                    return try await service.performFinalAnalysis(segments: snapshots, roster: roster)
+                }
+                guard let result = finalResult else {
                     continue
                 }
 

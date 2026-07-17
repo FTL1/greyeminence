@@ -89,6 +89,14 @@ struct ClaudeAPIClient: AIClient, Sendable {
             throw ClaudeAPIError.noTextContent
         }
 
+        if let usage = AIUsage.decode(fromResponseBody: data) {
+            UsageRecorder.record(modelIdentifier: modelIdentifier, usage: usage)
+            LogManager.send(
+                "usage: \(usage.inputTokens.formatted()) in / \(usage.outputTokens.formatted()) out (\(model))",
+                category: .ai
+            )
+        }
+
         // Log response payload
         if let jsonObject = try? JSONSerialization.jsonObject(with: data),
            let pretty = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),

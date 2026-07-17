@@ -333,6 +333,7 @@ struct AskView: View {
         case .followUpQuestion: "QUESTION"
         case .meetingSummary: "SUMMARY"
         case .screenObservation: "SCREEN"
+        case .sessionNarrative: "RECAP"
         }
     }
 
@@ -343,6 +344,7 @@ struct AskView: View {
         case .followUpQuestion: .teal
         case .meetingSummary: .purple
         case .screenObservation: .cyan
+        case .sessionNarrative: .mint
         }
     }
 

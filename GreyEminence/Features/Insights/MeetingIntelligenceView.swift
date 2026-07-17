@@ -11,6 +11,7 @@ struct MeetingIntelligenceView: View {
     @State private var isReanalyzing = false
     @State private var reanalysisError: String?
     @State private var reanalyzeTask: Task<Void, Never>?
+    @State private var reanalyzeSharesTrigger = false
 
     var body: some View {
         ScrollView {
@@ -28,6 +29,11 @@ struct MeetingIntelligenceView: View {
                     .font(.headline)
 
                     Spacer()
+
+                    // Truncates first when the pane narrows — the Reanalyze
+                    // controls must never be pushed off screen by a caption.
+                    MeetingAIUsageCaption(meetingID: meeting.id, isAnalyzing: isReanalyzing || meeting.isAnalyzing)
+                        .layoutPriority(-1)
 
                     if meeting.status == .completed && !meeting.segments.isEmpty {
                         if isReanalyzing || meeting.isAnalyzing {
@@ -53,6 +59,13 @@ struct MeetingIntelligenceView: View {
                                     ReProcessingQueue.shared.enqueue(meetingID: meeting.id)
                                 } label: {
                                     Label("Re-transcribe with large-v3", systemImage: "waveform.badge.checkmark")
+                                }
+                                if !meeting.screenFrames.isEmpty {
+                                    Button {
+                                        reanalyzeSharesTrigger = true
+                                    } label: {
+                                        Label("Re-analyze screen shares", systemImage: "rectangle.dashed.badge.record")
+                                    }
                                 }
                             } label: {
                                 Label("Reanalyze", systemImage: "arrow.clockwise")
@@ -92,7 +105,8 @@ struct MeetingIntelligenceView: View {
                 ScreenSharePlayerSection(
                     meeting: meeting,
                     pendingSeekTime: pendingSeekTime,
-                    onPlayheadSegment: onPlayheadSegment
+                    onPlayheadSegment: onPlayheadSegment,
+                    reanalyzeSharesTrigger: $reanalyzeSharesTrigger
                 )
 
                 if let insight = meeting.latestInsight {
@@ -174,12 +188,15 @@ struct MeetingIntelligenceView: View {
             // observations persisted on the frames ride along so a re-run
             // stays screen-aware like the original live analysis.
             let roster = MeetingRoster.snapshot(for: meeting)
-            let screenBlock = ScreenObservationFormatter.finalBlock(fromFrames: meeting.screenFrames)
+            let screenBlock = ScreenObservationFormatter.finalBlock(for: meeting)
             if screenBlock != nil {
-                LogManager.shared.log("Reanalyze: injecting screen observations from \(meeting.screenFrames.count) frame(s)", category: .screen, meetingID: meeting.id)
+                LogManager.shared.log("Reanalyze: injecting screen context (\(meeting.sessionSummaries.count) recap(s), \(meeting.screenFrames.count) frame(s))", category: .screen, meetingID: meeting.id)
             }
-            _ = try await service.analyze(segments: snapshots, roster: roster, screenObservations: screenBlock)
-            guard let rawResult = try await service.performFinalAnalysis(segments: snapshots, roster: roster, screenObservations: screenBlock) else {
+            let maybeResult = try await AIUsageContext.attribute(.reanalysis, meetingID: meeting.id) {
+                _ = try await service.analyze(segments: snapshots, roster: roster, screenObservations: screenBlock)
+                return try await service.performFinalAnalysis(segments: snapshots, roster: roster, screenObservations: screenBlock)
+            }
+            guard let rawResult = maybeResult else {
                 reanalysisError = "Analysis returned no results."
                 return
             }
@@ -391,5 +408,63 @@ struct LiveMeetingIntelligenceView: View {
             }
             .padding(.vertical)
         }
+    }
+}
+
+/// "AI: 142k in / 9k out (~$0.31)" — the meeting's usage-ledger rollup,
+/// with the per-purpose breakdown in the tooltip. Hidden until the ledger
+/// has events for this meeting.
+struct MeetingAIUsageCaption: View {
+    let meetingID: UUID
+    /// Re-fetches when an analysis finishes so the number stays current.
+    var isAnalyzing: Bool = false
+    @Environment(\.modelContext) private var modelContext
+    @State private var totals: AIUsageAggregator.Totals?
+    @State private var breakdown: [AIUsageAggregator.GroupRollup] = []
+
+    var body: some View {
+        Group {
+            if let totals, totals.totalInputSideTokens + totals.outputTokens > 0 {
+                Text(caption(totals))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(tooltip)
+            }
+        }
+        .task(id: "\(meetingID)-\(isAnalyzing)") { refresh() }
+    }
+
+    private func refresh() {
+        let id: UUID? = meetingID
+        let descriptor = FetchDescriptor<AIUsageEvent>(predicate: #Predicate { $0.meetingID == id })
+        let events = (try? modelContext.fetch(descriptor)) ?? []
+        let lines = events.map(AIUsageAggregator.Line.init(event:))
+        let settings = TrajectorSettings.load()
+        totals = AIUsageAggregator.totals(lines, settings: settings)
+        breakdown = AIUsageAggregator.byGroup(lines, settings: settings)
+    }
+
+    private func caption(_ totals: AIUsageAggregator.Totals) -> String {
+        var text = "AI: \(AIUsageAggregator.compactTokens(totals.totalInputSideTokens)) in / \(AIUsageAggregator.compactTokens(totals.outputTokens)) out"
+        if totals.estimatedCost > 0 {
+            let approx = totals.pricedEverything ? "~" : ">"
+            text += String(format: " (%@$%.2f)", approx, totals.estimatedCost)
+        }
+        return text
+    }
+
+    private var tooltip: String {
+        var lines = breakdown.map { rollup in
+            var line = "\(rollup.group.displayName): \(AIUsageAggregator.compactTokens(rollup.totals.totalInputSideTokens)) in / \(AIUsageAggregator.compactTokens(rollup.totals.outputTokens)) out"
+            if rollup.totals.estimatedCost > 0 {
+                line += String(format: " (~$%.2f)", rollup.totals.estimatedCost)
+            }
+            return line
+        }
+        if totals?.pricedEverything == false {
+            lines.append("Some calls used a model without a known price — cost shown is a lower bound.")
+        }
+        return lines.joined(separator: "\n")
     }
 }

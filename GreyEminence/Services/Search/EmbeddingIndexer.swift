@@ -111,6 +111,23 @@ final class EmbeddingIndexer {
             LogManager.send("Indexed \(indexedFrames)/\(snapshot.screenFrames.count) screen frame(s) for search", category: .screen, meetingID: snapshot.id)
         }
 
+        for summary in snapshot.sessionSummaries {
+            guard !summary.narrative.isEmpty,
+                  let vec = await service.embed("Meeting: \(snapshot.title) — screen share recap\n\(summary.narrative)") else { continue }
+            let record = EmbeddingRecord(
+                id: "sessionSummary:\(summary.sessionID.uuidString)",
+                sourceID: summary.sessionID,
+                sourceKind: .sessionNarrative,
+                meetingID: snapshot.id,
+                meetingTitle: snapshot.title,
+                meetingDate: snapshot.date,
+                text: summary.narrative,
+                vector: vec,
+                modelIdentifier: service.modelIdentifier
+            )
+            store.upsert(record)
+        }
+
         store.save()
     }
 
@@ -138,6 +155,7 @@ final class EmbeddingIndexer {
         let actionItems: [ActionSnapshot]
         let insights: [InsightSnapshot]
         let screenFrames: [FrameSnapshot]
+        let sessionSummaries: [SessionSummarySnapshot]
 
         init(meeting: Meeting) {
             self.id = meeting.id
@@ -154,7 +172,15 @@ final class EmbeddingIndexer {
             self.screenFrames = meeting.screenFrames.map {
                 FrameSnapshot(id: $0.id, observation: $0.observation, ocrText: $0.ocrText)
             }
+            self.sessionSummaries = meeting.sessionSummaries.map {
+                SessionSummarySnapshot(sessionID: $0.sessionID, narrative: $0.narrative)
+            }
         }
+    }
+
+    private struct SessionSummarySnapshot {
+        let sessionID: UUID
+        let narrative: String
     }
 
     private struct FrameSnapshot {

@@ -6,6 +6,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     case audio
     case screenShare
     case ai
+    case aiUsage
     case ask
     case vocabulary
     case organization
@@ -22,6 +23,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .audio: "Audio"
         case .screenShare: "Screen Share"
         case .ai: "AI"
+        case .aiUsage: "AI Usage"
         case .ask: "Ask"
         case .vocabulary: "Vocabulary"
         case .organization: "Organization"
@@ -38,6 +40,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .audio: "mic"
         case .screenShare: "rectangle.dashed.badge.record"
         case .ai: "brain"
+        case .aiUsage: "chart.bar"
         case .ask: "sparkles.square.filled.on.square"
         case .vocabulary: "textformat.abc"
         case .organization: "building.2"
@@ -54,6 +57,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .audio: .blue
         case .screenShare: .mint
         case .ai: .purple
+        case .aiUsage: .yellow
         case .ask: .pink
         case .vocabulary: .teal
         case .organization: .cyan
@@ -113,6 +117,8 @@ struct SettingsView: View {
             ScreenShareSettingsView()
         case .ai:
             APIKeySettingsView()
+        case .aiUsage:
+            AIUsageSettingsView()
         case .ask:
             AskSettingsView()
         case .vocabulary:

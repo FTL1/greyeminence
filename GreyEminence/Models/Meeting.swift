@@ -80,6 +80,9 @@ final class Meeting {
     @Relationship(deleteRule: .cascade, inverse: \ScreenShareFrame.meeting)
     var screenFrames: [ScreenShareFrame] = []
 
+    @Relationship(deleteRule: .cascade, inverse: \ShareSessionSummary.meeting)
+    var sessionSummaries: [ShareSessionSummary] = []
+
     @Relationship(deleteRule: .nullify)
     var attendees: [Contact] = []
 

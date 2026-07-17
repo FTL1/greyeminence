@@ -7,12 +7,13 @@ final class ScreenFrameAnalysisTests: XCTestCase {
 
     private func snapshot(
         id: UUID = UUID(),
+        session: UUID = UUID(),
         timestamp: TimeInterval,
         visualOnly: Bool = false
     ) -> ScreenFrameAnalysisService.FrameSnapshot {
         ScreenFrameAnalysisService.FrameSnapshot(
             frameID: id,
-            sessionID: UUID(),
+            sessionID: session,
             timestamp: timestamp,
             formattedTimestamp: "0:00",
             jpegData: Data(),
@@ -49,6 +50,49 @@ final class ScreenFrameAnalysisTests: XCTestCase {
     func testSelectBatchZeroLimitIsEmpty() {
         let frames = [snapshot(timestamp: 1)]
         XCTAssertTrue(ScreenFrameAnalysisService.selectBatch(from: frames, limit: 0).isEmpty)
+    }
+
+    // MARK: - throttleVisualOnly
+
+    func testThrottleAlwaysPassesRealChanges() {
+        let session = UUID()
+        let frames = (0..<5).map { snapshot(session: session, timestamp: TimeInterval($0), visualOnly: false) }
+        let result = ScreenFrameAnalysisService.throttleVisualOnly(frames, lastAnalyzedAt: [:], minimumGap: 60)
+        XCTAssertEqual(result.kept.count, 5)
+        XCTAssertTrue(result.droppedIDs.isEmpty)
+        XCTAssertTrue(result.lastAnalyzedAt.isEmpty)
+    }
+
+    func testThrottleDropsVisualChurnWithinGap() {
+        let session = UUID()
+        // Video playback: one visual-only frame every 15s.
+        let frames = (0..<8).map { snapshot(session: session, timestamp: TimeInterval($0 * 15), visualOnly: true) }
+        let result = ScreenFrameAnalysisService.throttleVisualOnly(frames, lastAnalyzedAt: [:], minimumGap: 60)
+        // t=0 passes, 15/30/45 dropped, 60 passes, 75/90 dropped, 105 dropped.
+        XCTAssertEqual(result.kept.map(\.timestamp), [0, 60])
+        XCTAssertEqual(result.droppedIDs.count, 6)
+        XCTAssertEqual(result.lastAnalyzedAt[session], 60)
+    }
+
+    func testThrottleCarriesStateAcrossBatches() {
+        let session = UUID()
+        let frame = snapshot(session: session, timestamp: 70, visualOnly: true)
+        let result = ScreenFrameAnalysisService.throttleVisualOnly(
+            [frame], lastAnalyzedAt: [session: 30], minimumGap: 60
+        )
+        XCTAssertTrue(result.kept.isEmpty)
+        XCTAssertEqual(result.droppedIDs, [frame.frameID])
+        XCTAssertEqual(result.lastAnalyzedAt[session], 30)
+    }
+
+    func testThrottleIsPerSession() {
+        let a = UUID(), b = UUID()
+        let frames = [
+            snapshot(session: a, timestamp: 10, visualOnly: true),
+            snapshot(session: b, timestamp: 12, visualOnly: true),
+        ]
+        let result = ScreenFrameAnalysisService.throttleVisualOnly(frames, lastAnalyzedAt: [:], minimumGap: 60)
+        XCTAssertEqual(result.kept.count, 2)
     }
 
     // MARK: - parse

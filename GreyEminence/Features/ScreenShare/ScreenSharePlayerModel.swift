@@ -37,8 +37,16 @@ final class ScreenSharePlayerModel {
         }
     }
 
+    /// Snapshot of one session's synthesized recap for the player UI.
+    struct RecapItem: Sendable, Equatable {
+        let sessionID: UUID
+        let narrative: String
+        let keyMoments: [ShareSessionSummary.KeyMoment]
+    }
+
     private(set) var frames: [FrameItem] = []
     private(set) var sessions: [ShareSession] = []
+    private(set) var recapsBySession: [UUID: RecapItem] = [:]
     private(set) var meetingDuration: TimeInterval = 0
     private let meetingID: UUID
 
@@ -90,6 +98,13 @@ final class ScreenSharePlayerModel {
                 )
             }
         sessions = ShareSession.sessions(from: meeting.screenFrames)
+        recapsBySession = Dictionary(uniqueKeysWithValues: meeting.sessionSummaries.map { summary in
+            (summary.sessionID, RecapItem(
+                sessionID: summary.sessionID,
+                narrative: summary.narrative,
+                keyMoments: summary.keyMoments
+            ))
+        })
         meetingDuration = max(meeting.duration, frames.last?.timestamp ?? 0)
         currentIndex = min(currentIndex, max(0, frames.count - 1))
         updateMatches()
@@ -205,10 +220,17 @@ final class ScreenSharePlayerModel {
     }
 
     /// Privacy hatch: delete an entire share session ("I shared the wrong
-    /// window").
+    /// window") — frames, narrative summary, and their embeddings.
     func deleteSession(_ sessionID: UUID, meeting: Meeting, context: ModelContext) {
         let ids = Set(frames.filter { $0.sessionID == sessionID }.map(\.id))
         deleteFrames(ids: ids, meeting: meeting, context: context)
+        if let summary = meeting.sessionSummaries.first(where: { $0.sessionID == sessionID }) {
+            EmbeddingStore.shared?.deleteRecord(id: "sessionSummary:\(sessionID.uuidString)")
+            meeting.sessionSummaries.removeAll { $0.sessionID == sessionID }
+            context.delete(summary)
+            PersistenceGate.save(context, site: "ScreenSharePlayer.deleteSessionSummary", meetingID: meeting.id)
+            refresh(from: meeting)
+        }
     }
 
     private func deleteFrames(ids: Set<UUID>, meeting: Meeting, context: ModelContext) {
@@ -230,7 +252,7 @@ final class ScreenSharePlayerModel {
     /// the log must say which one it is.
     private static func makeVisionClient(meetingID: UUID, context: String) async -> (any AIClient)? {
         do {
-            guard let client = try await AIClientFactory.makeClient() else {
+            guard let client = try await AIClientFactory.makeFrameAnalysisClient() else {
                 LogManager.shared.log("\(context) skipped: no API key configured", category: .screen, level: .warning, meetingID: meetingID)
                 return nil
             }
@@ -304,7 +326,7 @@ final class ScreenSharePlayerModel {
             let result = await service.analyzePendingBatch(recentTopics: topics)
             analyzingFrameIDs.subtract(snapshots.map(\.frameID))
 
-            apply(result, to: meeting, modelIdentifier: client.modelIdentifier)
+            apply(result, to: meeting)
             done += result.observations.count
             bulkProgress = (done, budget)
         }
@@ -312,12 +334,134 @@ final class ScreenSharePlayerModel {
         PersistenceGate.save(context, site: "ScreenSharePlayer.analyzeAllFrames", meetingID: meeting.id)
         refresh(from: meeting)
         LogManager.shared.log("Backfilled \(done) frame observation(s)", category: .screen, meetingID: meeting.id)
+
+        // Fresh observations usually unlock session recaps — chain the
+        // narrative backfill so one click covers both.
+        await generateRecaps(meeting: meeting, context: context)
+    }
+
+    /// Force a full redo of screen-share intelligence: wipe every frame's
+    /// observation and every session recap, then re-run vision analysis
+    /// (which chains recap synthesis) and re-index embeddings. The "my
+    /// frame descriptions predate a prompt fix" recovery, akin to
+    /// re-transcribing with large-v3.
+    func reanalyzeAllShares(meeting: Meeting, context: ModelContext) async {
+        guard !isBulkAnalyzing, !isGeneratingRecaps, !meeting.screenFrames.isEmpty else { return }
+        LogManager.shared.log("Screen-share redo: wiping \(meeting.screenFrames.count) observation(s) and \(meeting.sessionSummaries.count) recap(s)", category: .screen, meetingID: meeting.id)
+
+        for row in meeting.screenFrames {
+            row.observation = nil
+            row.contentTypeRaw = nil
+            row.keyEntities = []
+            row.analysisModelIdentifier = nil
+            row.analysisState = .ocrOnly
+        }
+        for summary in meeting.sessionSummaries {
+            EmbeddingStore.shared?.deleteRecord(id: "sessionSummary:\(summary.sessionID.uuidString)")
+            context.delete(summary)
+        }
+        meeting.sessionSummaries.removeAll()
+        PersistenceGate.save(context, site: "ScreenSharePlayer.reanalyzeShares/wipe", meetingID: meeting.id)
+        refresh(from: meeting)
+
+        // Fresh vision pass over now-unanalyzed frames; chains recap
+        // synthesis when it finishes.
+        await analyzeAllFrames(meeting: meeting, context: context)
+
+        // Frame + recap embeddings are stale — re-index the meeting so Ask
+        // reflects the new descriptions (upserts by id, so this is safe to
+        // run over everything).
+        if let store = EmbeddingStore.shared {
+            let providerRaw = UserDefaults.standard.string(forKey: "embeddingProvider") ?? EmbeddingProvider.nlEmbedding.rawValue
+            let provider = EmbeddingProvider(rawValue: providerRaw) ?? .nlEmbedding
+            await EmbeddingIndexer(store: store, service: provider.makeService()).indexMeeting(meeting)
+        }
+        LogManager.shared.log("Screen-share redo complete", category: .screen, meetingID: meeting.id)
+    }
+
+    // MARK: - Session recap backfill
+
+    private(set) var isGeneratingRecaps = false
+
+    /// True when at least one session has analyzed frames but no narrative —
+    /// the "Generate Recaps" button's visibility condition.
+    var hasSessionsWithoutRecaps: Bool {
+        sessions.contains { session in
+            recapsBySession[session.id] == nil
+                && frames.contains { $0.sessionID == session.id && !($0.observation ?? "").isEmpty }
+        }
+    }
+
+    /// Synthesize narratives for every session that has observations but no
+    /// summary. Runs on the MAIN model — recaps are synthesis, not frame
+    /// perception.
+    func generateRecaps(meeting: Meeting, context: ModelContext) async {
+        guard !isGeneratingRecaps else { return }
+        let existing = Set(meeting.sessionSummaries.map(\.sessionID))
+        let targets = ShareSession.sessions(from: meeting.screenFrames).filter { session in
+            !existing.contains(session.id)
+                && meeting.screenFrames.contains { $0.sessionID == session.id && !($0.observation ?? "").isEmpty }
+        }
+        guard !targets.isEmpty else { return }
+        guard let client = try? await AIClientFactory.makeClient() else {
+            LogManager.shared.log("Recap backfill skipped: AI client unavailable", category: .screen, level: .warning, meetingID: meeting.id)
+            return
+        }
+        isGeneratingRecaps = true
+        defer { isGeneratingRecaps = false }
+        LogManager.shared.log("Recap backfill starting (\(targets.count) session(s))", category: .screen, meetingID: meeting.id)
+
+        let service = ShareSessionSynthesisService(client: client)
+        let segments = meeting.segments
+            .sorted { $0.startTime < $1.startTime }
+            .map { SegmentSnapshot(speaker: $0.speaker, text: $0.text, formattedTimestamp: $0.formattedTimestamp, isFinal: $0.isFinal, startTime: $0.startTime) }
+
+        var generated = 0
+        for session in targets {
+            let sessionFrames = meeting.screenFrames.filter { $0.sessionID == session.id }
+            let observations: [ShareSessionSynthesisService.FrameObservationLine] = sessionFrames.compactMap { row in
+                guard let text = row.observation, !text.isEmpty else { return nil }
+                return ShareSessionSynthesisService.FrameObservationLine(
+                    timestamp: row.timestamp,
+                    formattedTimestamp: row.formattedTimestamp,
+                    observation: text
+                )
+            }
+            guard !observations.isEmpty else { continue }
+            let input = ShareSessionSynthesisService.makeInput(
+                sessionID: session.id,
+                meetingID: meeting.id,
+                windowTitle: session.windowTitle,
+                startTime: session.startTime,
+                endTime: session.endTime,
+                observations: observations,
+                segments: segments
+            )
+            guard let narrative = try? await service.synthesize(input) else { continue }
+            let summary = ShareSessionSummary(
+                sessionID: session.id,
+                windowTitle: session.windowTitle,
+                startTime: session.startTime,
+                endTime: session.endTime,
+                narrative: narrative.narrative,
+                keyMoments: narrative.keyMoments,
+                entities: narrative.entities,
+                modelIdentifier: narrative.modelIdentifier
+            )
+            summary.meeting = meeting
+            meeting.sessionSummaries.append(summary)
+            generated += 1
+        }
+        if generated > 0 {
+            PersistenceGate.save(context, site: "ScreenSharePlayer.generateRecaps", meetingID: meeting.id)
+        }
+        refresh(from: meeting)
+        LogManager.shared.log("Recap backfill complete (\(generated) recap(s))", category: .screen, meetingID: meeting.id)
     }
 
     private func apply(
         _ result: ScreenFrameAnalysisService.BatchResult,
-        to meeting: Meeting,
-        modelIdentifier: String
+        to meeting: Meeting
     ) {
         var rowsByID: [UUID: ScreenShareFrame] = [:]
         for row in meeting.screenFrames {
@@ -329,7 +473,7 @@ final class ScreenSharePlayerModel {
             row.contentTypeRaw = observation.contentType
             row.keyEntities = observation.keyEntities
             row.analysisState = .analyzed
-            row.analysisModelIdentifier = modelIdentifier
+            row.analysisModelIdentifier = result.modelIdentifier
         }
         for id in result.failedIDs {
             rowsByID[id]?.analysisState = .failed
@@ -374,7 +518,7 @@ final class ScreenSharePlayerModel {
         row.contentTypeRaw = observation.contentType
         row.keyEntities = observation.keyEntities
         row.analysisState = .analyzed
-        row.analysisModelIdentifier = client.modelIdentifier
+        row.analysisModelIdentifier = result.modelIdentifier
         PersistenceGate.save(context, site: "ScreenSharePlayer.analyzeNow", meetingID: meeting.id)
         refresh(from: meeting)
         LogManager.shared.log("Analyze-frame complete for [\(frame.formattedTimestamp)] (\(observation.contentType))", category: .screen, meetingID: meeting.id)

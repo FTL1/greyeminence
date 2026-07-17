@@ -13,6 +13,10 @@ struct ScreenSharePlayerSection: View {
     /// Player → transcript: fired with the nearest final segment's ID as the
     /// playhead crosses segment boundaries (throttled).
     var onPlayheadSegment: ((UUID) -> Void)?
+    /// Set by the Reanalyze menu's "Re-analyze screen shares" item; the
+    /// section consumes it: expand, wipe + redo all frame observations and
+    /// recaps, clear.
+    var reanalyzeSharesTrigger: Binding<Bool> = .constant(false)
 
     @Environment(\.modelContext) private var modelContext
     @State private var model: ScreenSharePlayerModel?
@@ -43,6 +47,13 @@ struct ScreenSharePlayerSection: View {
                     isExpanded = true
                     model?.seek(to: time)
                     pendingSeekTime = nil
+                }
+                .onChange(of: reanalyzeSharesTrigger.wrappedValue) {
+                    guard reanalyzeSharesTrigger.wrappedValue else { return }
+                    reanalyzeSharesTrigger.wrappedValue = false
+                    guard let model else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { isExpanded = true }
+                    Task { await model.reanalyzeAllShares(meeting: meeting, context: modelContext) }
                 }
         }
     }
@@ -149,25 +160,85 @@ struct ScreenSharePlayerSection: View {
             transport(model)
             TimelineScrubber(model: model)
             FilmstripView(model: model, meeting: meeting)
+            sessionRecap(model)
         }
         .onChange(of: model.currentIndex) {
             pushNearestSegment(model)
         }
     }
 
-    /// The stage hugs the frame image's own aspect ratio (centered in the
-    /// pane) instead of stretching a fixed-height canvas to full width —
-    /// which letterboxed the image inside an ultrawide black box that read
-    /// as "it captured the whole screen".
+    /// Narrative recap for the session under the playhead; key moments seek
+    /// on click. Sessions without a recap get a "Generate Recaps" backfill.
+    @ViewBuilder
+    private func sessionRecap(_ model: ScreenSharePlayerModel) -> some View {
+        if let sessionID = model.currentFrame?.sessionID {
+            if let recap = model.recapsBySession[sessionID] {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(recap.narrative)
+                            .font(.callout)
+                            .textSelection(.enabled)
+                        ForEach(Array(recap.keyMoments.enumerated()), id: \.offset) { _, moment in
+                            Button {
+                                model.seek(to: moment.timestamp)
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(Self.formatElapsed(moment.timestamp))
+                                        .font(.caption)
+                                        .fontDesign(.monospaced)
+                                        .foregroundStyle(.cyan)
+                                    Text(moment.label)
+                                        .font(.caption)
+                                        .foregroundStyle(.primary)
+                                        .multilineTextAlignment(.leading)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .help("Jump the player to this moment")
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label("Session recap", systemImage: "text.append")
+                        .font(.caption.weight(.semibold))
+                }
+            } else if model.hasSessionsWithoutRecaps || model.isGeneratingRecaps {
+                HStack(spacing: 6) {
+                    if model.isGeneratingRecaps {
+                        ProgressView().controlSize(.mini)
+                        Text("Generating recaps…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            Task { await model.generateRecaps(meeting: meeting, context: modelContext) }
+                        } label: {
+                            Label("Generate Recaps", systemImage: "text.append")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Synthesize a narrative recap for each share session from its analyzed frames and the transcript")
+                    }
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    private static func formatElapsed(_ elapsed: TimeInterval) -> String {
+        String(format: "%d:%02d", Int(elapsed) / 60, Int(elapsed) % 60)
+    }
+
+    /// The stage hugs the frame image's own aspect ratio, left-aligned over
+    /// the transport controls, with the frame's full observation in a
+    /// scrollable panel attached to its right — no more two-line caption
+    /// truncating the detailed descriptions.
     @ViewBuilder
     private func stage(_ model: ScreenSharePlayerModel) -> some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: 10) {
             if let frame = model.currentFrame {
                 StageImageView(url: frame.imageURL, maxHeight: 340)
-                    .overlay(alignment: .bottom) {
-                        captionBar(frame, model: model)
-                    }
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .contextMenu {
                         Button("Copy Image") { model.copyImage(frame) }
@@ -175,6 +246,7 @@ struct ScreenSharePlayerSection: View {
                             .disabled(frame.ocrText?.isEmpty ?? true)
                         Button("Open Image") { model.openImage(frame) }
                     }
+                frameInfoPanel(frame, model: model)
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -189,36 +261,62 @@ struct ScreenSharePlayerSection: View {
         }
     }
 
+    /// Side panel with the frame's complete observation (scrollable,
+    /// selectable), or the analysis/OCR fallback states.
     @ViewBuilder
-    private func captionBar(_ frame: ScreenSharePlayerModel.FrameItem, model: ScreenSharePlayerModel) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if let observation = frame.observation {
-                Text(observation)
+    private func frameInfoPanel(_ frame: ScreenSharePlayerModel.FrameItem, model: ScreenSharePlayerModel) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(frame.formattedTimestamp)
                     .font(.caption)
-                    .lineLimit(2)
-            } else if model.analyzingFrameIDs.contains(frame.id) {
-                ProgressView().controlSize(.mini)
-                Text("Analyzing…")
-                    .font(.caption)
-            } else if let firstLine = frame.ocrText?.components(separatedBy: "\n").first, !firstLine.isEmpty {
-                Image(systemName: "text.viewfinder")
-                    .font(.caption2)
-                Text(firstLine)
-                    .font(.caption)
-                    .italic()
-                    .lineLimit(1)
-            } else {
-                Text("No analysis for this frame")
-                    .font(.caption)
+                    .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
+                if let type = frame.contentType {
+                    Text(type.uppercased())
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.cyan.opacity(0.15), in: Capsule())
+                        .foregroundStyle(.cyan)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let observation = frame.observation {
+                        Text(observation)
+                            .font(.caption)
+                            .textSelection(.enabled)
+                    } else if model.analyzingFrameIDs.contains(frame.id) {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Analyzing…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let firstLine = frame.ocrText?.components(separatedBy: "\n").first, !firstLine.isEmpty {
+                        Label {
+                            Text(firstLine)
+                                .font(.caption)
+                                .italic()
+                        } icon: {
+                            Image(systemName: "text.viewfinder")
+                                .font(.caption2)
+                        }
+                        .foregroundStyle(.secondary)
+                    } else {
+                        Text("No analysis for this frame")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(.white.opacity(0.92))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.55))
+        .padding(8)
+        .frame(width: 260)
+        .frame(maxHeight: 340)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     @ViewBuilder

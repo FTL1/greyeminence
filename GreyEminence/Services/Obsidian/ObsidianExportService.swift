@@ -137,8 +137,12 @@ enum ObsidianExportService {
 
         // Shared Content — observation text + timestamps only (images stay
         // in the app container; copying them into the vault is a bloat and
-        // sync-conflict magnet, revisit as an opt-in later).
-        let sharedContentLines = sharedContentSection(frames: meeting.screenFrames)
+        // sync-conflict magnet, revisit as an opt-in later). Sessions with a
+        // synthesized narrative lead with the recap paragraph.
+        let sharedContentLines = sharedContentSection(
+            frames: meeting.screenFrames,
+            summaries: meeting.sessionSummaries
+        )
         if !sharedContentLines.isEmpty {
             lines.append(contentsOf: sharedContentLines)
         }
@@ -159,18 +163,43 @@ enum ObsidianExportService {
         return lines.joined(separator: "\n")
     }
 
-    /// "## Shared Content" — one subsection per share session, one line per
-    /// frame that has something to say (observation, or OCR first line as a
-    /// fallback). Empty array when the meeting captured nothing.
+    /// "## Shared Content" — one subsection per share session. Sessions with
+    /// a synthesized narrative export the recap paragraph + key moments;
+    /// sessions without fall back to one line per frame that has something
+    /// to say (observation, or OCR first line). Empty array when the meeting
+    /// captured nothing.
     @MainActor
-    private static func sharedContentSection(frames: [ScreenShareFrame]) -> [String] {
+    private static func sharedContentSection(
+        frames: [ScreenShareFrame],
+        summaries: [ShareSessionSummary]
+    ) -> [String] {
         guard !frames.isEmpty else { return [] }
         let sessions = ShareSession.sessions(from: frames)
         let bySession = Dictionary(grouping: frames, by: \.sessionID)
+        let summariesBySession = Dictionary(uniqueKeysWithValues: summaries.map { ($0.sessionID, $0) })
 
         var lines: [String] = ["## Shared Content", ""]
         var wroteAnySession = false
         for (index, session) in sessions.enumerated() {
+            let start = formatTimestamp(session.startTime)
+            let end = formatTimestamp(session.endTime)
+            lines.append("### Share session \(index + 1) (\(start)–\(end))")
+            lines.append("")
+
+            if let summary = summariesBySession[session.id] {
+                lines.append(summary.narrative)
+                let moments = summary.keyMoments
+                if !moments.isEmpty {
+                    lines.append("")
+                    for moment in moments {
+                        lines.append("- **[\(formatTimestamp(moment.timestamp))]** \(moment.label)")
+                    }
+                }
+                lines.append("")
+                wroteAnySession = true
+                continue
+            }
+
             let sessionFrames = (bySession[session.id] ?? []).sorted { $0.timestamp < $1.timestamp }
             var entryLines: [String] = []
             var seen = Set<String>()
@@ -184,10 +213,6 @@ enum ObsidianExportService {
                     entryLines.append("- **[\(frame.formattedTimestamp)]** (on screen) \(firstLine)")
                 }
             }
-            let start = formatTimestamp(session.startTime)
-            let end = formatTimestamp(session.endTime)
-            lines.append("### Share session \(index + 1) (\(start)–\(end))")
-            lines.append("")
             if entryLines.isEmpty {
                 lines.append("_\(session.frameCount) frame(s) captured — no readable content._")
             } else {

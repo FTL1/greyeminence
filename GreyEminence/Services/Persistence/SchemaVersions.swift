@@ -247,9 +247,23 @@ enum SchemaV17: VersionedSchema {
     }
 }
 
+/// SchemaV18 adds two independent models in one bump (they ship in the same
+/// release):
+/// - `ShareSessionSummary` — per-share-session synthesized narrative, with a
+///   cascade relationship from `Meeting` (`Meeting.sessionSummaries`).
+/// - `AIUsageEvent` — the AI usage ledger; deliberately relationship-free
+///   (plain `meetingID: UUID?`) so it survives meeting deletion.
+/// New models + one optional relationship — lightweight migration.
+enum SchemaV18: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(18, 0, 0) }
+    static var models: [any PersistentModel.Type] {
+        SchemaV17.models + [ShareSessionSummary.self, AIUsageEvent.self]
+    }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self, SchemaV17.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self, SchemaV17.self, SchemaV18.self]
     }
 
     static var stages: [MigrationStage] {
@@ -269,7 +283,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV13.self, toVersion: SchemaV14.self),
             .lightweight(fromVersion: SchemaV14.self, toVersion: SchemaV15.self),
             .lightweight(fromVersion: SchemaV15.self, toVersion: SchemaV16.self),
-            .lightweight(fromVersion: SchemaV16.self, toVersion: SchemaV17.self)
+            .lightweight(fromVersion: SchemaV16.self, toVersion: SchemaV17.self),
+            .lightweight(fromVersion: SchemaV17.self, toVersion: SchemaV18.self)
         ]
     }
 }

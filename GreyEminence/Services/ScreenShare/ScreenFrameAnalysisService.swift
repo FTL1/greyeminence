@@ -36,30 +36,46 @@ actor ScreenFrameAnalysisService {
         var failedIDs: [UUID] = []
         /// Frames dropped without analysis (batch overflow or budget).
         var skippedIDs: [UUID] = []
+        /// Which model produced `observations` — stamped on the rows as
+        /// provenance. The frame client's model, NOT the main model.
+        var modelIdentifier: String?
     }
 
     /// OCR characters included per frame in the prompt manifest.
     static let manifestOCRLimit = 500
+    /// Characters of the last applied observation carried into the next
+    /// batch's prompt as change-vs-previous context.
+    static let previousObservationLimit = 300
+    /// Visual-only (video-churn) frames analyzed at most this often per session.
+    static let visualOnlyMinimumGap: TimeInterval = 60
 
     private let client: any AIClient
     private let meetingID: UUID?
     private let maxFramesPerCall: Int
     private let maxAnalyzedPerMeeting: Int
+    private let analysisPixelBudget: Int
 
     private var pending: [FrameSnapshot] = []
     private(set) var analyzedCount = 0
     private var budgetExhausted = false
+    /// Last visual-only frame allowed through the throttle, per session.
+    private var visualOnlyLastAllowedAt: [UUID: TimeInterval] = [:]
+    /// First ~300 chars of the chronologically last observation applied —
+    /// gives the next batch's first frame change-vs-previous context.
+    private var previousObservationExcerpt: String?
 
     init(
         client: any AIClient,
         meetingID: UUID?,
         maxFramesPerCall: Int = 4,
-        maxAnalyzedPerMeeting: Int
+        maxAnalyzedPerMeeting: Int,
+        analysisPixelBudget: Int = ScreenShareSettings.analysisPixelBudget
     ) {
         self.client = client
         self.meetingID = meetingID
         self.maxFramesPerCall = maxFramesPerCall
         self.maxAnalyzedPerMeeting = maxAnalyzedPerMeeting
+        self.analysisPixelBudget = analysisPixelBudget
     }
 
     var analysisModelIdentifier: String { client.modelIdentifier }
@@ -81,19 +97,33 @@ actor ScreenFrameAnalysisService {
     /// rather than an ever-growing backlog.
     func analyzePendingBatch(recentTopics: [String]) async -> BatchResult {
         var result = BatchResult()
+        result.modelIdentifier = client.modelIdentifier
         guard !pending.isEmpty else { return result }
 
         let drained = pending
         pending = []
 
+        // Video churn first: at most one visual-only frame per minute per
+        // session gets to compete for the batch; the rest go straight to
+        // skipped.
+        let throttled = Self.throttleVisualOnly(
+            drained,
+            lastAnalyzedAt: visualOnlyLastAllowedAt,
+            minimumGap: Self.visualOnlyMinimumGap
+        )
+        visualOnlyLastAllowedAt = throttled.lastAnalyzedAt
+        result.skippedIDs = throttled.droppedIDs
+
         var batch = Self.selectBatch(
-            from: drained,
+            from: throttled.kept,
             limit: min(maxFramesPerCall, max(0, maxAnalyzedPerMeeting - analyzedCount))
         )
         let batchIDs = Set(batch.map(\.frameID))
-        result.skippedIDs = drained.map(\.frameID).filter { !batchIDs.contains($0) }
+        result.skippedIDs.append(contentsOf: throttled.kept.map(\.frameID).filter { !batchIDs.contains($0) })
         guard !batch.isEmpty else {
-            budgetExhausted = true
+            if !throttled.kept.isEmpty {
+                budgetExhausted = true
+            }
             return result
         }
         batch.sort { $0.timestamp < $1.timestamp }
@@ -106,24 +136,31 @@ actor ScreenFrameAnalysisService {
         let userPrompt = AIPromptTemplates.screenAnalysisPrompt(
             frameCount: batch.count,
             frameManifest: manifest,
-            recentTopics: recentTopics
+            recentTopics: recentTopics,
+            previousObservation: previousObservationExcerpt
         )
-        let images = batch.map { AIImageContent(jpegData: $0.jpegData) }
+        let pixelBudget = analysisPixelBudget
+        let payloads = batch.map { ScreenFrameTriage.downscaledJPEG($0.jpegData, targetPixelCount: pixelBudget) }
+        let images = payloads.map { AIImageContent(jpegData: $0) }
         let systemPrompt = AIPromptTemplates.screenSystemPrompt
         let capturedMeetingID = meetingID
 
-        LogManager.send("Screen-frame analysis batch starting (\(batch.count) frames, \(result.skippedIDs.count) skipped)", category: .screen, meetingID: meetingID)
+        let originalKB = batch.reduce(0) { $0 + $1.jpegData.count } / 1024
+        let payloadKB = payloads.reduce(0) { $0 + $1.count } / 1024
+        LogManager.send("Screen-frame analysis batch starting (\(batch.count) frames, \(result.skippedIDs.count) skipped, payload \(payloadKB) KB from \(originalKB) KB)", category: .screen, meetingID: meetingID)
 
         let response: String
         do {
-            response = try await AIRetry.run(label: "screenFrames", meetingID: capturedMeetingID) { [client] in
-                try await withTimeout(seconds: 90) {
-                    try await client.sendMessage(
-                        system: systemPrompt,
-                        userContent: userPrompt,
-                        images: images,
-                        maxTokens: 2048
-                    )
+            response = try await AIUsageContext.attribute(.frameAnalysis, meetingID: capturedMeetingID) {
+                try await AIRetry.run(label: "screenFrames", meetingID: capturedMeetingID) { [client] in
+                    try await withTimeout(seconds: 90) {
+                        try await client.sendMessage(
+                            system: systemPrompt,
+                            userContent: userPrompt,
+                            images: images,
+                            maxTokens: 6000
+                        )
+                    }
                 }
             }
         } catch {
@@ -133,6 +170,9 @@ actor ScreenFrameAnalysisService {
         }
 
         result.observations = Self.parse(response: response, batch: batch, meetingID: meetingID)
+        if let latest = result.observations.max(by: { $0.timestamp < $1.timestamp }) {
+            previousObservationExcerpt = String(latest.observation.prefix(Self.previousObservationLimit))
+        }
         let unparsed = batchIDs.subtracting(result.observations.map(\.frameID))
         result.failedIDs.append(contentsOf: unparsed)
         LogManager.send(
@@ -150,6 +190,33 @@ actor ScreenFrameAnalysisService {
     }
 
     // MARK: - Pure helpers (unit-testable)
+
+    /// Rate-limit video churn: visual-only frames (hash moved, words didn't)
+    /// pass at most once per `minimumGap` seconds per session; the rest are
+    /// dropped as skipped. Real content changes always pass. Returns the
+    /// updated per-session map so the throttle carries across batches.
+    static func throttleVisualOnly(
+        _ frames: [FrameSnapshot],
+        lastAnalyzedAt: [UUID: TimeInterval],
+        minimumGap: TimeInterval = 60
+    ) -> (kept: [FrameSnapshot], droppedIDs: [UUID], lastAnalyzedAt: [UUID: TimeInterval]) {
+        var last = lastAnalyzedAt
+        var kept: [FrameSnapshot] = []
+        var droppedIDs: [UUID] = []
+        for frame in frames.sorted(by: { $0.timestamp < $1.timestamp }) {
+            guard frame.isVisualOnlyChange else {
+                kept.append(frame)
+                continue
+            }
+            if let previous = last[frame.sessionID], frame.timestamp - previous < minimumGap {
+                droppedIDs.append(frame.frameID)
+            } else {
+                last[frame.sessionID] = frame.timestamp
+                kept.append(frame)
+            }
+        }
+        return (kept, droppedIDs, last)
+    }
 
     /// Pick the frames worth spending vision tokens on: real content changes
     /// first, then even spacing across the timeline for whatever room is left.

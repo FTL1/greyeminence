@@ -116,6 +116,15 @@ final class RecordingViewModel {
     /// Rolling log of Claude's frame observations, in arrival order. Feeds
     /// the live UI and the transcript-intelligence injection.
     private(set) var screenObservationLog: [ScreenFrameAnalysisService.FrameObservation] = []
+    /// Share sessions that ended mid-recording and are waiting for narrative
+    /// synthesis (which runs once all their frames clear vision analysis).
+    private var endedSessionsAwaitingSynthesis: Set<UUID> = []
+    /// One-time "recap of the share that just ended" blocks handed to the
+    /// next successful rolling pass.
+    private var pendingRecapBlocksForRolling: [String] = []
+    /// Lazily-built session synthesis service (main model). Rebuilt on
+    /// demand — the stop path can run after live state was reset.
+    private var sessionSynthesis: ShareSessionSynthesisService?
     /// How much of `screenObservationLog` the rolling analysis has already
     /// seen — advances only after a successful pass.
     private var lastSentObservationIndex = 0
@@ -795,17 +804,29 @@ final class RecordingViewModel {
                 }
             }
 
+            // Sweep every share session that still lacks a narrative —
+            // including the one open at stop — so the final analysis
+            // receives session recaps instead of raw bullets. Failures
+            // simply leave that session on per-frame fallback lines.
+            let unsummarizedSessions = Set(meeting.screenFrames.map(\.sessionID))
+                .subtracting(meeting.sessionSummaries.map(\.sessionID))
+            for sessionID in unsummarizedSessions {
+                _ = await self.synthesizeSession(sessionID: sessionID, meeting: meeting, segments: finalSnapshots)
+            }
+
             // Try final AI analysis (may fail or return nil — that's OK)
             if let service {
                 do {
                     let roster = MeetingRoster.snapshot(for: meeting)
-                    if !observationsAtStop.isEmpty {
-                        self.log.log("Injecting \(observationsAtStop.count) screen observation(s) into final analysis", category: .screen)
+                    let screenBlock = ScreenObservationFormatter.finalBlock(for: meeting)
+                        ?? ScreenObservationFormatter.finalBlock(observationsAtStop)
+                    if screenBlock != nil {
+                        self.log.log("Injecting screen context into final analysis (\(meeting.sessionSummaries.count) recap(s), \(observationsAtStop.count) live observation(s))", category: .screen)
                     }
                     if let result = try await service.performFinalAnalysis(
                         segments: finalSnapshots,
                         roster: roster,
-                        screenObservations: ScreenObservationFormatter.finalBlock(observationsAtStop)
+                        screenObservations: screenBlock
                     ) {
                         resultSummary = result.summary
                         resultActionItems = result.actionItems.map { parsed in
@@ -926,6 +947,9 @@ final class RecordingViewModel {
         screenObservationLog = []
         lastSentObservationIndex = 0
         budgetRefusedFrameIDs = []
+        endedSessionsAwaitingSynthesis = []
+        pendingRecapBlocksForRolling = []
+        sessionSynthesis = nil
     }
 
     // MARK: - Screen-Share Capture
@@ -964,7 +988,7 @@ final class RecordingViewModel {
         let task = Task { [weak self] in
             let client: any AIClient
             do {
-                guard let made = try await AIClientFactory.makeClient() else {
+                guard let made = try await AIClientFactory.makeFrameAnalysisClient() else {
                     LogManager.send("Screen-frame analysis skipped: no API key configured", category: .screen, level: .warning, meetingID: meetingID)
                     return
                 }
@@ -992,6 +1016,7 @@ final class RecordingViewModel {
                     let topics = await MainActor.run { self?.topics ?? [] }
                     let result = await service.analyzePendingBatch(recentTopics: topics)
                     await MainActor.run { self?.applyFrameAnalysis(result) }
+                    await self?.synthesizeEligibleEndedSessions()
                 }
                 try? await Task.sleep(for: .seconds(60))
             }
@@ -1022,7 +1047,7 @@ final class RecordingViewModel {
             row.contentTypeRaw = observation.contentType
             row.keyEntities = observation.keyEntities
             row.analysisState = .analyzed
-            row.analysisModelIdentifier = aiModelIdentifier
+            row.analysisModelIdentifier = result.modelIdentifier
         }
         for id in result.failedIDs {
             rowsByID[id]?.analysisState = .failed
@@ -1032,6 +1057,108 @@ final class RecordingViewModel {
         }
         if !result.observations.isEmpty {
             log.log("Applied \(result.observations.count) screen observation(s)", category: .screen)
+        }
+    }
+
+    // MARK: - Session narrative synthesis
+
+    /// Synthesize narratives for ended sessions whose frames are all done
+    /// with vision analysis. Runs from the 60s frame loop; the stop path
+    /// sweeps whatever remains (including the session still open at stop).
+    private func synthesizeEligibleEndedSessions() async {
+        guard !endedSessionsAwaitingSynthesis.isEmpty, let meeting = currentMeeting else { return }
+        for sessionID in Array(endedSessionsAwaitingSynthesis) {
+            // Frames still buffered for the 10s persistence loop, or still
+            // pending vision — try again next tick.
+            guard !pendingScreenFrames.contains(where: { $0.0.sessionID == sessionID }) else { continue }
+            let frames = meeting.screenFrames.filter { $0.sessionID == sessionID }
+            guard !frames.isEmpty else {
+                endedSessionsAwaitingSynthesis.remove(sessionID)  // session left no kept frames
+                continue
+            }
+            guard !frames.contains(where: { $0.analysisState == .pendingVision }) else { continue }
+
+            endedSessionsAwaitingSynthesis.remove(sessionID)
+            if let narrative = await synthesizeSession(sessionID: sessionID, meeting: meeting, segments: snapshotSegments()) {
+                let span = ShareSessionSynthesisService.span(
+                    start: frames.map(\.timestamp).min() ?? 0,
+                    end: frames.map(\.timestamp).max() ?? 0
+                )
+                pendingRecapBlocksForRolling.append(
+                    "Recap of the share that just ended (\(span)):\n\(narrative.narrative)"
+                )
+            }
+        }
+    }
+
+    /// Synthesize and persist one session's narrative. Returns nil when the
+    /// session has nothing analyzed, already has a summary, or synthesis
+    /// fails — every nil degrades to the per-frame fallback in the final
+    /// block. The summary row's `.unique` sessionID is the exactly-once
+    /// backstop if two paths race.
+    private func synthesizeSession(
+        sessionID: UUID,
+        meeting: Meeting,
+        segments: [SegmentSnapshot]
+    ) async -> ShareSessionSynthesisService.SessionNarrative? {
+        guard !meeting.sessionSummaries.contains(where: { $0.sessionID == sessionID }) else { return nil }
+        let frames = meeting.screenFrames.filter { $0.sessionID == sessionID }
+        let observations: [ShareSessionSynthesisService.FrameObservationLine] = frames.compactMap { row in
+            guard let text = row.observation, !text.isEmpty else { return nil }
+            return ShareSessionSynthesisService.FrameObservationLine(
+                timestamp: row.timestamp,
+                formattedTimestamp: row.formattedTimestamp,
+                observation: text
+            )
+        }
+        guard !observations.isEmpty else { return nil }
+
+        let startTime = frames.map(\.timestamp).min() ?? 0
+        let endTime = frames.map(\.timestamp).max() ?? startTime
+        let input = ShareSessionSynthesisService.makeInput(
+            sessionID: sessionID,
+            meetingID: meeting.id,
+            windowTitle: frames.first?.windowTitle,
+            startTime: startTime,
+            endTime: endTime,
+            observations: observations,
+            segments: segments
+        )
+
+        let service: ShareSessionSynthesisService
+        if let existing = sessionSynthesis {
+            service = existing
+        } else {
+            guard let client = try? await AIClientFactory.makeClient() else {
+                log.log("Session synthesis skipped: AI client unavailable", category: .screen, level: .warning)
+                return nil
+            }
+            let made = ShareSessionSynthesisService(client: client)
+            sessionSynthesis = made
+            service = made
+        }
+
+        do {
+            let narrative = try await service.synthesize(input)
+            let summary = ShareSessionSummary(
+                sessionID: sessionID,
+                windowTitle: frames.first?.windowTitle,
+                startTime: startTime,
+                endTime: endTime,
+                narrative: narrative.narrative,
+                keyMoments: narrative.keyMoments,
+                entities: narrative.entities,
+                modelIdentifier: narrative.modelIdentifier
+            )
+            summary.meeting = meeting
+            meeting.sessionSummaries.append(summary)
+            if let modelContext {
+                PersistenceGate.save(modelContext, site: "sessionSynthesis", critical: false, meetingID: meeting.id)
+            }
+            return narrative
+        } catch {
+            log.log("Session synthesis failed (final analysis falls back to per-frame lines): \(error.localizedDescription)", category: .screen, level: .warning)
+            return nil
         }
     }
 
@@ -1055,7 +1182,8 @@ final class RecordingViewModel {
         case .frameDropped:
             break
 
-        case .sessionEnded:
+        case .sessionEnded(let sessionID, _):
+            endedSessionsAwaitingSynthesis.insert(sessionID)
             if case .capturing = screenCaptureState {
                 screenCaptureState = .watching
             }
@@ -1520,18 +1648,29 @@ final class RecordingViewModel {
                     self.log.log("AI sending \(snapshots.count) segments to Claude API", category: .ai)
                 }
 
-                // New screen observations since the last successful pass.
-                // The index only advances on success, so a failed pass
-                // re-sends its observations next time.
-                let observationBatch = await MainActor.run {
-                    let batch = ScreenObservationFormatter.rollingBlock(
+                // New screen observations since the last successful pass,
+                // plus any one-time session-recap blocks. Both only advance
+                // on success, so a failed pass re-sends them next time.
+                let observationBatch = await MainActor.run { () -> (block: String, endIndex: Int, recapCount: Int)? in
+                    let rolling = ScreenObservationFormatter.rollingBlock(
                         self.screenObservationLog,
                         afterIndex: self.lastSentObservationIndex
                     )
-                    if let batch {
-                        self.log.log("Injecting \(batch.endIndex - self.lastSentObservationIndex) screen observation(s) into rolling analysis", category: .screen)
+                    let recaps = self.pendingRecapBlocksForRolling
+                    var parts: [String] = recaps
+                    if let rolling {
+                        parts.append(rolling.block)
+                        self.log.log("Injecting \(rolling.endIndex - self.lastSentObservationIndex) screen observation(s) into rolling analysis", category: .screen)
                     }
-                    return batch
+                    if !recaps.isEmpty {
+                        self.log.log("Injecting \(recaps.count) session recap(s) into rolling analysis", category: .screen)
+                    }
+                    guard !parts.isEmpty else { return nil }
+                    return (
+                        parts.joined(separator: "\n\n"),
+                        rolling?.endIndex ?? self.lastSentObservationIndex,
+                        recaps.count
+                    )
                 }
 
                 do {
@@ -1550,6 +1689,8 @@ final class RecordingViewModel {
                             self.latestRawResponse = result.rawResponse
                             if let observationBatch {
                                 self.lastSentObservationIndex = observationBatch.endIndex
+                                let consumed = min(observationBatch.recapCount, self.pendingRecapBlocksForRolling.count)
+                                self.pendingRecapBlocksForRolling.removeFirst(consumed)
                             }
                             self.log.log("AI analysis complete (\(result.actionItems.count) actions, \(result.topics.count) topics)", category: .ai)
                         }

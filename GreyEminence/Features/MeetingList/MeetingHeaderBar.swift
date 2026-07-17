@@ -55,7 +55,9 @@ struct MeetingHeaderBar: View {
                     }
                 }
 
-                HStack(spacing: 12) {
+                // Wrapping layout — badges and buttons flow to the next line
+                // in narrow windows instead of pushing each other off screen.
+                FlowLayout(spacing: 10) {
                     Label(meeting.date.formatted(date: .abbreviated, time: .shortened), systemImage: "calendar")
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -152,7 +154,6 @@ struct MeetingHeaderBar: View {
                             .fixedSize(horizontal: true, vertical: false)
                         }
                     }
-                    Spacer(minLength: 0)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

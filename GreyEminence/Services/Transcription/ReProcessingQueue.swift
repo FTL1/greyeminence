@@ -450,12 +450,15 @@ final class ReProcessingQueue {
             // Persisted screen observations ride along — this pass REPLACES
             // the live insights, and without them the screen-aware summary
             // produced at stop time would be silently degraded.
-            let screenBlock = ScreenObservationFormatter.finalBlock(fromFrames: meeting.screenFrames)
+            let screenBlock = ScreenObservationFormatter.finalBlock(for: meeting)
             if screenBlock != nil {
-                LogManager.send("Re-analysis: injecting screen observations from \(meeting.screenFrames.count) frame(s)", category: .screen, meetingID: meeting.id)
+                LogManager.send("Re-analysis: injecting screen context (\(meeting.sessionSummaries.count) recap(s), \(meeting.screenFrames.count) frame(s))", category: .screen, meetingID: meeting.id)
             }
-            _ = try await service.analyze(segments: segments, roster: roster, screenObservations: screenBlock)
-            guard let result = try await service.performFinalAnalysis(segments: segments, roster: roster, screenObservations: screenBlock) else { return }
+            let finalResult = try await AIUsageContext.attribute(.reanalysis, meetingID: meeting.id) {
+                _ = try await service.analyze(segments: segments, roster: roster, screenObservations: screenBlock)
+                return try await service.performFinalAnalysis(segments: segments, roster: roster, screenObservations: screenBlock)
+            }
+            guard let result = finalResult else { return }
             for old in meeting.insights { context.delete(old) }
             for old in meeting.actionItems { context.delete(old) }
 

@@ -1,5 +1,7 @@
 import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Vision
 
 /// Pure frame-triage helpers: perceptual hashing (change detection), the
@@ -105,6 +107,44 @@ enum ScreenFrameTriage {
     }
 
     // MARK: - Scaling
+
+    /// Re-encode a JPEG so its pixel count fits `targetPixelCount` — the
+    /// vision-payload copy. Disk keeps the original capture; this only trims
+    /// what goes over the wire (image tokens scale with pixels). Any decode
+    /// or encode failure returns the original data — a bigger payload, never
+    /// a lost frame.
+    static func downscaledJPEG(_ jpegData: Data, targetPixelCount: Int, quality: Double = 0.7) -> Data {
+        guard let source = CGImageSourceCreateWithData(jpegData as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Double,
+              let height = properties[kCGImagePropertyPixelHeight] as? Double,
+              width > 0, height > 0 else {
+            return jpegData
+        }
+        let originalSize = CGSize(width: width, height: height)
+        let target = scaledSize(for: originalSize, targetPixelCount: targetPixelCount)
+        guard target != originalSize else { return jpegData }
+
+        let thumbnailOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: Int(max(target.width, target.height)),
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let scaled = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbnailOptions as CFDictionary) else {
+            return jpegData
+        }
+
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            output, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return jpegData }
+        CGImageDestinationAddImage(
+            destination, scaled,
+            [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(destination) else { return jpegData }
+        return output as Data
+    }
 
     /// Pixel size that keeps `width*height` at or under `targetPixelCount`
     /// while preserving aspect ratio. Never upscales.

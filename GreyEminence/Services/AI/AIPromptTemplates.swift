@@ -136,6 +136,7 @@ enum AIPromptTemplates {
         case .meetingFinal:   defaultFinalCleanupPrompt
         case .screenSystem:   defaultScreenSystemPrompt
         case .screenAnalysis: defaultScreenAnalysisPrompt
+        case .screenSessionSynthesis: defaultSessionSynthesisPrompt
         }
     }
 
@@ -148,13 +149,40 @@ enum AIPromptTemplates {
     static func screenAnalysisPrompt(
         frameCount: Int,
         frameManifest: String,
-        recentTopics: [String]
+        recentTopics: [String],
+        previousObservation: String?
     ) -> String {
         let template = PromptStore.shared.get(.screenAnalysis, default: defaultScreenAnalysisPrompt)
         return PromptStore.render(template, values: [
             "frameCount": "\(frameCount)",
             "frameManifest": frameManifest,
             "recentTopics": recentTopics.isEmpty ? "(none yet)" : recentTopics.joined(separator: ", "),
+            "previousObservation": previousObservation ?? "(none — this is the first analyzed batch)",
+        ])
+    }
+
+    // MARK: - Session synthesis
+
+    static let sessionSynthesisSystemPrompt = """
+        You are a meeting intelligence assistant. You fuse what was shown on \
+        a shared screen with what was said while it was on screen, producing \
+        a recap grounded strictly in the material you are given. You MUST \
+        respond with ONLY valid JSON matching the schema in the user message — \
+        no prose, no markdown, no explanation before or after.
+        """
+
+    static func sessionSynthesisPrompt(
+        windowTitle: String?,
+        sessionSpan: String,
+        frameDescriptions: String,
+        transcriptExcerpt: String
+    ) -> String {
+        let template = PromptStore.shared.get(.screenSessionSynthesis, default: defaultSessionSynthesisPrompt)
+        return PromptStore.render(template, values: [
+            "windowTitle": windowTitle?.isEmpty == false ? windowTitle! : "(untitled window)",
+            "sessionSpan": sessionSpan,
+            "frameDescriptions": frameDescriptions,
+            "transcriptExcerpt": transcriptExcerpt,
         ])
     }
 
@@ -412,8 +440,9 @@ enum AIPromptTemplates {
     private static let defaultScreenSystemPrompt: String = """
         You are analyzing screenshots of content shared on screen during a live \
         meeting (slides, code, diagrams, dashboards, documents). For each image you \
-        receive, describe concisely what it shows so a meeting assistant can weave \
-        screen context into its notes.
+        receive, produce a DETAILED description — thorough enough that a meeting \
+        assistant that never sees the image can reconstruct what was shown and \
+        weave it into the meeting's story.
 
         You MUST respond with ONLY valid JSON matching this exact schema — no prose, \
         no markdown, no explanation before or after:
@@ -422,7 +451,7 @@ enum AIPromptTemplates {
           "frames": [
             {
               "index": 0,
-              "observation": "1-2 sentences: what the frame shows, and what changed versus the previous frame when that's apparent",
+              "observation": "100-250 words: the shared CONTENT itself — substantive text, data, and values transcribed verbatim — plus what is new or different versus the previous frame",
               "content_type": "slide|code|diagram|dashboard|document|terminal|video|other",
               "key_entities": ["specific named things visible: systems, projects, tickets, people, metrics"],
               "notable_text": "short verbatim text that carries meaning beyond the OCR excerpt you were given, or null"
@@ -432,8 +461,24 @@ enum AIPromptTemplates {
 
         Rules:
         - One entry per image, "index" matching the order the images were provided.
-        - Observations must be concrete ("Q3 roadmap slide showing auth-service GA \
-        slipping to November") — never generic ("a slide with text").
+        - Each observation is 100-250 words about the CONTENT being shared — \
+        the document, data, code, or slide. Transcribe the substance: real \
+        numbers, table rows, chart axes and values, code identifiers and \
+        signatures, dates, names, ticket IDs, metric readings — verbatim where \
+        the values carry meaning. Never compress legible data into vague \
+        phrases ("some metrics", "a list of items").
+        - NEVER describe application chrome: menus, toolbars, side panels, \
+        tab bars, viewer controls, window furniture. "The left panel shows an \
+        'All Tools' menu" is worthless — that is the app, not what's being \
+        shared. Name the application in at most a few words, and only when it \
+        genuinely aids context ("a PDF of the Q3 contract").
+        - When a previous-frame description is provided, or multiple frames \
+        are in this batch, describe only what is NEW or DIFFERENT in the \
+        content ("error rate now 4.1%, up from 2.3%"; "scrolled to the \
+        Codesheets table: …"). Never say things are "the same" or re-describe \
+        unchanged material — spend the words on what changed.
+        - Never invent content you cannot actually read — describe partial \
+        legibility honestly ("y-axis labels too small to read").
         - Extract key_entities in canonical form; they feed cross-meeting search.
         - If an image is unreadable or blank, say so in the observation and use \
         content_type "other".
@@ -443,11 +488,45 @@ enum AIPromptTemplates {
         {{frameCount}} screenshot(s) captured from a screen share during the meeting, \
         in chronological order. For context, the meeting's topics so far: {{recentTopics}}
 
+        The most recently analyzed frame (immediately before this batch) was \
+        described as: {{previousObservation}}
+
         For each image, on-device OCR extracted the following text (may be partial \
         or noisy — trust the image over the OCR):
 
         {{frameManifest}}
 
         Analyze each image and respond with the JSON schema from your instructions.
+        """
+
+    private static let defaultSessionSynthesisPrompt: String = """
+        A screen-share session just ended during a meeting. \
+        Window: "{{windowTitle}}", shown {{sessionSpan}} (elapsed meeting time).
+
+        DETAILED FRAME DESCRIPTIONS (chronological, from screenshots of the share):
+        {{frameDescriptions}}
+
+        TRANSCRIPT AROUND THE SESSION (from 30s before it started to 30s after it ended):
+        {{transcriptExcerpt}}
+
+        Write a recap that fuses what was SHOWN with what was SAID — the story \
+        of this share session as part of the meeting.
+
+        Respond with ONLY valid JSON matching this exact schema:
+
+        {
+          "narrative": "One 120-250 word paragraph: what was presented, how it evolved across the session, and how the conversation engaged with it. Weave spoken reactions and decisions together with the on-screen content. Preserve concrete values (numbers, dates, names, identifiers) from the frames.",
+          "key_moments": [{"time": "m:ss", "label": "5-12 words: what happened at this moment"}],
+          "entities": ["canonical named things: systems, projects, tickets, people, metrics"]
+        }
+
+        Rules:
+        - Ground every claim in the frames or the transcript above — never invent \
+        content, and never present speculation as fact.
+        - 3-8 key_moments. Every "time" must be a real timestamp copied from a \
+        frame or transcript line above. Prefer moments where the screen content \
+        changed or the discussion pivoted.
+        - If the transcript is empty or unrelated, recap the screen content alone \
+        and say the room did not discuss it.
         """
 }

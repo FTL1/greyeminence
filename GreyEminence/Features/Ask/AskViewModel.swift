@@ -125,7 +125,7 @@ final class AskViewModel {
             trimmed,
             topK: 40,
             dateRange: dateFilter.range(),
-            kinds: [.transcriptSegment, .screenObservation]
+            kinds: [.transcriptSegment, .screenObservation, .sessionNarrative]
         )
         results = found
 
@@ -164,10 +164,12 @@ final class AskViewModel {
         """
 
         do {
-            let response = try await client.sendMessage(
-                system: "You help the user recall things from their past meetings.",
-                userContent: prompt
-            )
+            let response = try await AIUsageContext.attribute(.ask) {
+                try await client.sendMessage(
+                    system: "You help the user recall things from their past meetings.",
+                    userContent: prompt
+                )
+            }
             synthesizedAnswer = response
         } catch {
             synthesizedAnswer = "Couldn't synthesize an answer: \(error.localizedDescription)"

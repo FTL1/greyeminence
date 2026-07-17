@@ -10,7 +10,59 @@ enum AIClientFactory {
         let providerRaw = UserDefaults.standard.string(forKey: "aiProvider") ?? "anthropic"
         let provider = AIProvider(rawValue: providerRaw) ?? .anthropic
         let model = UserDefaults.standard.string(forKey: "claudeModel") ?? "claude-sonnet-4-20250514"
+        return try await makeClient(provider: provider, model: model)
+    }
 
+    /// Client for per-frame vision analysis. Defaults to Haiku — frame
+    /// descriptions don't need the main model's depth, and Haiku is ~3×
+    /// cheaper per token. Session synthesis and transcript analysis stay
+    /// on `makeClient()`.
+    static func makeFrameAnalysisClient() async throws -> (any AIClient)? {
+        let providerRaw = UserDefaults.standard.string(forKey: "aiProvider") ?? "anthropic"
+        let provider = AIProvider(rawValue: providerRaw) ?? .anthropic
+        let mainModel = UserDefaults.standard.string(forKey: "claudeModel") ?? "claude-sonnet-4-20250514"
+
+        // No trajector settings at all means the main model also runs on
+        // foundation IDs, so Haiku's foundation ID is equally reachable.
+        let trajector = TrajectorSettings.load()
+        let choice = frameAnalysisModel(
+            preferred: ScreenShareSettings.frameAnalysisModel,
+            mainModel: mainModel,
+            provider: provider,
+            haikuProfileAvailable: trajector == nil || trajector?.haikuModel != nil
+        )
+        if choice.fellBackToMainModel {
+            LogManager.send("Frame analysis using main model \(mainModel): no Haiku inference profile in trajector settings", category: .screen)
+        }
+        return try await makeClient(provider: provider, model: choice.model)
+    }
+
+    /// Resolution of which model the frame-analysis client is bound to.
+    struct FrameAnalysisModelChoice: Equatable {
+        let model: String
+        let fellBackToMainModel: Bool
+    }
+
+    /// Pure resolver for the frame-analysis model. An empty preference means
+    /// "same as main model". Bedrock orgs that route through inference
+    /// profiles can't invoke a model without a mapped profile — when Haiku
+    /// has no slot, fall back to the main model instead of failing mid-meeting.
+    static func frameAnalysisModel(
+        preferred: String,
+        mainModel: String,
+        provider: AIProvider,
+        haikuProfileAvailable: Bool
+    ) -> FrameAnalysisModelChoice {
+        guard !preferred.isEmpty, preferred != mainModel else {
+            return FrameAnalysisModelChoice(model: mainModel, fellBackToMainModel: false)
+        }
+        if provider == .bedrock, preferred.contains("haiku"), !haikuProfileAvailable {
+            return FrameAnalysisModelChoice(model: mainModel, fellBackToMainModel: true)
+        }
+        return FrameAnalysisModelChoice(model: preferred, fellBackToMainModel: false)
+    }
+
+    private static func makeClient(provider: AIProvider, model: String) async throws -> (any AIClient)? {
         switch provider {
         case .anthropic:
             guard let apiKey = try KeychainHelper.get(AIPromptTemplates.keychainKey),

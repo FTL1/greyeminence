@@ -98,6 +98,14 @@ struct BedrockAPIClient: AIClient, Sendable {
             throw BedrockAPIError.noTextContent
         }
 
+        if let usage = AIUsage.decode(fromResponseBody: data) {
+            UsageRecorder.record(modelIdentifier: modelIdentifier, usage: usage)
+            LogManager.send(
+                "usage: \(usage.inputTokens.formatted()) in / \(usage.outputTokens.formatted()) out (\(model))",
+                category: .ai
+            )
+        }
+
         if let jsonObject = try? JSONSerialization.jsonObject(with: data),
            let pretty = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
            let prettyString = String(data: pretty, encoding: .utf8) {

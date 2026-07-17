@@ -1,4 +1,5 @@
 import CoreGraphics
+import ImageIO
 import XCTest
 @testable import Grey_Eminence
 
@@ -145,6 +146,45 @@ final class ScreenFrameTriageTests: XCTestCase {
         )
         XCTAssertLessThanOrEqual(scaled.width * scaled.height, 1_150_000)
         XCTAssertEqual(scaled.width / scaled.height, 3840.0 / 2160.0, accuracy: 0.01)
+    }
+
+    // MARK: - downscaledJPEG
+
+    private func jpegData(width: Int, height: Int) -> Data {
+        let cgImage = image(width: width, height: height) { x, _ in UInt8((x * 7) % 256) }
+        let out = NSMutableData()
+        let dest = CGImageDestinationCreateWithData(out, "public.jpeg" as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, cgImage, nil)
+        CGImageDestinationFinalize(dest)
+        return out as Data
+    }
+
+    private func pixelSize(of jpeg: Data) -> CGSize? {
+        guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Double,
+              let h = props[kCGImagePropertyPixelHeight] as? Double else { return nil }
+        return CGSize(width: w, height: h)
+    }
+
+    func testDownscaledJPEGStaysUnderPixelBudget() {
+        let original = jpegData(width: 1600, height: 1200)
+        let scaled = ScreenFrameTriage.downscaledJPEG(original, targetPixelCount: 600_000)
+        let size = pixelSize(of: scaled)!
+        XCTAssertLessThanOrEqual(size.width * size.height, 600_000)
+        XCTAssertEqual(size.width / size.height, 1600.0 / 1200.0, accuracy: 0.05)
+        XCTAssertLessThan(scaled.count, original.count)
+    }
+
+    func testDownscaledJPEGLeavesSmallImagesUntouched() {
+        let original = jpegData(width: 640, height: 480)
+        let scaled = ScreenFrameTriage.downscaledJPEG(original, targetPixelCount: 600_000)
+        XCTAssertEqual(scaled, original)
+    }
+
+    func testDownscaledJPEGReturnsOriginalOnGarbage() {
+        let garbage = Data("not a jpeg".utf8)
+        XCTAssertEqual(ScreenFrameTriage.downscaledJPEG(garbage, targetPixelCount: 600_000), garbage)
     }
 
     // MARK: - Share sessions

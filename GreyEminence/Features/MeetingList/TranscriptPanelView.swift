@@ -615,8 +615,11 @@ struct TranscriptPanelView: View {
         )
         do {
             let roster = MeetingRoster.snapshot(for: target)
-            _ = try await service.analyze(segments: snapshots, roster: roster)
-            if let result = try await service.performFinalAnalysis(segments: snapshots, roster: roster) {
+            let finalResult = try await AIUsageContext.attribute(.reanalysis, meetingID: target.id) {
+                _ = try await service.analyze(segments: snapshots, roster: roster)
+                return try await service.performFinalAnalysis(segments: snapshots, roster: roster)
+            }
+            if let result = finalResult {
                 if let title = result.title {
                     target.applyGeneratedTitle(title)
                 }

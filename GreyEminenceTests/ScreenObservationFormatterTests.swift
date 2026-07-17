@@ -31,7 +31,38 @@ final class ScreenObservationFormatterTests: XCTestCase {
         XCTAssertEqual(line, "[12:34] (slide) Roadmap slide — on screen: \"GA: Nov\"")
     }
 
+    func testLineTruncatesObservationWhenCapped() {
+        let long = String(repeating: "word ", count: 100)  // 500 chars
+        let line = ScreenObservationFormatter.line(
+            for: observation(session: UUID(), timestamp: 10, text: long, notable: "GA: Nov"),
+            maxObservationChars: 240
+        )
+        XCTAssertTrue(line.contains("…"))
+        XCTAssertTrue(line.hasSuffix(" — on screen: \"GA: Nov\""))
+        XCTAssertLessThan(line.count, 300)
+    }
+
+    func testLineLeavesShortObservationsAlone() {
+        let line = ScreenObservationFormatter.line(
+            for: observation(session: UUID(), timestamp: 10, text: "short"),
+            maxObservationChars: 240
+        )
+        XCTAssertFalse(line.contains("…"))
+    }
+
     // MARK: - rollingBlock
+
+    func testRollingBlockTruncatesLongObservations() {
+        let long = String(repeating: "x", count: 1000)
+        let batch = ScreenObservationFormatter.rollingBlock(
+            [observation(session: UUID(), timestamp: 10, text: long)],
+            afterIndex: 0
+        )
+        XCTAssertNotNil(batch)
+        // 240-char cap + timestamp/type prefix + ellipsis — far below 1000.
+        XCTAssertLessThan(batch!.block.count, 300)
+        XCTAssertTrue(batch!.block.contains("…"))
+    }
 
     func testRollingBlockReturnsOnlyNewEntries() {
         let session = UUID()

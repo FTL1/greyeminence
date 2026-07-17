@@ -59,6 +59,7 @@ struct LiveSharedContentSection: View {
                                 .font(.callout)
                                 .lineLimit(2)
                                 .foregroundStyle(.primary)
+                                .help(observation.observation)
                         }
                     }
                 }

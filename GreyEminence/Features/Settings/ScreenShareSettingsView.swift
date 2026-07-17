@@ -8,6 +8,7 @@ struct ScreenShareSettingsView: View {
     @AppStorage(ScreenShareSettings.intervalSecondsKey) private var intervalSeconds = ScreenShareSettings.defaultIntervalSeconds
     @AppStorage(ScreenShareSettings.analysisEnabledKey) private var analysisEnabled = true
     @AppStorage(ScreenShareSettings.maxAnalyzedFramesKey) private var maxAnalyzedFrames = ScreenShareSettings.defaultMaxAnalyzedFrames
+    @AppStorage(ScreenShareSettings.frameAnalysisModelKey) private var frameAnalysisModel = ScreenShareSettings.defaultFrameAnalysisModel
 
     @State private var audioManager = AudioSessionManager()
     @State private var framesBytesOnDisk: Int64?
@@ -93,6 +94,15 @@ struct ScreenShareSettingsView: View {
             }
             .disabled(!captureEnabled || !analysisEnabled)
             Text("Caps Claude usage per meeting. Frames beyond the cap are kept with on-device text only.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Frame analysis model", selection: $frameAnalysisModel) {
+                Text("Haiku 4.5 (recommended)").tag(ScreenShareSettings.defaultFrameAnalysisModel)
+                Text("Same as main model").tag("")
+            }
+            .disabled(!captureEnabled || !analysisEnabled)
+            Text("Haiku describes frames at a fraction of the main model's cost. Meeting summaries and session recaps always use the main model.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
