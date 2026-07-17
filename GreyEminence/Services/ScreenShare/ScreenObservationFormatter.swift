@@ -1,9 +1,31 @@
 import Foundation
+import SwiftData
 
 /// Renders frame observations into the prompt blocks the transcript
 /// intelligence receives. Pure — unit-tested without the AI service.
 enum ScreenObservationFormatter {
     typealias Observation = ScreenFrameAnalysisService.FrameObservation
+
+    /// Final block built from persisted rows — used by re-analysis paths
+    /// (Reanalyze button, re-processing queue) that run after the live
+    /// observation log is gone. Frames without observations are skipped.
+    @MainActor
+    static func finalBlock(fromFrames frames: [ScreenShareFrame]) -> String? {
+        let observations: [Observation] = frames.compactMap { row in
+            guard let text = row.observation, !text.isEmpty else { return nil }
+            return Observation(
+                frameID: row.id,
+                timestamp: row.timestamp,
+                formattedTimestamp: row.formattedTimestamp,
+                sessionID: row.sessionID,
+                observation: text,
+                contentType: row.contentTypeRaw ?? "other",
+                keyEntities: row.keyEntities,
+                notableText: nil
+            )
+        }
+        return finalBlock(observations)
+    }
 
     /// Character budget for the final-analysis block.
     static let finalBlockCap = 3_000

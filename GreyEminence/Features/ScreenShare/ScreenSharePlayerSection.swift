@@ -80,6 +80,30 @@ struct ScreenSharePlayerSection: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if let model, model.hasUnanalyzedFrames || model.isBulkAnalyzing {
+                if model.isBulkAnalyzing {
+                    HStack(spacing: 4) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        if let progress = model.bulkProgress {
+                            Text("\(progress.done)/\(progress.total)")
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Button {
+                        Task { await model.analyzeAllFrames(meeting: meeting, context: modelContext) }
+                    } label: {
+                        Label("Analyze Frames", systemImage: "brain")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Run Claude vision on frames that don't have an observation yet")
+                }
+            }
             Image(systemName: "chevron.down")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)

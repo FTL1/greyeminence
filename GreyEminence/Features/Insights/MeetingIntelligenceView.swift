@@ -170,10 +170,13 @@ struct MeetingIntelligenceView: View {
 
             // Seed with analyze() first so performFinalAnalysis has a prior
             // summary to refine. Then always run the final pass — it produces
-            // the polished result including the meeting title.
+            // the polished result including the meeting title. Screen-share
+            // observations persisted on the frames ride along so a re-run
+            // stays screen-aware like the original live analysis.
             let roster = MeetingRoster.snapshot(for: meeting)
-            _ = try await service.analyze(segments: snapshots, roster: roster)
-            guard let rawResult = try await service.performFinalAnalysis(segments: snapshots, roster: roster) else {
+            let screenBlock = ScreenObservationFormatter.finalBlock(fromFrames: meeting.screenFrames)
+            _ = try await service.analyze(segments: snapshots, roster: roster, screenObservations: screenBlock)
+            guard let rawResult = try await service.performFinalAnalysis(segments: snapshots, roster: roster, screenObservations: screenBlock) else {
                 reanalysisError = "Analysis returned no results."
                 return
             }

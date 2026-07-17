@@ -225,6 +225,97 @@ final class ScreenSharePlayerModel {
         LogManager.shared.log("Deleted \(rows.count) screen frame(s)", category: .screen, meetingID: meeting.id)
     }
 
+    // MARK: - Bulk analysis backfill
+
+    private(set) var isBulkAnalyzing = false
+    private(set) var bulkProgress: (done: Int, total: Int)?
+
+    var hasUnanalyzedFrames: Bool {
+        frames.contains { $0.observation == nil }
+    }
+
+    /// Backfill Claude observations for every frame that never got one —
+    /// frames captured while the AI was unconfigured, budget-skipped, or
+    /// failed. Runs in batches of 4, bounded by the per-meeting budget.
+    func analyzeAllFrames(meeting: Meeting, context: ModelContext) async {
+        guard !isBulkAnalyzing else { return }
+        let targets = frames.filter { $0.observation == nil }
+        guard !targets.isEmpty,
+              let client = try? await AIClientFactory.makeClient(),
+              client.supportsImages else { return }
+
+        isBulkAnalyzing = true
+        defer {
+            isBulkAnalyzing = false
+            bulkProgress = nil
+        }
+
+        let budget = min(targets.count, ScreenShareSettings.maxAnalyzedFrames)
+        let service = ScreenFrameAnalysisService(
+            client: client,
+            meetingID: meeting.id,
+            maxAnalyzedPerMeeting: budget
+        )
+        let topics = meeting.latestInsight?.topics ?? []
+        var done = 0
+        bulkProgress = (0, budget)
+
+        var index = 0
+        while index < budget {
+            let chunk = Array(targets[index..<min(index + 4, budget)])
+            index += chunk.count
+
+            let snapshots: [ScreenFrameAnalysisService.FrameSnapshot] = chunk.compactMap { item in
+                guard let data = try? Data(contentsOf: item.imageURL) else { return nil }
+                return ScreenFrameAnalysisService.FrameSnapshot(
+                    frameID: item.id,
+                    sessionID: item.sessionID,
+                    timestamp: item.timestamp,
+                    formattedTimestamp: item.formattedTimestamp,
+                    jpegData: data,
+                    ocrExcerpt: item.ocrText,
+                    isVisualOnlyChange: false
+                )
+            }
+            guard !snapshots.isEmpty else { continue }
+
+            analyzingFrameIDs.formUnion(snapshots.map(\.frameID))
+            _ = await service.enqueue(snapshots)
+            let result = await service.analyzePendingBatch(recentTopics: topics)
+            analyzingFrameIDs.subtract(snapshots.map(\.frameID))
+
+            apply(result, to: meeting, modelIdentifier: client.modelIdentifier)
+            done += result.observations.count
+            bulkProgress = (done, budget)
+        }
+
+        PersistenceGate.save(context, site: "ScreenSharePlayer.analyzeAllFrames", meetingID: meeting.id)
+        refresh(from: meeting)
+        LogManager.shared.log("Backfilled \(done) frame observation(s)", category: .screen, meetingID: meeting.id)
+    }
+
+    private func apply(
+        _ result: ScreenFrameAnalysisService.BatchResult,
+        to meeting: Meeting,
+        modelIdentifier: String
+    ) {
+        var rowsByID: [UUID: ScreenShareFrame] = [:]
+        for row in meeting.screenFrames {
+            rowsByID[row.id] = row
+        }
+        for observation in result.observations {
+            guard let row = rowsByID[observation.frameID] else { continue }
+            row.observation = observation.observation
+            row.contentTypeRaw = observation.contentType
+            row.keyEntities = observation.keyEntities
+            row.analysisState = .analyzed
+            row.analysisModelIdentifier = modelIdentifier
+        }
+        for id in result.failedIDs {
+            rowsByID[id]?.analysisState = .failed
+        }
+    }
+
     /// One-off vision analysis for a frame that never got an observation.
     func analyzeNow(_ frame: FrameItem, meeting: Meeting, context: ModelContext) async {
         guard !analyzingFrameIDs.contains(frame.id),

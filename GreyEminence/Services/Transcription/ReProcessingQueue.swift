@@ -447,8 +447,12 @@ final class ReProcessingQueue {
         )
         do {
             let roster = MeetingRoster.snapshot(for: meeting)
-            _ = try await service.analyze(segments: segments, roster: roster)
-            guard let result = try await service.performFinalAnalysis(segments: segments, roster: roster) else { return }
+            // Persisted screen observations ride along — this pass REPLACES
+            // the live insights, and without them the screen-aware summary
+            // produced at stop time would be silently degraded.
+            let screenBlock = ScreenObservationFormatter.finalBlock(fromFrames: meeting.screenFrames)
+            _ = try await service.analyze(segments: segments, roster: roster, screenObservations: screenBlock)
+            guard let result = try await service.performFinalAnalysis(segments: segments, roster: roster, screenObservations: screenBlock) else { return }
             for old in meeting.insights { context.delete(old) }
             for old in meeting.actionItems { context.delete(old) }
 
