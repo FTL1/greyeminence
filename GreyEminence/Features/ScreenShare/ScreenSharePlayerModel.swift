@@ -225,6 +225,26 @@ final class ScreenSharePlayerModel {
         LogManager.shared.log("Deleted \(rows.count) screen frame(s)", category: .screen, meetingID: meeting.id)
     }
 
+    /// Build a vision-capable client, logging the REAL failure reason —
+    /// "no API key" and "AWS SSO token expired" are different problems and
+    /// the log must say which one it is.
+    private static func makeVisionClient(meetingID: UUID, context: String) async -> (any AIClient)? {
+        do {
+            guard let client = try await AIClientFactory.makeClient() else {
+                LogManager.shared.log("\(context) skipped: no API key configured", category: .screen, level: .warning, meetingID: meetingID)
+                return nil
+            }
+            guard client.supportsImages else {
+                LogManager.shared.log("\(context) skipped: \(client.modelIdentifier) has no image support", category: .screen, level: .warning, meetingID: meetingID)
+                return nil
+            }
+            return client
+        } catch {
+            LogManager.shared.log("\(context) skipped: AI client failed — \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
+            return nil
+        }
+    }
+
     // MARK: - Bulk analysis backfill
 
     private(set) var isBulkAnalyzing = false
@@ -241,10 +261,7 @@ final class ScreenSharePlayerModel {
         guard !isBulkAnalyzing else { return }
         let targets = frames.filter { $0.observation == nil }
         guard !targets.isEmpty else { return }
-        guard let client = try? await AIClientFactory.makeClient(), client.supportsImages else {
-            LogManager.shared.log("Frame backfill skipped: AI not configured or no image support", category: .screen, level: .warning, meetingID: meeting.id)
-            return
-        }
+        guard let client = await Self.makeVisionClient(meetingID: meeting.id, context: "Frame backfill") else { return }
         LogManager.shared.log("Frame backfill starting (\(targets.count) unanalyzed frame(s))", category: .screen, meetingID: meeting.id)
 
         isBulkAnalyzing = true
@@ -322,10 +339,7 @@ final class ScreenSharePlayerModel {
     /// One-off vision analysis for a frame that never got an observation.
     func analyzeNow(_ frame: FrameItem, meeting: Meeting, context: ModelContext) async {
         guard !analyzingFrameIDs.contains(frame.id) else { return }
-        guard let client = try? await AIClientFactory.makeClient(), client.supportsImages else {
-            LogManager.shared.log("Analyze-frame skipped: AI not configured or no image support", category: .screen, level: .warning, meetingID: meeting.id)
-            return
-        }
+        guard let client = await Self.makeVisionClient(meetingID: meeting.id, context: "Analyze-frame") else { return }
         guard let jpegData = try? Data(contentsOf: frame.imageURL) else {
             LogManager.shared.log("Analyze-frame skipped: image file unreadable (\(frame.imageURL.lastPathComponent))", category: .screen, level: .warning, meetingID: meeting.id)
             return

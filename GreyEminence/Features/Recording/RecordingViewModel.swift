@@ -962,8 +962,15 @@ final class RecordingViewModel {
         guard ScreenShareSettings.analysisEnabled else { return }
         let maxAnalyzed = ScreenShareSettings.maxAnalyzedFrames
         let task = Task { [weak self] in
-            guard let client = try? await AIClientFactory.makeClient() else {
-                LogManager.send("Screen-frame analysis skipped: AI not configured", category: .screen, level: .warning, meetingID: meetingID)
+            let client: any AIClient
+            do {
+                guard let made = try await AIClientFactory.makeClient() else {
+                    LogManager.send("Screen-frame analysis skipped: no API key configured", category: .screen, level: .warning, meetingID: meetingID)
+                    return
+                }
+                client = made
+            } catch {
+                LogManager.send("Screen-frame analysis skipped: AI client failed — \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
                 return
             }
             guard client.supportsImages else {
@@ -1463,9 +1470,19 @@ final class RecordingViewModel {
         let aiTask = Task { [weak self] in
             guard let self else { return }
 
-            guard let client = try? await AIClientFactory.makeClient() else {
+            let client: any AIClient
+            do {
+                guard let made = try await AIClientFactory.makeClient() else {
+                    await MainActor.run {
+                        self.log.log("AI intelligence skipped: no API key configured", category: .ai, level: .warning)
+                    }
+                    return
+                }
+                client = made
+            } catch {
                 await MainActor.run {
-                    self.log.log("AI not configured — skipping intelligence", category: .ai, level: .warning)
+                    self.log.log("AI intelligence skipped: client failed — \(error.localizedDescription)", category: .ai, level: .warning)
+                    self.errorMessage = "AI unavailable: \(error.localizedDescription)"
                 }
                 return
             }
