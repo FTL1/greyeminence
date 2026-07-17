@@ -131,28 +131,38 @@ struct ScreenSharePlayerSection: View {
         }
     }
 
+    /// The stage hugs the frame image's own aspect ratio (centered in the
+    /// pane) instead of stretching a fixed-height canvas to full width —
+    /// which letterboxed the image inside an ultrawide black box that read
+    /// as "it captured the whole screen".
     @ViewBuilder
     private func stage(_ model: ScreenSharePlayerModel) -> some View {
-        ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.black.opacity(0.85))
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
             if let frame = model.currentFrame {
-                StageImageView(url: frame.imageURL)
+                StageImageView(url: frame.imageURL, maxHeight: 340)
+                    .overlay(alignment: .bottom) {
+                        captionBar(frame, model: model)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .contextMenu {
                         Button("Copy Image") { model.copyImage(frame) }
                         Button("Copy Recognized Text") { model.copyOCRText(frame) }
                             .disabled(frame.ocrText?.isEmpty ?? true)
                         Button("Open Image") { model.openImage(frame) }
                     }
-                captionBar(frame, model: model)
             } else {
-                Image(systemName: "photo.badge.exclamationmark")
-                    .font(.largeTitle)
-                    .foregroundStyle(.tertiary)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.black.opacity(0.85))
+                    Image(systemName: "photo.badge.exclamationmark")
+                        .font(.largeTitle)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(width: 420, height: 260)
             }
+            Spacer(minLength: 0)
         }
-        .frame(height: 300)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     @ViewBuilder
@@ -274,8 +284,11 @@ struct ScreenSharePlayerSection: View {
 }
 
 /// Aspect-fit stage image at higher resolution than the strip thumbs.
+/// Sizes itself to the image's own aspect ratio, capped at `maxHeight` —
+/// no letterboxing canvas around it.
 private struct StageImageView: View {
     let url: URL
+    let maxHeight: CGFloat
 
     @State private var image: CGImage?
 
@@ -285,12 +298,16 @@ private struct StageImageView: View {
                 Image(decorative: image, scale: 2)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
+                    .frame(maxHeight: maxHeight)
             } else {
-                ProgressView()
-                    .controlSize(.small)
+                ZStack {
+                    Color.black.opacity(0.85)
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                .frame(width: 420, height: min(260, maxHeight))
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: url) {
             image = await FrameThumbnailCache.shared.thumbnail(at: url, size: .stage)
         }
