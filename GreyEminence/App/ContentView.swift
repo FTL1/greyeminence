@@ -152,6 +152,13 @@ struct ContentView: View {
                 if !report.skipped {
                     TransientActivityCoordinator.shared.flash("Maintenance complete")
                 }
+                // Unthrottled (unlike maintenance): rows lost to a schema
+                // downgrade should come back on the very next launch, and
+                // the no-op case costs one fetch + a directory check.
+                let recovered = await ScreenFrameRecoveryService.recoverAtLaunch(modelContext: modelContext)
+                if recovered > 0 {
+                    TransientActivityCoordinator.shared.flash("Recovered \(recovered) screen-share frame(s)")
+                }
             }
         }
         .onChange(of: autoStartRecording) { _, enabled in
