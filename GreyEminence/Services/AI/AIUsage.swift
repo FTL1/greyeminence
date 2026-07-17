@@ -49,7 +49,9 @@ struct AIUsageContext: Sendable {
     /// call site already attributed it. Outermost wins: a reanalysis pass
     /// wraps the whole intelligence service, and its `.reanalysis` label
     /// must not be overwritten by the service's own initial/final labels.
-    static func attribute<T>(
+    // T is Sendable for the sake of CI's older Swift toolchain, which
+    // can't prove the result stays on the caller's isolation.
+    static func attribute<T: Sendable>(
         _ purpose: AIUsagePurpose,
         meetingID: UUID? = nil,
         isolation: isolated (any Actor)? = #isolation,
