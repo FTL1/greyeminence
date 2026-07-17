@@ -1,7 +1,10 @@
 import CoreGraphics
 import Foundation
 import ImageIO
-import ScreenCaptureKit
+// @preconcurrency: CI's older SDK lacks Sendable annotations on
+// SCShareableContent — without this the release build rejects every
+// `try await SCShareableContent...` call from actor-isolated code.
+@preconcurrency import ScreenCaptureKit
 import UniformTypeIdentifiers
 
 // MARK: - Events & value types

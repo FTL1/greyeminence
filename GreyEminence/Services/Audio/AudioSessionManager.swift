@@ -1,5 +1,7 @@
 import AVFoundation
-import ScreenCaptureKit
+// @preconcurrency: CI's older SDK lacks Sendable annotations on
+// SCShareableContent (see ScreenShareCaptureService).
+@preconcurrency import ScreenCaptureKit
 
 @Observable
 @MainActor
