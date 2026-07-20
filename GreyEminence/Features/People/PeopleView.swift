@@ -22,47 +22,30 @@ struct PeopleView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(filteredContacts, selection: $selectedContact) { contact in
-                ContactRowView(contact: contact)
-                    .tag(contact)
-                    .opacity(contact.isArchived ? 0.5 : 1)
-                    .contextMenu {
-                        Button(contact.isArchived ? "Unarchive" : "Archive") {
-                            contact.isArchived.toggle()
-                        }
-                        Button("Delete", role: .destructive) {
-                            if selectedContact == contact {
-                                selectedContact = nil
+            // The search bar sits OUTSIDE the List in the VStack — always
+            // visible regardless of scroll position. (.searchable(.sidebar)
+            // lost its material in this nested split view, and a
+            // safeAreaInset bar on a macOS List can end up inside the
+            // scroll region.)
+            VStack(spacing: 0) {
+                searchBar
+                Divider()
+                List(filteredContacts, selection: $selectedContact) { contact in
+                    ContactRowView(contact: contact)
+                        .tag(contact)
+                        .opacity(contact.isArchived ? 0.5 : 1)
+                        .contextMenu {
+                            Button(contact.isArchived ? "Unarchive" : "Archive") {
+                                contact.isArchived.toggle()
                             }
-                            modelContext.delete(contact)
+                            Button("Delete", role: .destructive) {
+                                if selectedContact == contact {
+                                    selectedContact = nil
+                                }
+                                modelContext.delete(contact)
+                            }
                         }
-                    }
-            }
-            // Hand-rolled search bar instead of .searchable(.sidebar): in
-            // this NESTED split view the searchable field renders without
-            // its material backing, so list rows scrolled straight through
-            // it. safeAreaInset + .bar keeps it opaque and pinned.
-            .safeAreaInset(edge: .top, spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search contacts", text: $searchText)
-                        .textFieldStyle(.plain)
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Clear search")
-                    }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.bar)
-                .overlay(alignment: .bottom) { Divider() }
             }
             .navigationTitle("People")
             .toolbar {
@@ -105,5 +88,27 @@ struct PeopleView: View {
                 )
             }
         }
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search contacts", text: $searchText)
+                .textFieldStyle(.plain)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.bar)
     }
 }
