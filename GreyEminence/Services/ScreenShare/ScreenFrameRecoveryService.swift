@@ -26,10 +26,21 @@ enum ScreenFrameRecoveryService {
 
     @discardableResult
     static func recoverAtLaunch(modelContext: ModelContext) async -> Int {
-        let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
+        // Only meetings with NO frame rows are candidates — let the store
+        // filter so we don't fault every meeting's frame relationship on a
+        // normal launch.
+        let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.screenFrames.isEmpty })
+        let meetings = (try? modelContext.fetch(descriptor)) ?? []
         var recoveredTotal = 0
-        for meeting in meetings where meeting.screenFrames.isEmpty {
-            let framesDir = StorageManager.shared.framesDirectory(for: meeting.id)
+        let recordingsURL = StorageManager.shared.recordingsURL
+        for meeting in meetings {
+            // Build the path directly and STAT it — StorageManager's
+            // framesDirectory(for:) creates directories as a side effect,
+            // which on the no-op path would mkdir (and litter) a frames/
+            // dir for every frameless meeting on every launch.
+            let framesDir = recordingsURL
+                .appendingPathComponent(meeting.id.uuidString, isDirectory: true)
+                .appendingPathComponent("frames", isDirectory: true)
             guard FileManager.default.fileExists(atPath: framesDir.path) else { continue }
             recoveredTotal += await recoverFrames(for: meeting, framesDir: framesDir)
         }
@@ -101,8 +112,7 @@ enum ScreenFrameRecoveryService {
     /// frames after a pause land slightly late — close enough for the
     /// player and transcript sync.
     nonisolated static func elapsed(capturedAt: Date, meetingStart: Date, duration: TimeInterval) -> TimeInterval {
-        let raw = capturedAt.timeIntervalSince(meetingStart)
-        let upper = duration > 0 ? duration : max(raw, 0)
-        return min(max(raw, 0), upper)
+        let raw = max(capturedAt.timeIntervalSince(meetingStart), 0)
+        return duration > 0 ? min(raw, duration) : raw
     }
 }

@@ -87,8 +87,10 @@ enum ScreenFrameTriage {
     /// screens carry only a title bar, the message, and a button) so a
     /// document that merely quotes the phrase doesn't end the session.
     static func isShareEndedPlaceholder(ocrText: String?) -> Bool {
+        // Empty OCR yields an empty set, and `.contains` on it is already
+        // false — no separate emptiness guard needed.
         let lines = ocrLines(ocrText)
-        guard !lines.isEmpty, lines.count <= 5 else { return false }
+        guard lines.count <= 5 else { return false }
         return lines.contains { line in
             shareEndedPhrases.contains { line.contains($0) }
         }
