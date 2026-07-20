@@ -148,14 +148,12 @@ struct RecordingToolbar: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 LevelBar(level: viewModel.micLevel)
-                    .frame(width: 40, height: 12)
             }
             HStack(spacing: 2) {
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 LevelBar(level: viewModel.systemLevel)
-                    .frame(width: 40, height: 12)
             }
         }
         .fixedSize()
@@ -264,18 +262,26 @@ private struct CalendarLinkLabel: View {
 
 struct LevelBar: View {
     let level: Float
+    var width: CGFloat = 40
+    var height: CGFloat = 12
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(.secondary.opacity(0.2))
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(level > 0.8 ? .red : (level > 0.5 ? .yellow : .green))
-                    .frame(width: geo.size.width * CGFloat(level))
-                    .animation(.linear(duration: 0.1), value: level)
-            }
+        // Intrinsically sized — NO GeometryReader. A bare GeometryReader has
+        // no ideal size, so the toolbar's `.fixedSize()` cluster inside a
+        // `ViewThatFits` re-measured it combinatorially and beachballed the
+        // UI during recording (every new transcript segment retriggered the
+        // pass). Computing the fill width from an explicit `width` keeps
+        // layout O(1).
+        let fill = width * CGFloat(min(max(level, 0), 1))
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(.secondary.opacity(0.2))
+            RoundedRectangle(cornerRadius: 2)
+                .fill(level > 0.8 ? .red : (level > 0.5 ? .yellow : .green))
+                .frame(width: fill)
+                .animation(.linear(duration: 0.1), value: level)
         }
+        .frame(width: width, height: height)
     }
 }
 

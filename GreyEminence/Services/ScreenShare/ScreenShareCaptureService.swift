@@ -15,6 +15,16 @@ enum SessionEndReason: String, Sendable {
     case capReached
     /// The window showed Teams' "Content sharing has ended" placeholder.
     case shareEnded
+
+    /// Human-readable phrase for the activity log.
+    var logReason: String {
+        switch self {
+        case .windowGone: "the shared window closed or was no longer detected"
+        case .recordingStopped: "the recording stopped"
+        case .capReached: "the per-recording frame cap was reached"
+        case .shareEnded: "the presenter ended the share (\"Content sharing has ended\")"
+        }
+    }
 }
 
 /// A window the picker can offer. `score` reflects the Teams pop-out
@@ -329,7 +339,7 @@ actor ScreenShareCaptureService {
         currentWindowTitle = ""
         missedPolls = 0
         continuation?.yield(.sessionEnded(sessionID: sessionID, reason: reason))
-        LogManager.send("Share session ended (\(reason.rawValue))", category: .screen, meetingID: meetingID)
+        LogManager.send("Screen capture stopped: \(reason.logReason)", category: .screen, meetingID: meetingID)
     }
 
     private func reportCandidatesIfChanged(_ candidates: [WindowCandidate]) {

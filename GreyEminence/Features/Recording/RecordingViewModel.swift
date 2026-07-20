@@ -1182,11 +1182,16 @@ final class RecordingViewModel {
         case .frameDropped:
             break
 
-        case .sessionEnded(let sessionID, _):
+        case .sessionEnded(let sessionID, let reason):
             endedSessionsAwaitingSynthesis.insert(sessionID)
-            if case .capturing = screenCaptureState {
+            var stoppedTitle = ""
+            if case .capturing(let windowTitle) = screenCaptureState {
+                stoppedTitle = windowTitle
                 screenCaptureState = .watching
             }
+            let titlePart = stoppedTitle.isEmpty ? "" : " for \"\(stoppedTitle)\""
+            let stillWatching = reason == .capReached ? "" : " — still watching for new shares"
+            log.log("Screen capture stopped\(titlePart): \(reason.logReason)\(stillWatching)", category: .screen)
 
         case .permissionDenied:
             screenCaptureState = .denied
