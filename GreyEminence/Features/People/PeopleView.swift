@@ -6,11 +6,11 @@ struct PeopleView: View {
     @Query(sort: \Contact.name) private var contacts: [Contact]
     @State private var selectedContact: Contact?
     @State private var showAddSheet = false
-    @State private var showArchived = false
+    @State private var showInactive = false
     @State private var searchText = ""
 
     private var filteredContacts: [Contact] {
-        let visible = contacts.filter { showArchived || !$0.isArchived }
+        let visible = contacts.filter { showInactive || !$0.isArchived }
         if searchText.isEmpty { return visible }
         let query = searchText.lowercased()
         return visible.filter {
@@ -35,7 +35,7 @@ struct PeopleView: View {
                         .tag(contact)
                         .opacity(contact.isArchived ? 0.5 : 1)
                         .contextMenu {
-                            Button(contact.isArchived ? "Unarchive" : "Archive") {
+                            Button(contact.isArchived ? "Mark Active" : "Mark Inactive") {
                                 contact.isArchived.toggle()
                             }
                             Button("Delete", role: .destructive) {
@@ -57,10 +57,10 @@ struct PeopleView: View {
                     }
                 }
                 ToolbarItem {
-                    Toggle(isOn: $showArchived) {
-                        Label("Show Archived", systemImage: "archivebox")
+                    Toggle(isOn: $showInactive) {
+                        Label("Show Inactive", systemImage: "person.crop.circle.badge.xmark")
                     }
-                    .help(showArchived ? "Hide archived contacts" : "Show archived contacts")
+                    .help(showInactive ? "Hide inactive contacts" : "Show inactive contacts")
                 }
             }
             .overlay {

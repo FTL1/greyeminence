@@ -9,7 +9,7 @@ struct ContactDetailView: View {
         List {
             if contact.isArchived {
                 Section {
-                    Label("This contact is archived and won't appear in pickers.", systemImage: "archivebox")
+                    Label("This contact is inactive (e.g. left the company). They won't appear in search, pickers, or calendar auto-linking — but stay on the meetings they already attended.", systemImage: "person.crop.circle.badge.xmark")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -103,11 +103,13 @@ struct ContactDetailView: View {
                     contact.isArchived.toggle()
                 } label: {
                     Label(
-                        contact.isArchived ? "Unarchive" : "Archive",
-                        systemImage: contact.isArchived ? "tray.and.arrow.up" : "archivebox"
+                        contact.isArchived ? "Mark Active" : "Mark Inactive",
+                        systemImage: contact.isArchived ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.xmark"
                     )
                 }
-                .help(contact.isArchived ? "Unarchive this contact" : "Archive this contact")
+                .help(contact.isArchived
+                      ? "Reactivate this contact so they appear in search and pickers again"
+                      : "Mark inactive (e.g. left the company) — hides them from search, pickers, and calendar auto-linking")
             }
         }
     }

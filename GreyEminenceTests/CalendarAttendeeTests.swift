@@ -100,6 +100,29 @@ final class CalendarAttendeeTests: XCTestCase {
         XCTAssertEqual(meeting.attendees.map(\.id), [existing.id])
     }
 
+    func testLinkDoesNotResurrectInactiveContact() throws {
+        let context = try makeContext()
+        let meeting = Meeting(title: "Planning")
+        context.insert(meeting)
+        // This person left the company — marked inactive (isArchived).
+        let former = Contact(name: "Sam Lee", email: "sam@org.com")
+        former.isArchived = true
+        context.insert(former)
+
+        let service = CalendarService()
+        service.linkEvent(
+            makeEvent(attendees: [EventAttendee(name: "Sam Lee", email: "sam@org.com")]),
+            to: meeting,
+            in: context,
+            setTitle: false
+        )
+
+        // Recognized (so no duplicate created) but NOT re-added to the meeting.
+        let contacts = try context.fetch(FetchDescriptor<Contact>())
+        XCTAssertEqual(contacts.count, 1)
+        XCTAssertTrue(meeting.attendees.isEmpty)
+    }
+
     func testLinkNeverCreatesContactForCurrentUser() throws {
         let context = try makeContext()
         let meeting = Meeting(title: "Planning")

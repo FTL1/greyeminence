@@ -400,6 +400,10 @@ final class CalendarService {
         // must not produce two Contact rows.
         var createdByKey: [String: Contact] = [:]
         for (attendee, match) in matched {
+            // An invite must not resurrect an inactive contact (someone who
+            // left). We still recognize the match here — so we don't create a
+            // duplicate for them — but skip re-adding them to the meeting.
+            if let match, match.isArchived { continue }
             var contact = match
             if contact == nil {
                 // The invite gives us a full identity — create the contact so
