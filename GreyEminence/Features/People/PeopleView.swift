@@ -38,7 +38,32 @@ struct PeopleView: View {
                         }
                     }
             }
-            .searchable(text: $searchText, placement: .sidebar, prompt: "Search contacts")
+            // Hand-rolled search bar instead of .searchable(.sidebar): in
+            // this NESTED split view the searchable field renders without
+            // its material backing, so list rows scrolled straight through
+            // it. safeAreaInset + .bar keeps it opaque and pinned.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search contacts", text: $searchText)
+                        .textFieldStyle(.plain)
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear search")
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.bar)
+                .overlay(alignment: .bottom) { Divider() }
+            }
             .navigationTitle("People")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
