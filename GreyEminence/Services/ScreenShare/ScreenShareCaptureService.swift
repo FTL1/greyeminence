@@ -13,6 +13,8 @@ enum SessionEndReason: String, Sendable {
     case windowGone
     case recordingStopped
     case capReached
+    /// The window showed Teams' "Content sharing has ended" placeholder.
+    case shareEnded
 }
 
 /// A window the picker can offer. `score` reflects the Teams pop-out
@@ -124,6 +126,11 @@ actor ScreenShareCaptureService {
     private var missedPolls = 0
     private var lastCaptureAt: Date?
     private var lastReportedCandidateIDs: [CGWindowID] = []
+    /// Windows that showed the share-ended placeholder, keyed to the title
+    /// they carried at the time. Auto-detect skips them until the window
+    /// closes or its title changes (either means Teams reused or refreshed
+    /// it — re-evaluate). Manual selection always overrides.
+    private var ignoredWindows: [CGWindowID: String] = [:]
 
     // MARK: Lifecycle
 
@@ -136,6 +143,7 @@ actor ScreenShareCaptureService {
         self.frameCapReached = false
         self.manualWindowID = nil
         self.keptCount = 0
+        self.ignoredWindows = [:]
 
         let (stream, continuation) = AsyncStream.makeStream(of: ScreenCaptureEvent.self)
         self.continuation = continuation
@@ -161,6 +169,10 @@ actor ScreenShareCaptureService {
     /// Manual window selection from the picker. `nil` returns to auto-detect.
     func selectWindow(_ windowID: CGWindowID?) {
         manualWindowID = windowID
+        if let windowID {
+            // The user insisting on a window beats the placeholder ignore.
+            ignoredWindows.removeValue(forKey: windowID)
+        }
         LogManager.send(
             windowID.map { "Manual window selected (id \($0))" } ?? "Returned to auto-detect",
             category: .screen,
@@ -250,11 +262,19 @@ actor ScreenShareCaptureService {
         let candidates = Self.candidates(from: content.windows)
         reportCandidatesIfChanged(candidates)
 
+        // Drop placeholder ignores whose window closed or changed title —
+        // either way it's no longer the screen we blacklisted.
+        ignoredWindows = ignoredWindows.filter { id, titleAtIgnore in
+            candidates.contains { $0.id == id && $0.title == titleAtIgnore }
+        }
+
         let selected: WindowCandidate?
         if let manualID = manualWindowID {
             selected = candidates.first { $0.id == manualID }
         } else if config.autoDetect {
-            selected = candidates.filter { $0.score >= 100 }.max { $0.score < $1.score }
+            selected = candidates
+                .filter { $0.score >= 100 && ignoredWindows[$0.id] == nil }
+                .max { $0.score < $1.score }
         } else {
             selected = nil
         }
@@ -441,6 +461,19 @@ actor ScreenShareCaptureService {
         } catch {
             LogManager.send("Frame OCR failed (keeping frame without text): \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
         }
+
+        // Teams leaves a "Content sharing has ended" placeholder in the
+        // pop-out after the presenter stops. That's the end of the share,
+        // not content: drop the frame, close the session, and ignore this
+        // window until it closes or its title changes.
+        if ScreenFrameTriage.isShareEndedPlaceholder(ocrText: ocrText) {
+            ignoredWindows[windowID] = currentWindowTitle
+            continuation?.yield(.frameDropped(sessionID: sessionID))
+            LogManager.send("Share-ended placeholder detected (\"\(currentWindowTitle)\") — frame dropped, session closed", category: .screen, meetingID: meetingID)
+            endSession(sessionID, reason: .shareEnded)
+            return
+        }
+
         let visualOnly = lastKeptHash != nil
             && ScreenFrameTriage.isVisualOnlyChange(previousOCR: lastKeptOCR, currentOCR: ocrText)
 

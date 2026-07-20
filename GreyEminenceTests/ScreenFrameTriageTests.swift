@@ -132,6 +132,33 @@ final class ScreenFrameTriageTests: XCTestCase {
         XCTAssertTrue(ScreenFrameTriage.isVisualOnlyChange(previousOCR: nil, currentOCR: nil))
     }
 
+    // MARK: - Share-ended placeholder
+
+    func testPlaceholderDetectedFromTypicalOCR() {
+        // What Vision reads off the real Teams placeholder: title bar,
+        // message, button.
+        let ocr = "Shared content | Future Systems Weekly\nContent sharing has ended\nDismiss"
+        XCTAssertTrue(ScreenFrameTriage.isShareEndedPlaceholder(ocrText: ocr))
+    }
+
+    func testPlaceholderCaseInsensitive() {
+        XCTAssertTrue(ScreenFrameTriage.isShareEndedPlaceholder(ocrText: "CONTENT SHARING HAS ENDED"))
+    }
+
+    func testDocumentQuotingPhraseIsNotPlaceholder() {
+        // A busy screen that merely contains the phrase must not end the
+        // session — the placeholder heuristic requires a nearly-empty screen.
+        let doc = (1...10).map { "Meaningful document line number \($0)" }
+            .joined(separator: "\n") + "\nContent sharing has ended"
+        XCTAssertFalse(ScreenFrameTriage.isShareEndedPlaceholder(ocrText: doc))
+    }
+
+    func testNormalContentIsNotPlaceholder() {
+        XCTAssertFalse(ScreenFrameTriage.isShareEndedPlaceholder(ocrText: "Q3 Roadmap\nAuth GA Nov"))
+        XCTAssertFalse(ScreenFrameTriage.isShareEndedPlaceholder(ocrText: nil))
+        XCTAssertFalse(ScreenFrameTriage.isShareEndedPlaceholder(ocrText: "   "))
+    }
+
     // MARK: - Scaling
 
     func testScaledSizeLeavesSmallImagesAlone() {
