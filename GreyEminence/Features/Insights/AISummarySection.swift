@@ -9,35 +9,48 @@ struct AISummarySection: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            if let sections, !sections.isEmpty {
-                StructuredSummaryView(sections: sections, rawSummary: summary)
-            } else if !summary.isEmpty {
-                // Legacy flat-string fallback
-                Text(summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 4)
-            }
-        } label: {
-            HStack {
-                Label {
-                    Text("Summary")
-                } icon: {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 22, height: 22)
-                        .background(Color.blue.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        // Plain Button header with the Copy button as a SIBLING — not a
+        // DisclosureGroup, whose label swallows taps to toggle, so a Copy
+        // button nested in it never fired (it just collapsed the section).
+        // Mirrors FollowUpQuestionsSection / ActionItemsSection.
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 22, height: 22)
+                            .background(Color.blue.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        Text("Summary")
+                            .font(.subheadline.weight(.semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.plain)
 
-                Spacer()
+                if !summary.isEmpty {
+                    CopyButton(label: "Copy", help: "Copy the full summary") { plainText(from: summary) }
+                }
+            }
 
-                if sections != nil {
-                    CopyButton(label: "Copy") { plainText(from: summary) }
-                        .font(.caption)
+            if isExpanded {
+                if let sections, !sections.isEmpty {
+                    StructuredSummaryView(sections: sections, rawSummary: summary)
+                } else if !summary.isEmpty {
+                    // Legacy flat-string fallback
+                    Text(summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(.top, 4)
                 }
             }
         }
