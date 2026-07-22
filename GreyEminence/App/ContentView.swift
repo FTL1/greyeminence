@@ -914,7 +914,7 @@ struct ActionItemRow: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 8) {
             Button {
                 item.isCompleted.toggle()
                 persist("toggleCompleted")
@@ -929,8 +929,11 @@ struct ActionItemRow: View {
                     .strikethrough(item.isCompleted || item.isDismissed)
                     .foregroundStyle(item.isCompleted || item.isDismissed ? .secondary : .primary)
                     .textSelection(.enabled)
-                HStack(spacing: 4) {
-                    if let contact = item.assignedContact {
+                // Assignee row only when one is set — assign/unlink live in the
+                // context menu, so unassigned items stay a single clean line
+                // rather than a second row with a dangling icon.
+                if let contact = item.assignedContact {
+                    HStack(spacing: 4) {
                         Text(contact.initials)
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.white)
@@ -939,24 +942,16 @@ struct ActionItemRow: View {
                         Text(contact.name)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else if let assignee = item.assignee, !assignee.isEmpty {
-                        Text(assignee)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
-
-                    Button {
-                        showContactPicker = true
-                    } label: {
-                        Image(systemName: item.assignedContact != nil ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.plus")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
+                } else if let assignee = item.assignee, !assignee.isEmpty {
+                    Text(assignee)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             if onShowDetails != nil {
-                Spacer()
                 Button {
                     onShowDetails?(item)
                 } label: {
