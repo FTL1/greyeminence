@@ -171,6 +171,51 @@ final class StorageManager: Sendable {
         return relative
     }
 
+    /// Remove specific frame image files (paths relative to the recording
+    /// directory, i.e. `ScreenShareFrame.imagePath`) and prune any session
+    /// subdirs and the `frames/` dir left empty afterward. Returns the number
+    /// of files actually removed.
+    ///
+    /// Needed when a frame-owning meeting is deleted but its recording folder
+    /// has to stay on disk because a split sibling still references the shared
+    /// source audio — `deleteRecording(for:)` is skipped in that case, so the
+    /// JPEGs would otherwise linger until the whole audio group is gone. Static
+    /// with an explicit base dir so it's unit-testable off a temp directory.
+    @discardableResult
+    static func deleteFrameFiles(inRecordingDirectory recordingDir: URL, relativePaths: [String]) -> Int {
+        let fm = FileManager.default
+        var removed = 0
+        var sessionDirs: Set<URL> = []
+        for relative in relativePaths {
+            let url = recordingDir.appendingPathComponent(relative)
+            if (try? fm.removeItem(at: url)) != nil {
+                removed += 1
+                sessionDirs.insert(url.deletingLastPathComponent())
+            }
+        }
+        // Prune the per-session subdirs, then the frames/ dir, if now empty.
+        for dir in sessionDirs {
+            if let entries = try? fm.contentsOfDirectory(atPath: dir.path), entries.isEmpty {
+                try? fm.removeItem(at: dir)
+            }
+        }
+        let framesDir = recordingDir.appendingPathComponent("frames", isDirectory: true)
+        if let entries = try? fm.contentsOfDirectory(atPath: framesDir.path), entries.isEmpty {
+            try? fm.removeItem(at: framesDir)
+        }
+        return removed
+    }
+
+    /// Convenience over ``deleteFrameFiles(inRecordingDirectory:relativePaths:)``
+    /// that resolves the recording directory for `sourceMeetingID` (the audio
+    /// source — where frames physically live) WITHOUT the mkdir side effect of
+    /// `recordingDirectory(for:)`.
+    @discardableResult
+    func deleteFrameFiles(sourceMeetingID: UUID, relativePaths: [String]) -> Int {
+        let dir = recordingsURL.appendingPathComponent(sourceMeetingID.uuidString, isDirectory: true)
+        return Self.deleteFrameFiles(inRecordingDirectory: dir, relativePaths: relativePaths)
+    }
+
     // MARK: - Candidate Resumes
 
     /// Per-candidate directory for attached files (currently just resumes).
