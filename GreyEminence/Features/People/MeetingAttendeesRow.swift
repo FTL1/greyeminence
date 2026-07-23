@@ -212,22 +212,7 @@ struct MeetingAttendeesRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                // Widest arrangement that fits wins; the trailing summary pill
-                // is the always-fits floor, so the row can never push its
-                // container wider than the window. Candidates are listed
-                // unconditionally — a `nil` branch inside ViewThatFits can be
-                // chosen as a zero-size "fitting" candidate and blank the row.
-                // Caps above the attendee count just collapse to the same
-                // full-run layout, which is harmless.
-                ViewThatFits(in: .horizontal) {
-                    chipRow(people)
-                    dotRow(people, cap: people.count)
-                    dotRow(people, cap: 12)
-                    dotRow(people, cap: 8)
-                    dotRow(people, cap: 5)
-                    dotRow(people, cap: 3)
-                    summaryPill(people)
-                }
+                roster(people)
             }
 
             Button {
@@ -248,39 +233,46 @@ struct MeetingAttendeesRow: View {
         }
     }
 
-    private func chipRow(_ people: [Contact]) -> some View {
-        HStack(spacing: 6) {
-            ForEach(people) { contact in
-                ContactChip(contact: contact) { remove(contact) }
+    /// Full-name chips up to this headcount; past it the row drops to
+    /// initials-only dots.
+    private static let chipLimit = 4
+    /// Hard ceiling on dots before the overflow pill absorbs the rest. This
+    /// constant — not measurement — is what keeps the row from pushing its
+    /// container wider than the window at high headcount.
+    private static let dotLimit = 8
+
+    /// The arrangement is chosen from the headcount alone, deliberately NOT by
+    /// measuring. A `ViewThatFits` here had to realize *every* candidate's
+    /// element list — Text, Capsule background, `.help`, `.contextMenu`, and a
+    /// popover per overflow pill — on every layout pass, and with a `ForEach`
+    /// inside each candidate that came to dominate the main thread (73% of it
+    /// in a sample, rebuilding view elements and AttributeGraph nodes rather
+    /// than just sizing). Fixed caps bound the width just as well, in O(1).
+    @ViewBuilder
+    private func roster(_ people: [Contact]) -> some View {
+        if people.count <= Self.chipLimit {
+            HStack(spacing: 6) {
+                ForEach(people) { contact in
+                    ContactChip(contact: contact) { remove(contact) }
+                }
+            }
+        } else {
+            let shown = people.prefix(Self.dotLimit)
+            let hidden = people.count - shown.count
+            HStack(spacing: 3) {
+                ForEach(shown) { contact in
+                    CompactContactDot(contact: contact) { remove(contact) }
+                }
+                if hidden > 0 {
+                    AttendeeOverflowPill(
+                        label: "+\(hidden)",
+                        systemImage: nil,
+                        contacts: people,
+                        onRemove: remove
+                    )
+                }
             }
         }
-    }
-
-    private func dotRow(_ people: [Contact], cap: Int) -> some View {
-        let shown = Array(people.prefix(cap))
-        let hidden = people.count - shown.count
-        return HStack(spacing: 3) {
-            ForEach(shown) { contact in
-                CompactContactDot(contact: contact) { remove(contact) }
-            }
-            if hidden > 0 {
-                AttendeeOverflowPill(
-                    label: "+\(hidden)",
-                    systemImage: nil,
-                    contacts: people,
-                    onRemove: remove
-                )
-            }
-        }
-    }
-
-    private func summaryPill(_ people: [Contact]) -> some View {
-        AttendeeOverflowPill(
-            label: "\(people.count)",
-            systemImage: "person.crop.circle",
-            contacts: people,
-            onRemove: remove
-        )
     }
 
     private func remove(_ contact: Contact) {
