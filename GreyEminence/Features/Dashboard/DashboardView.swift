@@ -8,9 +8,23 @@ struct DashboardView: View {
     @Query private var allMeetings: [Meeting]
     @Query(filter: #Predicate<ActionItem> { !$0.isCompleted })
     private var pendingActions: [ActionItem]
+    // Open commitments (incomplete AND not dismissed) drive the stalled count.
+    // Kept as its own reactive @Query so the count comes from an in-memory
+    // date scan over this small set — not a fresh fetch + per-item meeting
+    // fault + struct build on every body evaluation, which is what
+    // CommitmentTrackingService.stalledCommitments(in:) does. The service is
+    // still the right call where the full StalledCommitment list is needed.
+    @Query(filter: #Predicate<ActionItem> { !$0.isCompleted && $0.dismissedAt == nil })
+    private var openActions: [ActionItem]
 
     private var stalledCount: Int {
-        CommitmentTrackingService().stalledCommitments(in: modelContext).count
+        // Mirror the service's threshold: stalled = created ≥ 7 calendar days ago.
+        let calendar = Calendar.current
+        let now = Date.now
+        return openActions.reduce(into: 0) { count, item in
+            let days = calendar.dateComponents([.day], from: item.createdAt, to: now).day ?? 0
+            if days >= 7 { count += 1 }
+        }
     }
 
     private var meetingsThisWeek: [Meeting] {

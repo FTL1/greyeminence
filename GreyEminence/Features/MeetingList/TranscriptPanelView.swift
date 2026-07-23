@@ -34,7 +34,11 @@ struct TranscriptPanelView: View {
     @State private var editSaveError: String?
 
     private var editedCount: Int {
-        meeting.segments.filter(\.isEdited).count
+        // Allocation-free scan — read on every body evaluation, so avoid
+        // building a throwaway filtered array of up to a few thousand segments.
+        meeting.segments.reduce(into: 0) { count, segment in
+            if segment.isEdited { count += 1 }
+        }
     }
 
     var body: some View {
