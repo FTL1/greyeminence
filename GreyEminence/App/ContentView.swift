@@ -517,12 +517,9 @@ struct ContentView: View {
                     // surface the previous recording's transcript.
                     if showInspector && recordingViewModel.state != .idle {
                         inspectorDragHandle(containerWidth: geo.size.width)
-                        LiveTranscriptView(
-                            segments: recordingViewModel.segments,
-                            segmentConfidence: recordingViewModel.segmentConfidence
-                        )
-                        .frame(width: clampedWidth)
-                        .layoutPriority(0)
+                        RecordingInspectorPanel(viewModel: recordingViewModel)
+                            .frame(width: clampedWidth)
+                            .layoutPriority(0)
                     }
                 }
             }
