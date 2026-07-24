@@ -75,6 +75,11 @@ struct ContentView: View {
     @State private var showProfileSetup = false
     @State private var interruptedMeeting: Meeting?
     @State private var showResumeAlert = false
+    /// Highest app version whose feature highlights the user has seen. Empty on
+    /// first launch under this system — seeded in `presentWhatsNewIfNeeded`.
+    @AppStorage("lastSeenHighlightVersion") private var lastSeenHighlightVersion = ""
+    @State private var showWhatsNew = false
+    @State private var whatsNewHighlights: [FeatureHighlight] = []
     @State private var selectedInterview: Interview?
     var recordingViewModel: RecordingViewModel
     var interviewRecordingViewModel: InterviewRecordingViewModel
@@ -142,6 +147,7 @@ struct ContentView: View {
                     showProfileSetup = true
                 }
             }
+            presentWhatsNewIfNeeded()
             recordingViewModel.configureAutoDetection(enabled: autoStartRecording) { [modelContext] in
                 modelContext
             }
@@ -166,6 +172,24 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showProfileSetup) {
             MyProfileSetupSheet()
+        }
+        // Post-update "What's New". Dismissal (any path — Got it, Escape, Try it)
+        // records the current version via onDismiss so it never re-nags.
+        .sheet(isPresented: $showWhatsNew, onDismiss: {
+            lastSeenHighlightVersion = FeatureHighlightCatalog.currentVersion
+        }) {
+            WhatsNewSheet(
+                highlights: whatsNewHighlights,
+                version: FeatureHighlightCatalog.currentVersion
+            ) { highlight in
+                // Deep-link into the feature, and count that as discovering it
+                // so the in-context badge doesn't also fire.
+                showWhatsNew = false
+                if let destination = highlight.destination {
+                    selectedDestination = destination
+                }
+                FeatureDiscovery.shared.markSeen(highlight.id)
+            }
         }
         // Presented at the root so it appears regardless of which destination is
         // active — a recording (and its multi-event calendar choice) can be
@@ -230,6 +254,37 @@ struct ContentView: View {
         TransientActivityCoordinator.shared.flash(
             "Restored \(reverted) interrupted interview\(reverted == 1 ? "" : "s") — click Start to resume"
         )
+    }
+
+    /// Decide whether to show the post-update "What's New" sheet, and stage its
+    /// highlights. Runs once per launch from `onAppear`.
+    private func presentWhatsNewIfNeeded() {
+        // Never interrupt an in-progress recording that survived a relaunch.
+        guard recordingViewModel.state == .idle else { return }
+
+        if lastSeenHighlightVersion.isEmpty {
+            // First launch under this system. A brand-new user (no profile set,
+            // no changelog reads) is onboarding — suppress the sheet and just
+            // start tracking from here so they only ever see FUTURE updates.
+            // An existing user upgrading INTO the system sees the current
+            // highlights once (seed to "0.0.0"), then only newer ones after.
+            let brandNewUser = myContactIDString.isEmpty && ChangelogReadStore.readVersions().isEmpty
+            if brandNewUser {
+                lastSeenHighlightVersion = FeatureHighlightCatalog.currentVersion
+                return
+            }
+            lastSeenHighlightVersion = "0.0.0"
+        }
+
+        let pending = FeatureHighlightCatalog.pending(since: lastSeenHighlightVersion)
+        guard !pending.isEmpty else { return }
+        whatsNewHighlights = pending
+
+        // Sequence behind the first-run profile sheet so the two never stack.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            guard !showProfileSetup else { return }
+            showWhatsNew = true
+        }
     }
 
     /// Check if there's an interrupted recording from a previous session.

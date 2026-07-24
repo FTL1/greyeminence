@@ -19,11 +19,18 @@ struct ScreenCaptureIndicator: View {
                 chipLabel
             }
             .buttonStyle(.plain)
+            .newFeatureBadge("screen-capture")
             .popover(isPresented: $showPopover, arrowEdge: .bottom) {
                 ScreenCapturePopover(viewModel: viewModel, showWindowPicker: $showWindowPicker)
             }
             .sheet(isPresented: $showWindowPicker) {
                 ScreenShareWindowPickerSheet(viewModel: viewModel)
+            }
+            // Opening the capture popover counts as discovering the feature.
+            .onChange(of: showPopover) { _, shown in
+                if shown {
+                    withAnimation { FeatureDiscovery.shared.markSeen("screen-capture") }
+                }
             }
         }
     }

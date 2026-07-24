@@ -4,6 +4,36 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.23.13 — 2026-07-24
+
+**What's New after updates**
+- A curated "What's New" sheet now appears once after the app updates to a
+  version you haven't seen, highlighting the headline features with a "Try
+  it" link straight into each one. Skipped several versions? You get the
+  union of what you missed, capped to the headline set — the full history
+  stays in this changelog. New installs are suppressed (you're onboarding,
+  not catching up), and the sheet sequences behind first-run setup so the
+  two never stack.
+- Tasteful "NEW" badges mark new affordances in context (the recording
+  side-panel's Prep tab, the screen-share capture chip) and clear the first
+  time you use them — catching anything you dismissed on the sheet.
+
+**Meeting Prep beside the transcript**
+- While recording, the side panel now has a Transcript / Prep toggle. Flip
+  to Prep to keep carried-over unresolved tasks, open questions, and prior
+  topics in view during the meeting. The toggle only appears for recurring
+  meetings that have prep to show; one-off meetings keep the plain
+  transcript.
+
+**Fixes & cleanup**
+- Fixed a 100% CPU / beachball regression where the attendees row's
+  `ViewThatFits` rebuilt every candidate's view tree on every layout pass.
+  The roster arrangement is now chosen by headcount, not measurement.
+- Deleting a meeting whose audio is shared with a split sibling no longer
+  leaves that meeting's screen-frame JPEGs orphaned on disk.
+- Removed two per-redraw costs read from view bodies (the dashboard's
+  stalled-item count and the header's edited-segment count).
+
 ## 0.17.4 — 2026-05-26
 
 **Re-processing robustness**

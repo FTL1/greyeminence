@@ -28,6 +28,7 @@ struct RecordingInspectorPanel: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .newFeatureBadge("meeting-prep-panel")
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 Divider()
@@ -51,6 +52,12 @@ struct RecordingInspectorPanel: View {
         // the user on an empty pane.
         .onChange(of: showsPrepTab) { _, hasPrep in
             if !hasPrep { mode = .transcript }
+        }
+        // Switching to Prep counts as discovering it — retire the NEW badge.
+        .onChange(of: mode) { _, newMode in
+            if newMode == .prep {
+                withAnimation { FeatureDiscovery.shared.markSeen("meeting-prep-panel") }
+            }
         }
     }
 }
