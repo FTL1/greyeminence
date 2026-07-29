@@ -92,9 +92,18 @@ struct BedrockAPIClient: AIClient, Sendable {
             throw BedrockAPIError.httpError(statusCode: httpResponse.statusCode, body: errorBody)
         }
 
+        // Log the raw response *before* decoding. A model-side shape change
+        // (e.g. a new content-block type) otherwise fails with an opaque
+        // Decodable error and no payload in the log to diagnose it from.
+        if let jsonObject = try? JSONSerialization.jsonObject(with: data),
+           let pretty = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
+           let prettyString = String(data: pretty, encoding: .utf8) {
+            LogManager.send("Bedrock response", category: .ai, detail: prettyString)
+        }
+
         let apiResponse = try JSONDecoder().decode(APIResponse.self, from: data)
 
-        guard let textBlock = apiResponse.content.first(where: { $0.type == "text" }) else {
+        guard let text = apiResponse.content.first(where: { $0.type == "text" })?.text else {
             throw BedrockAPIError.noTextContent
         }
 
@@ -106,13 +115,7 @@ struct BedrockAPIClient: AIClient, Sendable {
             )
         }
 
-        if let jsonObject = try? JSONSerialization.jsonObject(with: data),
-           let pretty = try? JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted, .sortedKeys]),
-           let prettyString = String(data: pretty, encoding: .utf8) {
-            LogManager.send("Bedrock response", category: .ai, detail: prettyString)
-        }
-
-        return textBlock.text
+        return text
     }
 
     // MARK: - AWS Signature V4
@@ -239,9 +242,14 @@ struct BedrockAPIClient: AIClient, Sendable {
         let content: [ContentBlock]
     }
 
+    /// `text` is optional because Claude 5-era models interleave non-text
+    /// blocks — `thinking` (adaptive thinking is on by default on Sonnet 5),
+    /// `tool_use` — ahead of the text block. A non-optional `text` makes the
+    /// whole array fail to decode with an opaque "data couldn't be read
+    /// because it is missing" (DecodingError.keyNotFound).
     private struct ContentBlock: Decodable {
         let type: String
-        let text: String
+        let text: String?
     }
 }
 
