@@ -4,6 +4,18 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.23.14 — 2026-07-29
+
+**Fixed: meeting analysis failing with "The data couldn't be read"**
+- AI analysis stopped producing insights entirely, showing only the error
+  "The data couldn't be read because it is missing." The Bedrock model
+  behind the Sonnet profile now returns a reasoning block ahead of its
+  answer, and the app rejected the whole response rather than reading past
+  it. Analysis works again; screen-share frame analysis was unaffected.
+- The raw AI response is now written to the activity log before it's
+  parsed, so a future change in response shape leaves something to
+  diagnose from instead of a bare error.
+
 ## 0.23.13 — 2026-07-24
 
 **What's New after updates**
