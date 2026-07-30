@@ -1,12 +1,27 @@
 import SwiftUI
 
-/// Help menu items that open the bundled docs in their own window.
-/// Plugged into the App's `.commands` block via
+/// Help menu items: the on-demand What's New sheet, then the bundled docs in
+/// their own window. Plugged into the App's `.commands` block via
 /// `CommandGroup(replacing: .help) { HelpMenuCommands() }`.
 struct HelpMenuCommands: View {
     @Environment(\.openWindow) private var openWindow
+    /// Bound to the key window's ContentView; nil when no main window is
+    /// focused, which disables the item rather than dropping the request.
+    @FocusedValue(\.whatsNewPresentation) private var whatsNewPresentation
 
     var body: some View {
+        // Where macOS apps conventionally put this (cf. Xcode's "What's New in
+        // Xcode"). Shows the headline set rather than `pending`, which is empty
+        // once the post-update sheet has recorded this version.
+        Button("What's New in Grey Eminence") {
+            whatsNewPresentation?.wrappedValue = WhatsNewPresentation(
+                highlights: FeatureHighlightCatalog.headline()
+            )
+        }
+        .disabled(whatsNewPresentation == nil)
+
+        Divider()
+
         ForEach(HelpDoc.allCases) { doc in
             Button(doc.menuTitle) {
                 openWindow(id: "help-doc", value: doc)

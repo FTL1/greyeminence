@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// A staged What's New presentation — the highlights to show. Identity is
+/// per-request so asking again after a dismissal re-presents.
+struct WhatsNewPresentation: Identifiable {
+    let id = UUID()
+    let highlights: [FeatureHighlight]
+}
+
+private struct WhatsNewPresentationKey: FocusedValueKey {
+    typealias Value = Binding<WhatsNewPresentation?>
+}
+
+extension FocusedValues {
+    /// Published by the main window so App-scene menu commands (Help → What's
+    /// New) can present the sheet in the *key* window. A shared singleton would
+    /// fire in every open window at once, and would be swallowed entirely when
+    /// no window is open (the app survives via MenuBarExtra).
+    var whatsNewPresentation: Binding<WhatsNewPresentation?>? {
+        get { self[WhatsNewPresentationKey.self] }
+        set { self[WhatsNewPresentationKey.self] = newValue }
+    }
+}
+
 /// Post-update "What's New" moment: a short, curated set of feature highlights
 /// shown once after the app updates to a version the user hasn't seen. Each row
 /// can deep-link straight to the feature ("Try it"). Dismissal is recorded by

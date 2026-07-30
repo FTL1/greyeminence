@@ -48,12 +48,24 @@ enum FeatureHighlightCatalog {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
     }
 
-    /// Highlights newer than `lastSeenVersion`, newest first, capped so a user
-    /// who skipped many releases gets the headline set (the rest stay in the
-    /// changelog) rather than an endless scroll.
-    static func pending(since lastSeenVersion: String, limit: Int = 4) -> [FeatureHighlight] {
+    /// Cap on how many highlights any one presentation shows — a user who
+    /// skipped many releases gets the headline set, not an endless scroll (the
+    /// rest stay in the changelog).
+    private static let defaultLimit = 4
+
+    /// Highlights newer than `lastSeenVersion`, newest first, capped.
+    static func pending(since lastSeenVersion: String, limit: Int = defaultLimit) -> [FeatureHighlight] {
         let newer = all.filter { SemVer.compare($0.version, lastSeenVersion) == .orderedDescending }
         return Array(newer.prefix(limit))
+    }
+
+    /// The newest highlights regardless of what the user has already seen — for
+    /// Help → What's New, where `pending` would be empty (the post-update sheet
+    /// records the current version on dismissal, so nothing is ever pending once
+    /// it has been shown). Every shipped highlight postdates "0.0.0", so this is
+    /// `pending` with the floor removed — one selection policy, not two.
+    static func headline(limit: Int = defaultLimit) -> [FeatureHighlight] {
+        pending(since: "0.0.0", limit: limit)
     }
 }
 

@@ -78,8 +78,9 @@ struct ContentView: View {
     /// Highest app version whose feature highlights the user has seen. Empty on
     /// first launch under this system — seeded in `presentWhatsNewIfNeeded`.
     @AppStorage("lastSeenHighlightVersion") private var lastSeenHighlightVersion = ""
-    @State private var showWhatsNew = false
-    @State private var whatsNewHighlights: [FeatureHighlight] = []
+    /// Staged What's New presentation — non-nil means "show it". Set by the
+    /// post-update check and, via the focused value below, by Help → What's New.
+    @State private var whatsNew: WhatsNewPresentation?
     @State private var selectedInterview: Interview?
     var recordingViewModel: RecordingViewModel
     var interviewRecordingViewModel: InterviewRecordingViewModel
@@ -170,21 +171,25 @@ struct ContentView: View {
         .onChange(of: autoStartRecording) { _, enabled in
             recordingViewModel.setAutoDetectionEnabled(enabled)
         }
+        // Lets Help → What's New present the sheet in this window when it's the
+        // key one — see FocusedValues.whatsNewPresentation.
+        .focusedSceneValue(\.whatsNewPresentation, $whatsNew)
         .sheet(isPresented: $showProfileSetup) {
             MyProfileSetupSheet()
         }
-        // Post-update "What's New". Dismissal (any path — Got it, Escape, Try it)
-        // records the current version via onDismiss so it never re-nags.
-        .sheet(isPresented: $showWhatsNew, onDismiss: {
+        // "What's New" — post-update or on demand from the Help menu. Dismissal
+        // (any path — Got it, Escape, Try it) records the current version via
+        // onDismiss so the post-update sheet never re-nags.
+        .sheet(item: $whatsNew, onDismiss: {
             lastSeenHighlightVersion = FeatureHighlightCatalog.currentVersion
-        }) {
+        }) { presentation in
             WhatsNewSheet(
-                highlights: whatsNewHighlights,
+                highlights: presentation.highlights,
                 version: FeatureHighlightCatalog.currentVersion
             ) { highlight in
                 // Deep-link into the feature, and count that as discovering it
                 // so the in-context badge doesn't also fire.
-                showWhatsNew = false
+                whatsNew = nil
                 if let destination = highlight.destination {
                     selectedDestination = destination
                 }
@@ -278,12 +283,11 @@ struct ContentView: View {
 
         let pending = FeatureHighlightCatalog.pending(since: lastSeenHighlightVersion)
         guard !pending.isEmpty else { return }
-        whatsNewHighlights = pending
 
         // Sequence behind the first-run profile sheet so the two never stack.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             guard !showProfileSetup else { return }
-            showWhatsNew = true
+            whatsNew = WhatsNewPresentation(highlights: pending)
         }
     }
 

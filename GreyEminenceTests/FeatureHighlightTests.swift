@@ -54,6 +54,21 @@ final class FeatureHighlightTests: XCTestCase {
         XCTAssertEqual(all.count, FeatureHighlightCatalog.all.count)
     }
 
+    // MARK: Headline highlights (Help → What's New)
+
+    /// The on-demand path can't use `pending` — it's empty once the post-update
+    /// sheet records the current version (see the test above), which is exactly
+    /// when the user reaches for Help → What's New. So `headline` must stand on
+    /// its own while still honouring the shared cap.
+    func testHeadlineIgnoresSeenStateAndRespectsLimit() {
+        XCTAssertFalse(FeatureHighlightCatalog.headline().isEmpty)
+        XCTAssertLessThanOrEqual(FeatureHighlightCatalog.headline(limit: 1).count, 1)
+        XCTAssertEqual(
+            FeatureHighlightCatalog.headline(limit: 99).count,
+            FeatureHighlightCatalog.all.count
+        )
+    }
+
     func testHighlightIDsAreUnique() {
         let ids = FeatureHighlightCatalog.all.map(\.id)
         XCTAssertEqual(Set(ids).count, ids.count, "duplicate feature ids would cross-wire NEW badges")
