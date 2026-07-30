@@ -46,7 +46,8 @@ struct BedrockAPIClient: AIClient, Sendable {
             anthropic_version: "bedrock-2023-05-31",
             max_tokens: maxTokens,
             system: system,
-            messages: [Message(role: "user", content: blocks)]
+            messages: [Message(role: "user", content: blocks)],
+            thinking: .disabled
         )
 
         let bodyData = try JSONEncoder().encode(body)
@@ -104,7 +105,7 @@ struct BedrockAPIClient: AIClient, Sendable {
         let apiResponse = try JSONDecoder().decode(APIResponse.self, from: data)
 
         guard let text = apiResponse.content.first(where: { $0.type == "text" })?.text else {
-            throw BedrockAPIError.noTextContent
+            throw BedrockAPIError.noTextContent(stopReason: apiResponse.stop_reason)
         }
 
         if let usage = AIUsage.decode(fromResponseBody: data) {
@@ -231,6 +232,7 @@ struct BedrockAPIClient: AIClient, Sendable {
         let max_tokens: Int
         let system: String
         let messages: [Message]
+        let thinking: ThinkingConfig
     }
 
     private struct Message: Encodable {
@@ -240,6 +242,7 @@ struct BedrockAPIClient: AIClient, Sendable {
 
     private struct APIResponse: Decodable {
         let content: [ContentBlock]
+        let stop_reason: String?
     }
 
     /// `text` is optional because Claude 5-era models interleave non-text
@@ -257,7 +260,7 @@ enum BedrockAPIError: LocalizedError {
     case invalidURL
     case invalidResponse
     case httpError(statusCode: Int, body: String)
-    case noTextContent
+    case noTextContent(stopReason: String?)
 
     var errorDescription: String? {
         switch self {
@@ -267,8 +270,12 @@ enum BedrockAPIError: LocalizedError {
             "Invalid response from Bedrock"
         case .httpError(let statusCode, let body):
             "Bedrock HTTP \(statusCode): \(body)"
-        case .noTextContent:
-            "No text content in Bedrock response"
+        case .noTextContent(let stopReason):
+            // Name the usual cause rather than just the symptom: the model can
+            // exhaust max_tokens before emitting any text.
+            stopReason == "max_tokens"
+                ? "The model hit its output limit before answering — try again, or raise max tokens"
+                : "No text content in Bedrock response\(stopReason.map { " (stop reason: \($0))" } ?? "")"
         }
     }
 }

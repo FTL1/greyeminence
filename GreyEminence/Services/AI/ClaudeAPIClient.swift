@@ -43,7 +43,8 @@ struct ClaudeAPIClient: AIClient, Sendable {
             model: model,
             max_tokens: maxTokens,
             system: system,
-            messages: [Message(role: "user", content: blocks)]
+            messages: [Message(role: "user", content: blocks)],
+            thinking: .disabled
         )
 
         let request = try buildRequest(body: body)
@@ -95,7 +96,7 @@ struct ClaudeAPIClient: AIClient, Sendable {
         let apiResponse = try JSONDecoder().decode(APIResponse.self, from: data)
 
         guard let text = apiResponse.content.first(where: { $0.type == "text" })?.text else {
-            throw ClaudeAPIError.noTextContent
+            throw ClaudeAPIError.noTextContent(stopReason: apiResponse.stop_reason)
         }
 
         if let usage = AIUsage.decode(fromResponseBody: data) {
@@ -135,6 +136,7 @@ struct ClaudeAPIClient: AIClient, Sendable {
         let max_tokens: Int
         let system: String
         let messages: [Message]
+        let thinking: ThinkingConfig
     }
 
     private struct Message: Encodable {
@@ -146,6 +148,7 @@ struct ClaudeAPIClient: AIClient, Sendable {
 
     private struct APIResponse: Decodable {
         let content: [ContentBlock]
+        let stop_reason: String?
     }
 
     /// `text` is optional because Claude 5-era models interleave non-text
@@ -173,7 +176,7 @@ enum ClaudeAPIError: LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int)
     case apiError(statusCode: Int, message: String)
-    case noTextContent
+    case noTextContent(stopReason: String?)
 
     var errorDescription: String? {
         switch self {
@@ -185,8 +188,12 @@ enum ClaudeAPIError: LocalizedError {
             Self.friendlyHTTPMessage(statusCode)
         case .apiError(let statusCode, let message):
             Self.friendlyAPIMessage(statusCode: statusCode, message: message)
-        case .noTextContent:
-            "No text content in API response"
+        case .noTextContent(let stopReason):
+            // Name the usual cause rather than just the symptom: the model can
+            // exhaust max_tokens before emitting any text.
+            stopReason == "max_tokens"
+                ? "The model hit its output limit before answering — try again, or raise max tokens"
+                : "No text content in API response\(stopReason.map { " (stop reason: \($0))" } ?? "")"
         }
     }
 

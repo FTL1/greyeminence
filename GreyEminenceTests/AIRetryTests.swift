@@ -81,7 +81,8 @@ final class AIRetryTests: XCTestCase {
     func test_claude_noTextContent_isNotRetryable() {
         // Empty response means the model returned nothing — retrying will
         // almost certainly return nothing again.
-        XCTAssertFalse(AIRetry.isRetryable(ClaudeAPIError.noTextContent))
+        XCTAssertFalse(AIRetry.isRetryable(ClaudeAPIError.noTextContent(stopReason: nil)))
+        XCTAssertFalse(AIRetry.isRetryable(ClaudeAPIError.noTextContent(stopReason: "max_tokens")))
     }
 
     func test_claude_invalidURL_isNotRetryable() {

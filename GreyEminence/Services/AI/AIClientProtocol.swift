@@ -94,3 +94,21 @@ enum AIMessageContentBlock: Encodable {
         images.map { .image($0) } + [.text(text)]
     }
 }
+
+/// Extended-thinking configuration sent with every request.
+///
+/// We always disable it. The analysis prompts ask for a fixed JSON schema, not
+/// open-ended reasoning, and adaptive thinking is ON BY DEFAULT on Claude 5-era
+/// models — which share `max_tokens` between thinking and the answer. On a long
+/// transcript Sonnet 5 spent the entire 8192-token budget thinking and returned
+/// a response with no text block at all (`stop_reason: "max_tokens"`), so
+/// analysis failed outright. Disabling is deterministic; capping effort only
+/// reduces thinking rather than eliminating it.
+///
+/// Revisit if a model is adopted where thinking measurably improves the
+/// extraction — and raise `maxTokens` well above the answer size if so.
+struct ThinkingConfig: Encodable {
+    let type: String
+
+    static let disabled = ThinkingConfig(type: "disabled")
+}
