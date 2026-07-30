@@ -31,14 +31,23 @@ struct ScreenSharePlayerSection: View {
             EmptyView()
         } else {
             content
-                .onAppear {
-                    if model == nil {
-                        model = ScreenSharePlayerModel(meeting: meeting)
-                    }
+                // Rebuild whenever the meeting being shown changes — keyed on
+                // its identity, NOT its frame count. The detail pane reuses one
+                // view for every meeting, so a count-keyed refresh leaves the
+                // previous meeting's player in place whenever the two happen to
+                // have the same number of frames: its images, observations and
+                // window titles all render under the newly selected meeting.
+                .task(id: meeting.id) {
+                    model = ScreenSharePlayerModel(meeting: meeting)
+                    // Playhead state belongs to the meeting we just left.
+                    isExpanded = false
+                    lastPushedSegmentID = nil
+                    lastPushAt = .distantPast
                 }
                 .onDisappear {
                     model?.pause()
                 }
+                // Frames captured while this same meeting is on screen.
                 .onChange(of: meeting.screenFrames.count) {
                     model?.refresh(from: meeting)
                 }
