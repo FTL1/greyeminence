@@ -4,6 +4,28 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.23.15 — 2026-07-30
+
+**Fixed: meeting analysis producing no insights**
+- 0.23.14 fixed the "data couldn't be read" error and revealed the next
+  one: on long meetings the model was spending its entire output budget
+  reasoning and never getting to the answer, so analysis failed with "No
+  text content". That reasoning step is now switched off — it was doing
+  nothing for these prompts, which ask for a fixed set of fields.
+- When a response does come back empty, the error now says the model hit
+  its output limit rather than just reporting nothing.
+
+**Fixed: screen shares shown under the wrong meeting**
+- Selecting a different meeting could leave the previous meeting's screen
+  share on screen — its images, descriptions and frame count — whenever the
+  two meetings happened to have the same number of frames. Nothing was
+  mis-filed: the recordings were always stored against the right meeting,
+  only the panel was slow to catch up. It now follows the selection.
+
+**Re-open What's New whenever you like**
+- Help → What's New in Grey Eminence brings the update highlights back
+  after you've dismissed them.
+
 ## 0.23.14 — 2026-07-29
 
 **Fixed: meeting analysis failing with "The data couldn't be read"**
