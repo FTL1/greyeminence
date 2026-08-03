@@ -29,16 +29,27 @@ struct MeetingListView: View {
     }
 
     private var groupedMeetings: [(String, [Meeting])] {
-        let calendar = Calendar.current
-        let grouped = Dictionary(grouping: visibleMeetings) { meeting -> String in
-            if calendar.isDateInToday(meeting.date) {
+        Self.groupSections(for: visibleMeetings, now: .now)
+    }
+
+    /// Buckets meetings into the relative sections ("Today"…"This Month") and
+    /// then one section per calendar month. `now` is injected so the bucketing
+    /// is testable without depending on the wall clock.
+    static func groupSections(
+        for meetings: [Meeting],
+        now: Date,
+        calendar: Calendar = .current
+    ) -> [(String, [Meeting])] {
+        let grouped = Dictionary(grouping: meetings) { meeting -> String in
+            if calendar.isDate(meeting.date, inSameDayAs: now) {
                 return "Today"
-            } else if calendar.isDateInYesterday(meeting.date) {
+            } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+                      calendar.isDate(meeting.date, inSameDayAs: yesterday) {
                 return "Yesterday"
-            } else if let weekInterval = calendar.dateInterval(of: .weekOfYear, for: .now),
+            } else if let weekInterval = calendar.dateInterval(of: .weekOfYear, for: now),
                       weekInterval.contains(meeting.date) {
                 return "This Week"
-            } else if let monthInterval = calendar.dateInterval(of: .month, for: .now),
+            } else if let monthInterval = calendar.dateInterval(of: .month, for: now),
                       monthInterval.contains(meeting.date) {
                 return "This Month"
             } else {
@@ -52,7 +63,12 @@ struct MeetingListView: View {
             let aIdx = order.firstIndex(of: a.key) ?? Int.max
             let bIdx = order.firstIndex(of: b.key) ?? Int.max
             if aIdx != bIdx { return aIdx < bIdx }
-            return a.key > b.key
+            // Month sections sort by date, never by header text: comparing
+            // "June 2026" > "July 2026" as strings is true ('n' > 'l'), which
+            // buried a whole month of meetings below an older section.
+            let aDate = a.value.map(\.date).max() ?? .distantPast
+            let bDate = b.value.map(\.date).max() ?? .distantPast
+            return aDate > bDate
         }
     }
 
