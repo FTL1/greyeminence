@@ -4,6 +4,16 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.23.16 — 2026-08-03
+
+**Fixed: a month of meetings appearing to be missing**
+- The Meetings list sorted its month headings alphabetically instead of by
+  date, so July sat below June and looked like it had vanished. Nothing was
+  ever lost — the meetings were there the whole time, just filed under the
+  wrong heading order. The same slip affected January and February, and any
+  other pair of months whose names sort differently than the calendar does.
+- Month sections now follow the calendar, newest first.
+
 ## 0.23.15 — 2026-07-30
 
 **Fixed: meeting analysis producing no insights**
