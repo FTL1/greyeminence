@@ -40,6 +40,12 @@ struct MeetingListView: View {
         now: Date,
         calendar: Calendar = .current
     ) -> [(String, [Meeting])] {
+        // Built once, and pinned to the same time zone as `calendar` so the
+        // label a meeting gets always agrees with the bucket it landed in.
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "MMMM yyyy"
+        monthFormatter.timeZone = calendar.timeZone
+
         let grouped = Dictionary(grouping: meetings) { meeting -> String in
             if calendar.isDate(meeting.date, inSameDayAs: now) {
                 return "Today"
@@ -53,9 +59,7 @@ struct MeetingListView: View {
                       monthInterval.contains(meeting.date) {
                 return "This Month"
             } else {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "MMMM yyyy"
-                return formatter.string(from: meeting.date)
+                return monthFormatter.string(from: meeting.date)
             }
         }
         let order = ["Today", "Yesterday", "This Week", "This Month"]

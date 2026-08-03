@@ -8,17 +8,18 @@ import SwiftData
 @MainActor
 final class MeetingListGroupingTests: XCTestCase {
 
-    private var context: ModelContext!
-
-    override func setUpWithError() throws {
+    /// Built per test rather than in `setUp` — the context is MainActor-bound
+    /// and `setUpWithError` is not.
+    private func makeContext() throws -> ModelContext {
         let container = try ModelContainer(
             for: Meeting.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        context = ModelContext(container)
+        return ModelContext(container)
     }
 
-    /// Fixed reference point so bucketing never depends on the wall clock.
+    /// Fixed reference point so bucketing never depends on the wall clock or
+    /// on the runner's time zone.
     private var calendar: Calendar {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
@@ -29,8 +30,11 @@ final class MeetingListGroupingTests: XCTestCase {
         calendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12))!
     }
 
-    @discardableResult
-    private func makeMeeting(_ date: Date, title: String = "Meeting") -> Meeting {
+    private func makeMeeting(
+        _ date: Date,
+        title: String = "Meeting",
+        in context: ModelContext
+    ) -> Meeting {
         let meeting = Meeting(title: title)
         meeting.date = date
         context.insert(meeting)
@@ -42,29 +46,38 @@ final class MeetingListGroupingTests: XCTestCase {
             .map(\.0)
     }
 
-    func testJulySortsAboveJune() {
+    func testJulySortsAboveJune() throws {
+        let context = try makeContext()
         let now = date(2026, 8, 3)
-        let meetings = [makeMeeting(date(2026, 6, 16)), makeMeeting(date(2026, 7, 17))]
+        let meetings = [
+            makeMeeting(date(2026, 6, 16), in: context),
+            makeMeeting(date(2026, 7, 17), in: context),
+        ]
 
         XCTAssertEqual(sections(meetings, now: now), ["July 2026", "June 2026"])
     }
 
     /// The same defect in the other direction: "January" beats "February"
     /// alphabetically, so a string sort inverted them too.
-    func testFebruarySortsAboveJanuary() {
+    func testFebruarySortsAboveJanuary() throws {
+        let context = try makeContext()
         let now = date(2026, 4, 10)
-        let meetings = [makeMeeting(date(2026, 1, 5)), makeMeeting(date(2026, 2, 5))]
+        let meetings = [
+            makeMeeting(date(2026, 1, 5), in: context),
+            makeMeeting(date(2026, 2, 5), in: context),
+        ]
 
         XCTAssertEqual(sections(meetings, now: now), ["February 2026", "January 2026"])
     }
 
-    func testRelativeSectionsPrecedeMonthSections() {
+    func testRelativeSectionsPrecedeMonthSections() throws {
+        let context = try makeContext()
         let now = date(2026, 8, 3)
         let meetings = [
-            makeMeeting(date(2026, 6, 16)),
-            makeMeeting(date(2026, 7, 17)),
-            makeMeeting(date(2026, 8, 3)),
-            makeMeeting(date(2026, 8, 2)),
+            makeMeeting(date(2026, 6, 16), in: context),
+            makeMeeting(date(2026, 7, 17), in: context),
+            makeMeeting(date(2026, 8, 3), in: context),
+            makeMeeting(date(2026, 8, 2), in: context),
         ]
 
         XCTAssertEqual(
@@ -73,17 +86,22 @@ final class MeetingListGroupingTests: XCTestCase {
         )
     }
 
-    func testMonthSectionsOrderAcrossYearBoundary() {
+    func testMonthSectionsOrderAcrossYearBoundary() throws {
+        let context = try makeContext()
         let now = date(2026, 3, 1)
-        let meetings = [makeMeeting(date(2025, 12, 10)), makeMeeting(date(2026, 1, 10))]
+        let meetings = [
+            makeMeeting(date(2025, 12, 10), in: context),
+            makeMeeting(date(2026, 1, 10), in: context),
+        ]
 
         XCTAssertEqual(sections(meetings, now: now), ["January 2026", "December 2025"])
     }
 
-    func testMeetingsStayWithinTheirSection() {
+    func testMeetingsStayWithinTheirSection() throws {
+        let context = try makeContext()
         let now = date(2026, 8, 3)
-        let june = makeMeeting(date(2026, 6, 16), title: "June call")
-        let july = makeMeeting(date(2026, 7, 17), title: "July call")
+        let june = makeMeeting(date(2026, 6, 16), title: "June call", in: context)
+        let july = makeMeeting(date(2026, 7, 17), title: "July call", in: context)
 
         let grouped = MeetingListView.groupSections(
             for: [june, july], now: now, calendar: calendar
