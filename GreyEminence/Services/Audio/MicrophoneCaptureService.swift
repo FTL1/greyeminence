@@ -19,6 +19,23 @@ actor MicrophoneCaptureService {
 
     let bufferSize: AVAudioFrameCount = 4096
 
+    /// Uptime at which this capture began. Preserved across engine rebuilds so
+    /// buffer timestamps stay on one continuous timeline — a recovery must not
+    /// restart segment times at zero.
+    private var captureStartUptime: Double = 0
+    private var requestedDeviceUID: String?
+    private var configChangeObserver: NSObjectProtocol?
+    /// Bounded so a device that can never deliver doesn't spin forever.
+    private var recoveryAttempts = 0
+    private static let maxRecoveryAttempts = 5
+
+    /// When the engine was last built. Starting an engine (and setting the
+    /// input AU's CurrentDevice) itself posts a configuration change, so
+    /// changes arriving right after a build are our own doing and must be
+    /// ignored — otherwise the observer feeds itself in a loop.
+    private var lastEngineBuildAt: Date = .distantPast
+    private static let buildSettleWindow: TimeInterval = 3
+
     /// Timestamp of the most recent buffer delivered from the audio tap.
     /// `nil` until the first buffer arrives. Safe to call from any isolation.
     nonisolated var lastBufferTimestamp: Date? {
@@ -42,9 +59,34 @@ actor MicrophoneCaptureService {
         // Brief yield so observers process the notification before we claim the device.
         Thread.sleep(forTimeInterval: 0.05)
 
+        self.requestedDeviceUID = deviceUID
+        self.captureStartUptime = ProcessInfo.processInfo.systemUptime
+        self.recoveryAttempts = 0
+
+        let stream = AsyncStream<TaggedAudioBuffer> { continuation in
+            self.continuation = continuation
+
+            continuation.onTermination = { @Sendable _ in
+                Task { await self.stopCapture() }
+            }
+        }
+
+        let engine = try buildEngine()
+        self.audioEngine = engine
+        self.isCapturing = true
+        observeConfigurationChanges(on: engine)
+
+        LogManager.send("Microphone capture started", category: .audio)
+        return stream
+    }
+
+    /// Builds the engine, installs the tap into the *existing* continuation,
+    /// and starts it. Shared by `startCapture` and recovery so a rebuilt
+    /// engine is configured identically to the original.
+    private func buildEngine() throws -> AVAudioEngine {
         let engine = AVAudioEngine()
 
-        let resolvedUID = deviceUID ?? UserDefaults.standard.string(forKey: "audio.preferredInputDeviceUID")
+        let resolvedUID = requestedDeviceUID ?? UserDefaults.standard.string(forKey: "audio.preferredInputDeviceUID")
         if let resolvedUID, !resolvedUID.isEmpty {
             // Skip the AudioUnitSetProperty call when the preferred UID is
             // already the system default input. Setting CurrentDevice on the
@@ -90,15 +132,7 @@ actor MicrophoneCaptureService {
             level: probe.isLikelySilent ? .warning : .info
         )
 
-        let stream = AsyncStream<TaggedAudioBuffer> { continuation in
-            self.continuation = continuation
-
-            continuation.onTermination = { @Sendable _ in
-                Task { await self.stopCapture() }
-            }
-        }
-
-        let startTime = ProcessInfo.processInfo.systemUptime
+        let startTime = self.captureStartUptime
         let cont = self.continuation
         let lastBuffer = self.lastBufferAt
         self.lastStartedFormat = inputFormat
@@ -120,12 +154,103 @@ actor MicrophoneCaptureService {
 
         engine.prepare()
         try engine.start()
+        lastEngineBuildAt = Date()
+        return engine
+    }
 
-        self.audioEngine = engine
-        self.isCapturing = true
+    /// Rebuilds only when the tap has genuinely stopped delivering. A
+    /// configuration change on its own is not a fault — the device format can
+    /// change while audio keeps flowing, and the engine we just started emits
+    /// one as a matter of course.
+    private func recoverIfStalled(reason: String) {
+        guard isCapturing else { return }
+        guard Self.shouldRecoverOnConfigChange(
+            now: Date(),
+            lastEngineBuildAt: lastEngineBuildAt,
+            lastBufferAt: lastBufferTimestamp
+        ) else { return }
+        recoverCapture(reason: reason)
+    }
 
-        LogManager.send("Microphone capture started", category: .audio)
-        return stream
+    /// Whether a configuration-change notification warrants rebuilding.
+    ///
+    /// Pure so the two ways this can go wrong are covered by tests: rebuilding
+    /// in response to our own build (an infinite loop — observed 2026-08-05,
+    /// five rebuilds in under a second) and rebuilding while audio is still
+    /// flowing (a needless gap in the recording).
+    static func shouldRecoverOnConfigChange(
+        now: Date,
+        lastEngineBuildAt: Date,
+        lastBufferAt: Date?,
+        settleWindow: TimeInterval = buildSettleWindow,
+        bufferStaleAfter: TimeInterval = 3
+    ) -> Bool {
+        guard now.timeIntervalSince(lastEngineBuildAt) >= settleWindow else { return false }
+        guard let lastBufferAt else { return true }   // never delivered — rebuild
+        return now.timeIntervalSince(lastBufferAt) >= bufferStaleAfter
+    }
+
+    /// macOS posts this when the input hardware or its format changes under
+    /// the engine — which is what happens when another app (Teams, Zoom,
+    /// Discord) claims the input device moments after we started. The engine
+    /// stops and the tap is torn down; without reinstalling, buffers simply
+    /// never resume and the recording captures only the far end.
+    private func observeConfigurationChanges(on engine: AVAudioEngine) {
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+        }
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { await self.recoverIfStalled(reason: "engine configuration changed") }
+        }
+    }
+
+    /// Rebuilds the engine and tap, feeding the same continuation so consumers
+    /// never see the interruption. Returns true when capture was restarted.
+    @discardableResult
+    func recoverCapture(reason: String) -> Bool {
+        guard isCapturing else { return false }
+        guard recoveryAttempts < Self.maxRecoveryAttempts else {
+            LogManager.send(
+                "Mic capture not recovered (\(reason)) — gave up after \(Self.maxRecoveryAttempts) attempts",
+                category: .audio,
+                level: .warning
+            )
+            return false
+        }
+        recoveryAttempts += 1
+
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+
+        do {
+            let engine = try buildEngine()
+            audioEngine = engine
+            observeConfigurationChanges(on: engine)
+            LogManager.send(
+                "Mic capture recovered (\(reason)) — attempt \(recoveryAttempts)",
+                category: .audio
+            )
+            return true
+        } catch {
+            LogManager.send(
+                "Mic capture recovery failed (\(reason)): \(error.localizedDescription)",
+                category: .audio,
+                level: .warning
+            )
+            return false
+        }
+    }
+
+    /// Cleared by the watchdog once buffers are flowing again, so a later
+    /// unrelated stall gets a fresh budget.
+    func noteHealthy() {
+        recoveryAttempts = 0
     }
 
     func suspendCapture() {
@@ -143,6 +268,10 @@ actor MicrophoneCaptureService {
     func stopCapture() {
         guard isCapturing else { return }
 
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+            self.configChangeObserver = nil
+        }
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil

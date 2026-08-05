@@ -1594,6 +1594,7 @@ final class RecordingViewModel {
             try? await Task.sleep(for: .seconds(5))  // grace for startup
             var micWarned = false
             var sysWarned = false
+            var lastMicRecoveryAt: Date?
             while !Task.isCancelled {
                 guard let self else { return }
                 if await self.state != .recording {
@@ -1611,6 +1612,29 @@ final class RecordingViewModel {
                         micWarned = true
                     } else if stale <= 3 {
                         micWarned = false
+                        lastMicRecoveryAt = nil
+                        await micSvc.noteHealthy()
+                    }
+
+                    // Backstop for the configuration-change observer: some
+                    // device grabs stop the tap without posting a change
+                    // notification, and a mic that never recovers means a
+                    // recording of everyone except the user. Retried on a
+                    // cadence rather than once, so a device that needs a
+                    // moment to settle still gets picked up.
+                    let dueForRetry = lastMicRecoveryAt.map {
+                        now.timeIntervalSince($0) >= 15
+                    } ?? true
+                    if stale > 10, dueForRetry {
+                        lastMicRecoveryAt = now
+                        let recovered = await micSvc.recoverCapture(
+                            reason: "no buffers for \(Int(stale))s"
+                        )
+                        if !recovered {
+                            await MainActor.run {
+                                self.errorMessage = "Your microphone stopped feeding this recording and could not be restarted. Other participants are still being captured. Stopping and starting the recording usually clears it."
+                            }
+                        }
                     }
                 }
                 if let last = sysSvc.lastBufferTimestamp {
