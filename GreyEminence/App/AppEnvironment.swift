@@ -13,6 +13,9 @@ final class AppEnvironment {
 
     func configure(modelContext: ModelContext) {
         self.meetingStore = MeetingStore(modelContext: modelContext)
+        // Register the call-prompt category and delegate before the detector
+        // can raise a prompt.
+        CallPromptService.shared.configure()
         Task {
             await StalledNotificationService.shared.requestAuthorization()
             StalledNotificationService.shared.refresh(in: modelContext)

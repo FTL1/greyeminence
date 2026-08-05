@@ -36,7 +36,7 @@ struct ScreenShareSettingsView: View {
             Toggle(isOn: $captureEnabled) {
                 VStack(alignment: .leading) {
                     Text("Capture shared screens during recordings")
-                    Text("Screenshots popped-out Microsoft Teams screen-share windows while you record. Nothing is captured outside a share.")
+                    Text("Screenshots shared content while you record — popped-out Microsoft Teams share windows, and Discord streams that are popped out or fullscreened. Nothing is captured outside a share.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -44,7 +44,7 @@ struct ScreenShareSettingsView: View {
 
             Toggle(isOn: $autoDetect) {
                 VStack(alignment: .leading) {
-                    Text("Auto-detect Teams share windows")
+                    Text("Auto-detect share windows")
                     Text("When off, use Choose Window in the recording toolbar to pick the window yourself.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

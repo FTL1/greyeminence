@@ -39,7 +39,7 @@ struct ScreenShareWindowPickerSheet: View {
                     viewModel.selectShareWindow(nil)
                     dismiss()
                 }
-                .help("Return to automatic Teams share-window detection")
+                .help("Return to automatic share-window detection")
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)

@@ -261,9 +261,18 @@ enum SchemaV18: VersionedSchema {
     }
 }
 
+/// SchemaV19 adds `Meeting.sourceAppBundleID` / `sourceAppName` — which app
+/// the call was held in, so Discord and Teams meetings can be told apart
+/// after the fact. Two optional attributes, no new entity — lightweight
+/// migration; pre-existing meetings keep `nil`.
+enum SchemaV19: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(19, 0, 0) }
+    static var models: [any PersistentModel.Type] { SchemaV18.models }
+}
+
 enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self, SchemaV17.self, SchemaV18.self]
+        [SchemaV1.self, SchemaV2.self, SchemaV3.self, SchemaV4.self, SchemaV5.self, SchemaV6.self, SchemaV7.self, SchemaV8.self, SchemaV9.self, SchemaV10.self, SchemaV11.self, SchemaV12.self, SchemaV13.self, SchemaV14.self, SchemaV15.self, SchemaV16.self, SchemaV17.self, SchemaV18.self, SchemaV19.self]
     }
 
     static var stages: [MigrationStage] {
@@ -284,7 +293,8 @@ enum GreyEminenceMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: SchemaV14.self, toVersion: SchemaV15.self),
             .lightweight(fromVersion: SchemaV15.self, toVersion: SchemaV16.self),
             .lightweight(fromVersion: SchemaV16.self, toVersion: SchemaV17.self),
-            .lightweight(fromVersion: SchemaV17.self, toVersion: SchemaV18.self)
+            .lightweight(fromVersion: SchemaV17.self, toVersion: SchemaV18.self),
+            .lightweight(fromVersion: SchemaV18.self, toVersion: SchemaV19.self)
         ]
     }
 }

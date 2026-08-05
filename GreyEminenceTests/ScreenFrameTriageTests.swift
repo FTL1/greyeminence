@@ -321,4 +321,116 @@ final class ScreenFrameTriageTests: XCTestCase {
         )
         XCTAssertGreaterThanOrEqual(score, 100)
     }
+
+    // MARK: - Discord window scoring
+
+    private static let discord = "com.hnc.Discord"
+    private static let display = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+
+    /// The primary Discord auto-capture path: a stream popped out into its own
+    /// window, so Discord now has two windows and this one isn't the main one.
+    func testDiscordPopOutWindowScoresAboveAutoThreshold() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Ada's stream",
+            bundleID: Self.discord,
+            frame: CGRect(x: 0, y: 0, width: 1400, height: 900),
+            context: .init(sameAppWindowCount: 2, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThanOrEqual(score, 100)
+    }
+
+    /// A window titled like the pop-out but with no second window is just the
+    /// main app — auto-capturing it would frame the chat and member list.
+    func testDiscordSingleWindowIsNeverAutoSelected() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "#engineering | Acme - Discord",
+            bundleID: Self.discord,
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            context: .init(sameAppWindowCount: 1, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThan(score, 0)
+        XCTAssertLessThan(score, 100)
+    }
+
+    /// Two windows where this one *is* the main window: the pop-out is the
+    /// other one, so this must stay picker-only.
+    func testDiscordMainWindowStaysPickerOnlyEvenWithTwoWindows() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "#engineering | Acme - Discord",
+            bundleID: Self.discord,
+            frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+            context: .init(sameAppWindowCount: 2, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThan(score, 0)
+        XCTAssertLessThan(score, 100)
+    }
+
+    /// Fullscreening the stream is the other way to get a chrome-free view.
+    func testDiscordFullscreenWindowScoresAboveAutoThreshold() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Ada Lovelace",
+            bundleID: Self.discord,
+            frame: Self.display,
+            context: .init(sameAppWindowCount: 1, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThanOrEqual(score, 100)
+    }
+
+    /// Teams has no fullscreen rule — a maximized Teams main window must not
+    /// start auto-capturing.
+    func testFullscreenRuleDoesNotApplyToTeams() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Chat | Microsoft Teams",
+            bundleID: "com.microsoft.teams2",
+            frame: Self.display,
+            context: .init(sameAppWindowCount: 1, displayFrames: [Self.display])
+        )
+        XCTAssertLessThan(score, 100)
+    }
+
+    /// Apps with no profile stay invisible to auto-detect, however many
+    /// windows they have open.
+    func testUnprofiledAppScoresZeroRegardlessOfContext() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Some Document",
+            bundleID: "com.google.Chrome",
+            frame: Self.display,
+            context: .init(sameAppWindowCount: 3, displayFrames: [Self.display])
+        )
+        XCTAssertEqual(score, 0)
+    }
+
+    func testIsFullscreenToleratesMenuBarAndDock() {
+        let display = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        // Full width, shortened by the menu bar — still "fullscreen".
+        XCTAssertTrue(ScreenShareCaptureService.isFullscreen(
+            CGRect(x: 0, y: 0, width: 1920, height: 1035), in: [display]
+        ))
+        // A half-width window is not.
+        XCTAssertFalse(ScreenShareCaptureService.isFullscreen(
+            CGRect(x: 0, y: 0, width: 960, height: 1080), in: [display]
+        ))
+        XCTAssertFalse(ScreenShareCaptureService.isFullscreen(
+            CGRect(x: 0, y: 0, width: 1920, height: 1080), in: []
+        ))
+    }
+
+    // MARK: - Per-app share-ended phrases
+
+    func testDiscordPlaceholderUsesDiscordPhrases() {
+        let ocr = "The stream has ended"
+        XCTAssertTrue(ScreenFrameTriage.isShareEndedPlaceholder(
+            ocrText: ocr, phrases: ShareAppProfiles.discord.shareEndedPhrases
+        ))
+        // Teams' phrase list must not match Discord's placeholder.
+        XCTAssertFalse(ScreenFrameTriage.isShareEndedPlaceholder(
+            ocrText: ocr, phrases: ShareAppProfiles.teams.shareEndedPhrases
+        ))
+    }
+
+    func testShareEndedDefaultsToTeamsPhrases() {
+        XCTAssertTrue(ScreenFrameTriage.isShareEndedPlaceholder(
+            ocrText: "Content sharing has ended"
+        ))
+    }
 }

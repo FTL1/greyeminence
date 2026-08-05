@@ -74,7 +74,9 @@ enum ScreenFrameTriage {
     // MARK: - Share-ended placeholder
 
     /// Lowercased phrases that mark the placeholder screen Teams leaves in
-    /// the pop-out window after the presenter stops sharing.
+    /// the pop-out window after the presenter stops sharing. Retained as the
+    /// default so callers without an app profile behave as before; per-app
+    /// sets live in `ShareAppProfiles`.
     static let shareEndedPhrases: [String] = [
         "content sharing has ended",
         "sharing is paused",
@@ -86,13 +88,16 @@ enum ScreenFrameTriage {
     /// down. Requires the screen to be otherwise nearly empty (placeholder
     /// screens carry only a title bar, the message, and a button) so a
     /// document that merely quotes the phrase doesn't end the session.
-    static func isShareEndedPlaceholder(ocrText: String?) -> Bool {
+    static func isShareEndedPlaceholder(
+        ocrText: String?,
+        phrases: [String] = shareEndedPhrases
+    ) -> Bool {
         // Empty OCR yields an empty set, and `.contains` on it is already
         // false — no separate emptiness guard needed.
         let lines = ocrLines(ocrText)
         guard lines.count <= 5 else { return false }
         return lines.contains { line in
-            shareEndedPhrases.contains { line.contains($0) }
+            phrases.contains { line.contains($0) }
         }
     }
 

@@ -76,6 +76,13 @@ struct MeetingRowView: View {
                 }
             }
 
+            if let sourceApp = meeting.sourceAppName {
+                Image(systemName: "video.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("Recorded from \(sourceApp)")
+            }
+
             if meeting.seriesID != nil {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption)

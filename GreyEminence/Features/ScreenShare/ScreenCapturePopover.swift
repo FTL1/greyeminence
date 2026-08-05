@@ -84,7 +84,7 @@ struct ScreenCapturePopover: View {
                 }
             }
         } else if case .watching = viewModel.screenCaptureState {
-            Text("Pop out the shared content in Teams and capture starts automatically.")
+            Text("\(ShareAppProfiles.genericPopOutHint) Capture starts automatically.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

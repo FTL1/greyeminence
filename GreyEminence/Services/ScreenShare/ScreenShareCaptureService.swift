@@ -84,30 +84,17 @@ actor ScreenShareCaptureService {
         var jpegQuality: Double = 0.7
     }
 
-    // MARK: Teams pop-out heuristics (data-driven — cheap to update when
-    // Teams changes; empirical verification tracked as a spike)
+    /// Per-app share-window heuristics live in `ShareAppProfiles` — data-driven
+    /// so adapting to a Teams or Discord UI change is an edit there, not here.
 
-    static let teamsBundleIDs: Set<String> = [
-        "com.microsoft.teams2",   // "new" Teams
-        "com.microsoft.teams",    // classic
-    ]
-
-    /// Lowercased substrings that suggest a window is the popped-out share
-    /// content rather than the main meeting window.
-    static let shareTitlePatterns: [String] = [
-        "is presenting",
-        "is sharing",
-        "screen shar",       // "screen share" / "screen sharing"
-        "shared content",
-        "content shared",
-    ]
-
-    /// Lowercased substrings that mark the main Teams app windows we must
-    /// never capture (chat, activity, the meeting stage itself).
-    static let mainWindowPatterns: [String] = [
-        "| microsoft teams",
-        "microsoft teams",
-    ]
+    /// Facts about the wider window list that a single window can't reveal on
+    /// its own, but which strongly indicate a share.
+    struct ScoringContext: Sendable {
+        /// How many windows the same app currently has on screen.
+        var sameAppWindowCount: Int = 1
+        /// Frames of the attached displays, for spotting a fullscreened window.
+        var displayFrames: [CGRect] = []
+    }
 
     private static let discoveryInterval: Double = 3.0
     /// Consecutive failed polls before the session is declared over
@@ -129,6 +116,9 @@ actor ScreenShareCaptureService {
     private var currentWindowID: CGWindowID?
     private var currentSessionID: UUID?
     private var currentWindowTitle: String = ""
+    /// Profile of the app owning the session's window, so share-ended
+    /// detection uses that app's placeholder wording.
+    private var currentProfile: ShareAppProfile?
     private var sequence = 0
     private var lastKeptHash: UInt64?
     private var lastKeptOCR: String?
@@ -320,6 +310,7 @@ actor ScreenShareCaptureService {
         currentSessionID = sessionID
         currentWindowID = candidate.id
         currentWindowTitle = candidate.title
+        currentProfile = ShareAppProfiles.profile(for: candidate.bundleID)
         sequence = 0
         lastKeptHash = nil
         lastKeptOCR = nil
@@ -337,6 +328,7 @@ actor ScreenShareCaptureService {
         currentSessionID = nil
         currentWindowID = nil
         currentWindowTitle = ""
+        currentProfile = nil
         missedPolls = 0
         continuation?.yield(.sessionEnded(sessionID: sessionID, reason: reason))
         LogManager.send("Screen capture stopped: \(reason.logReason)", category: .screen, meetingID: meetingID)
@@ -361,8 +353,24 @@ actor ScreenShareCaptureService {
 
     // MARK: Scoring (pure — unit-tested via scoreWindow)
 
-    static func candidates(from windows: [SCWindow]) -> [WindowCandidate] {
-        windows.compactMap { window in
+    /// Display bounds via CoreGraphics rather than `NSScreen`, which is
+    /// MainActor-isolated and so unreachable from this actor.
+    static func activeDisplayFrames() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.prefix(Int(count)).map { CGDisplayBounds($0) }
+    }
+
+    static func candidates(
+        from windows: [SCWindow],
+        displayFrames: [CGRect]? = nil
+    ) -> [WindowCandidate] {
+        let displays = displayFrames ?? activeDisplayFrames()
+        // Eligible windows first, so the per-app window counts below reflect
+        // what the user can actually see rather than hidden helper windows.
+        let eligible = windows.compactMap { window -> (SCWindow, SCRunningApplication)? in
             guard let app = window.owningApplication else { return nil }
             // Real, visible, normal-level windows only. This excludes hidden
             // Electron helper windows AND share overlays like Teams' red
@@ -371,11 +379,19 @@ actor ScreenShareCaptureService {
             guard window.isOnScreen, window.windowLayer == 0 else { return nil }
             // Windows failing the size floor are never candidates at all.
             guard window.frame.width >= 300, window.frame.height >= 200 else { return nil }
+            return (window, app)
+        }
+
+        var windowCounts: [String: Int] = [:]
+        for (_, app) in eligible {
+            windowCounts[app.bundleIdentifier, default: 0] += 1
+        }
+
+        return eligible.map { window, app in
             let title = window.title ?? ""
-            let score = scoreWindow(
-                title: title,
-                bundleID: app.bundleIdentifier,
-                frame: window.frame
+            let context = ScoringContext(
+                sameAppWindowCount: windowCounts[app.bundleIdentifier] ?? 1,
+                displayFrames: displays
             )
             return WindowCandidate(
                 id: window.windowID,
@@ -383,34 +399,67 @@ actor ScreenShareCaptureService {
                 appName: app.applicationName,
                 bundleID: app.bundleIdentifier,
                 frame: window.frame,
-                score: score
+                score: scoreWindow(
+                    title: title,
+                    bundleID: app.bundleIdentifier,
+                    frame: window.frame,
+                    context: context
+                )
             )
         }
     }
 
-    /// Heuristic score for "is this the popped-out Teams share window".
+    /// Heuristic score for "is this window the shared content".
     /// ≥100 auto-captures; 1–99 shows in the picker as plausible; 0 is
     /// picker-only filler.
-    static func scoreWindow(title: String, bundleID: String, frame: CGRect) -> Int {
+    ///
+    /// Apps with no profile score 0 — they stay manually selectable but are
+    /// never auto-captured, which is how unknown apps have always behaved.
+    static func scoreWindow(
+        title: String,
+        bundleID: String,
+        frame: CGRect,
+        context: ScoringContext = ScoringContext()
+    ) -> Int {
         guard frame.width >= 300, frame.height >= 200 else { return 0 }
-        guard teamsBundleIDs.contains(bundleID) else { return 0 }
+        guard let profile = ShareAppProfiles.profile(for: bundleID) else { return 0 }
 
         let lower = title.lowercased()
-        var score = 60  // any adequately-sized Teams window is plausible
+        let isMainWindow = lower.isEmpty
+            || profile.mainWindowPatterns.contains(where: { lower.contains($0) })
+        var score = 60  // any adequately-sized window of a known app is plausible
 
-        if shareTitlePatterns.contains(where: { lower.contains($0) }) {
+        if profile.shareTitlePatterns.contains(where: { lower.contains($0) }) {
             score += 100
-        } else if lower.isEmpty || mainWindowPatterns.contains(where: { lower.contains($0) }) {
+        } else if profile.secondaryWindowIsShare
+                    && context.sameAppWindowCount >= 2
+                    && !isMainWindow {
+            // A second, differently-titled window of an app that pops its
+            // share out — this is the Discord pop-out.
+            score += 100
+        } else if profile.fullscreenIsShare && isFullscreen(frame, in: context.displayFrames) {
+            score += 100
+        } else if isMainWindow {
             // The main meeting/chat window, or an untitled window (overlays,
             // placeholders) — plausible for the picker, never auto-selected.
             score -= 40
         } else {
-            // Teams window with an unrecognized real title: the pop-out
-            // content window often carries just the shared app/monitor name,
-            // so an unbranded title is itself a share signal.
+            // Known app with an unrecognized real title: the pop-out content
+            // window often carries just the shared app/monitor name, so an
+            // unbranded title is itself a share signal.
             score += 40
         }
         return score
+    }
+
+    /// True when the window covers a whole display, within a tolerance that
+    /// absorbs the menu bar, Dock, and rounding.
+    static func isFullscreen(_ frame: CGRect, in displayFrames: [CGRect]) -> Bool {
+        displayFrames.contains { display in
+            abs(frame.width - display.width) <= 2
+                && abs(frame.height - display.height) <= 80
+                && frame.width > 0
+        }
     }
 
     // MARK: Capture
@@ -476,7 +525,10 @@ actor ScreenShareCaptureService {
         // pop-out after the presenter stops. That's the end of the share,
         // not content: drop the frame, close the session, and ignore this
         // window until it closes or its title changes.
-        if ScreenFrameTriage.isShareEndedPlaceholder(ocrText: ocrText) {
+        if ScreenFrameTriage.isShareEndedPlaceholder(
+            ocrText: ocrText,
+            phrases: currentProfile?.shareEndedPhrases ?? ScreenFrameTriage.shareEndedPhrases
+        ) {
             ignoredWindows[windowID] = currentWindowTitle
             continuation?.yield(.frameDropped(sessionID: sessionID))
             LogManager.send("Share-ended placeholder detected (\"\(currentWindowTitle)\") — frame dropped, session closed", category: .screen, meetingID: meetingID)

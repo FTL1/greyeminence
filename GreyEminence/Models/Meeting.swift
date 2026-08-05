@@ -51,6 +51,14 @@ final class Meeting {
     /// as suppressedActionItems but stored as normalized question text.
     var suppressedFollowUps: [String] = []
 
+    /// The app the call was held in, when we can tell — bundle ID plus a
+    /// friendly name. Recorded from whichever process held the microphone at
+    /// the moment recording started, falling back to the app that owned the
+    /// captured screen-share window. `nil` on legacy meetings and whenever
+    /// nothing else had the mic (a dictation-style solo recording).
+    var sourceAppBundleID: String?
+    var sourceAppName: String?
+
     // Calendar integration
     var calendarEventID: String?
     var calendarEventTitle: String?

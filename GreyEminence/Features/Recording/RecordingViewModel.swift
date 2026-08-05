@@ -355,7 +355,20 @@ final class RecordingViewModel {
             }
             meetingDetector.onStopRequested = { [weak self] in
                 guard let self, let ctx = modelContextProvider() else { return }
+                CallPromptService.shared.dismissPrompt()
                 self.stopRecording(in: ctx, autoDetected: true)
+            }
+            // Apps that hold the mic outside of calls ask first. Accepting
+            // starts an *auto* recording, so it still stops on its own when
+            // the call ends.
+            meetingDetector.onConfirmationRequested = { holder in
+                CallPromptService.shared.promptToRecord(
+                    appName: holder.appName ?? "Call"
+                )
+            }
+            CallPromptService.shared.onStartRequested = { [weak self] in
+                guard let self, let ctx = modelContextProvider() else { return }
+                self.startRecording(in: ctx, autoDetected: true)
             }
             autoDetectionConfigured = true
         }
@@ -400,6 +413,20 @@ final class RecordingViewModel {
             log.log("Recording resumed into existing meeting \(existing.id)", category: .audio)
         } else {
             meeting = Meeting(title: "Meeting \(DateFormatter.shortDate.string(from: .now))")
+
+            // Which app is this call in? On an auto-start the detector already
+            // has a fresh poll; on a manual start take a one-shot reading.
+            // Either way this is best-effort provenance — a solo recording
+            // legitimately has no other app holding the mic.
+            let holders = autoDetected
+                ? meetingDetector.currentHolders
+                : meetingDetector.snapshotHolders()
+            if let source = MeetingDetectionService.startDecision(for: holders).holder
+                ?? holders.first {
+                meeting.sourceAppBundleID = source.bundleID
+                meeting.sourceAppName = source.appName
+                log.log("Recording source app: \(source.appName ?? source.bundleID ?? "unknown")", category: .audio)
+            }
 
             // Calendar linking runs after the recording is live (see
             // matchCalendarAtStart) so a network fetch (Microsoft Graph) never
@@ -1164,8 +1191,16 @@ final class RecordingViewModel {
 
     private func handleScreenCaptureEvent(_ event: ScreenCaptureEvent) {
         switch event {
-        case .sessionStarted(_, let windowTitle, _):
+        case .sessionStarted(_, let windowTitle, let appBundleID):
             screenCaptureState = .capturing(windowTitle: windowTitle)
+            // Fallback provenance: if nothing held the mic when we started
+            // (or it was an app we couldn't name), the app whose window is
+            // being shared is a good answer.
+            if currentMeeting?.sourceAppBundleID == nil, !appBundleID.isEmpty {
+                currentMeeting?.sourceAppBundleID = appBundleID
+                currentMeeting?.sourceAppName = MeetingAppRegistry.displayName(for: appBundleID)
+                    ?? ShareAppProfiles.profile(for: appBundleID)?.displayName
+            }
 
         case .frameKept(let frame):
             // Stamp elapsed seconds on the same clock as segment.startTime.
