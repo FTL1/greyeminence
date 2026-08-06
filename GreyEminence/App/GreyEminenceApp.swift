@@ -45,9 +45,19 @@ struct GreyEminenceApp: App {
     }
 
     private static func kickOffStartupUpdateCheck(controller: SPUStandardUpdaterController) {
+        #if DEBUG
+        // Never in a Debug build: it lives in DerivedData and is whatever was
+        // last compiled, so "updating" it installs the published release over
+        // the working copy. See SparkleUpdaterDelegate.updaterMayCheck — this
+        // is the belt to its braces, since that gate is only consulted when a
+        // check actually fires, hours later.
+        controller.updater.automaticallyChecksForUpdates = false
+        LogManager.send("Automatic update checks disabled (Debug build)", category: .update)
+        #else
         DispatchQueue.main.async {
             controller.updater.checkForUpdatesInBackground()
         }
+        #endif
     }
 
     var sharedModelContainer: ModelContainer? = {

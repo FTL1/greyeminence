@@ -66,8 +66,19 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
     }
 
     nonisolated func updaterMayCheck(forUpdates updater: SPUUpdater) -> Bool {
+        #if DEBUG
+        // A Debug build lives in DerivedData and is whatever the developer
+        // last compiled. Letting Sparkle "update" it installs the published
+        // release over the working copy and silently reverts uncommitted
+        // work — observed 2026-08-06, where an overnight scheduled check
+        // replaced a dev build mid-field-test and the app went on logging
+        // as though the changes had never been made.
+        Self.log("updaterMayCheckForUpdates -> false (Debug build)")
+        return false
+        #else
         Self.log("updaterMayCheckForUpdates -> true")
         return true
+        #endif
     }
 
     nonisolated func updater(_ updater: SPUUpdater, willScheduleUpdateCheckAfterDelay delay: TimeInterval) {
