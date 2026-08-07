@@ -24,6 +24,15 @@ enum FeatureHighlightCatalog {
     /// set its `version` to that release's MARKETING_VERSION.
     static let all: [FeatureHighlight] = [
         FeatureHighlight(
+            id: "discord-calls",
+            version: "0.24.0",
+            title: "Record Discord calls",
+            summary: "Grey Eminence now recognizes Discord. Because Discord holds the mic the whole time you're in a voice channel, it asks before recording rather than starting on its own — answer from the menu bar without leaving the call. Popped-out or fullscreened streams get captured like any other shared screen.",
+            systemImage: "phone.badge.waveform.fill",
+            tint: .blue,
+            destination: .settings
+        ),
+        FeatureHighlight(
             id: "meeting-prep-panel",
             version: "0.23.13",
             title: "Meeting Prep, beside the transcript",

@@ -4,6 +4,34 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.24.0 — 2026-08-07
+
+**Discord calls**
+- Grey Eminence now recognizes Discord alongside Teams, Zoom, and the rest.
+  Discord is different: it holds your microphone for as long as you're
+  connected to a voice channel, including sitting in one alone, so
+  auto-recording it would capture a lot of nothing. It asks instead —
+  once per call, from the menu bar or a bar at the bottom of the window,
+  so you can answer without leaving the call.
+- Streams get captured like any other shared screen, as long as they're
+  popped out or fullscreened. The main Discord window stays available in
+  the window picker but is never captured automatically, since it would
+  frame the channel list and chat rather than the stream.
+- Meetings now record which app they came from, shown on the meeting row.
+
+**Fixed: recordings that captured everyone except you**
+- When another app claimed the microphone a moment after recording
+  started — which is exactly what happens on an auto-started call — the
+  microphone could stop feeding the recording silently. The transcript
+  came back with the far end only. Capture now notices and restarts
+  itself, and tells you if it can't.
+
+**A tidier transcript toolbar**
+- The controls above a transcript were crowded into one row that
+  compressed everything at once in a narrow panel. Selection actions now
+  take over the bar only while you're selecting, and the developer tools
+  have their own strip.
+
 ## 0.23.16 — 2026-08-03
 
 **Fixed: a month of meetings appearing to be missing**
