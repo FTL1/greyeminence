@@ -376,6 +376,20 @@ final class ScreenFrameTriageTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(score, 100)
     }
 
+    /// A fullscreened Discord *chat* window is an ordinary thing to have on
+    /// screen. The fullscreen rule must not override the main-window penalty,
+    /// or auto-capture screenshots the channel sidebar and member list.
+    func testDiscordFullscreenMainWindowStaysPickerOnly() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "#engineering | Acme - Discord",
+            bundleID: Self.discord,
+            frame: Self.display,
+            context: .init(sameAppWindowCount: 1, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThan(score, 0)
+        XCTAssertLessThan(score, 100)
+    }
+
     /// Teams has no fullscreen rule — a maximized Teams main window must not
     /// start auto-capturing.
     func testFullscreenRuleDoesNotApplyToTeams() {

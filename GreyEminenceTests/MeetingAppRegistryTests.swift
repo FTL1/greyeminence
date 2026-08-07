@@ -9,14 +9,12 @@ final class MeetingAppRegistryTests: XCTestCase {
 
     private func holder(
         _ bundleID: String?,
-        outputRunning: Bool = false,
         pid: pid_t = 501
     ) -> MeetingDetectionService.MicHolder {
         MeetingDetectionService.MicHolder(
             pid: pid,
             bundleID: bundleID,
-            appName: bundleID.flatMap { MeetingAppRegistry.displayName(for: $0) },
-            outputRunning: outputRunning
+            appName: bundleID.flatMap { MeetingAppRegistry.displayName(for: $0) }
         )
     }
 
@@ -95,19 +93,17 @@ final class MeetingAppRegistryTests: XCTestCase {
     // MARK: - Start gate
 
     /// The whole point: Discord holding the mic must never start a recording
-    /// by itself, however the output flag reads — it is true even when you
-    /// are sitting in an empty channel.
+    /// by itself. Nothing in the process flags distinguishes an active call
+    /// from sitting in an empty channel, so it always asks.
     func testDiscordAsksRatherThanStarting() {
-        for outputRunning in [true, false] {
-            let decision = MeetingDetectionService.startDecision(
-                for: [holder("com.hnc.Discord.helper.Renderer", outputRunning: outputRunning)]
-            )
-            guard case .confirm(let holder, let debounce) = decision else {
-                return XCTFail("expected .confirm for Discord (outputRunning: \(outputRunning)), got \(decision)")
-            }
-            XCTAssertEqual(holder.bundleID, "com.hnc.Discord.helper.Renderer")
-            XCTAssertEqual(debounce, 20)
+        let decision = MeetingDetectionService.startDecision(
+            for: [holder("com.hnc.Discord.helper.Renderer")]
+        )
+        guard case .confirm(let holder, let debounce) = decision else {
+            return XCTFail("expected .confirm for Discord, got \(decision)")
         }
+        XCTAssertEqual(holder.bundleID, "com.hnc.Discord.helper.Renderer")
+        XCTAssertEqual(debounce, 20)
     }
 
     func testTeamsStartsOnMicAloneWithDefaultDebounce() {
@@ -135,7 +131,7 @@ final class MeetingAppRegistryTests: XCTestCase {
     /// at the same time — that one still auto-records.
     func testAutoStartWinsOverPromptWhenBothPresent() {
         let decision = MeetingDetectionService.startDecision(for: [
-            holder("com.hnc.Discord.helper.Renderer", outputRunning: true, pid: 100),
+            holder("com.hnc.Discord.helper.Renderer", pid: 100),
             holder("com.microsoft.teams2", pid: 200),
         ])
         guard case .start(let holder, _) = decision else {

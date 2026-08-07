@@ -31,11 +31,13 @@ enum MeetingAppRegistry {
     /// the mic when a call starts and release it when the call ends. These
     /// entries exist so the meeting can be *labelled*; they intentionally
     /// carry no extra gating, so detection behaviour is unchanged for them.
+    static let teams = MeetingAppProfile(
+        bundleIDs: ["com.microsoft.teams2", "com.microsoft.teams"],
+        displayName: "Microsoft Teams"
+    )
+
     static let profiles: [MeetingAppProfile] = [
-        MeetingAppProfile(
-            bundleIDs: ["com.microsoft.teams2", "com.microsoft.teams"],
-            displayName: "Microsoft Teams"
-        ),
+        teams,
         MeetingAppProfile(
             bundleIDs: ["us.zoom.xos"],
             displayName: "Zoom"
@@ -58,18 +60,20 @@ enum MeetingAppRegistry {
         // `kAudioProcessPropertyIsRunningOutput` is *also* continuously true
         // while sitting alone in an empty channel, so "is anyone talking"
         // cannot be inferred from the process flags at all. We ask instead.
-        MeetingAppProfile(
-            bundleIDs: [
-                "com.hnc.Discord",
-                "com.hnc.DiscordPTB",
-                "com.hnc.DiscordCanary",
-                "com.hnc.DiscordDevelopment",
-            ],
-            displayName: "Discord",
-            requiresConfirmation: true,
-            startDebounceOverride: 20
-        ),
+        discord,
     ]
+
+    static let discord = MeetingAppProfile(
+        bundleIDs: [
+            "com.hnc.Discord",
+            "com.hnc.DiscordPTB",
+            "com.hnc.DiscordCanary",
+            "com.hnc.DiscordDevelopment",
+        ],
+        displayName: "Discord",
+        requiresConfirmation: true,
+        startDebounceOverride: 20
+    )
 
     /// `nil` for apps we have no specific policy for — callers treat that as
     /// "the default policy", i.e. exactly how the detector behaved before
@@ -80,14 +84,20 @@ enum MeetingAppRegistry {
     /// `com.hnc.Discord.helper.Renderer`, not `com.hnc.Discord` (observed
     /// 2026-08-03). Exact matches win, so `com.hnc.DiscordPTB` can never be
     /// mistaken for a helper of `com.hnc.Discord`.
+    /// Exact IDs and their dotted helper prefixes, built once. The prefix pass
+    /// is the common case (the mic holder is usually a helper), so building
+    /// `id + "."` per lookup would allocate on every poll.
+    private static let exactIndex: [String: MeetingAppProfile] = profiles.reduce(into: [:]) { index, profile in
+        for id in profile.bundleIDs { index[id] = profile }
+    }
+    private static let helperPrefixes: [(prefix: String, profile: MeetingAppProfile)] = profiles.flatMap { profile in
+        profile.bundleIDs.map { (prefix: $0 + ".", profile: profile) }
+    }
+
     static func profile(for bundleID: String?) -> MeetingAppProfile? {
         guard let bundleID else { return nil }
-        if let exact = profiles.first(where: { $0.bundleIDs.contains(bundleID) }) {
-            return exact
-        }
-        return profiles.first { profile in
-            profile.bundleIDs.contains { bundleID.hasPrefix($0 + ".") }
-        }
+        if let exact = exactIndex[bundleID] { return exact }
+        return helperPrefixes.first { bundleID.hasPrefix($0.prefix) }?.profile
     }
 
     /// Friendly name for a bundle ID, falling back to whatever the running

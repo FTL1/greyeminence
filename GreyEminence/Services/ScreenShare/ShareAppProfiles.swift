@@ -9,9 +9,11 @@ import Foundation
 /// data means adapting to a UI change is an edit here, not a rewrite of the
 /// scorer.
 struct ShareAppProfile: Sendable, Equatable {
-    let id: String
-    let bundleIDs: Set<String>
-    let displayName: String
+    /// Identity (bundle IDs, display name, helper matching) is owned by
+    /// `MeetingAppRegistry`; this type only adds share-window recognition, so
+    /// there is one place to add an app.
+    let app: MeetingAppProfile
+    var displayName: String { app.displayName }
 
     /// Lowercased substrings that mark a window as the shared content itself.
     let shareTitlePatterns: [String]
@@ -43,12 +45,7 @@ enum ShareAppProfiles {
     /// pop-out content window carries the presenter's name ("Alice is
     /// presenting"), and the main window is branded "| Microsoft Teams".
     static let teams = ShareAppProfile(
-        id: "teams",
-        bundleIDs: [
-            "com.microsoft.teams2",   // "new" Teams
-            "com.microsoft.teams",    // classic
-        ],
-        displayName: "Microsoft Teams",
+        app: MeetingAppRegistry.teams,
         shareTitlePatterns: [
             "is presenting",
             "is sharing",
@@ -60,11 +57,8 @@ enum ShareAppProfiles {
             "| microsoft teams",
             "microsoft teams",
         ],
-        shareEndedPhrases: [
-            "content sharing has ended",
-            "sharing is paused",
-        ],
-        popOutHint: "Pop out the shared content in Teams for the cleanest capture.",
+        shareEndedPhrases: ScreenFrameTriage.shareEndedPhrases,
+        popOutHint: "Pop out the shared content in Teams for the cleanest capture."
     )
 
     /// Discord — a Go Live stream renders *inside* the main window alongside
@@ -78,14 +72,7 @@ enum ShareAppProfiles {
     /// tells us what to put here. Until then the secondary-window and
     /// fullscreen rules carry the auto-detection.
     static let discord = ShareAppProfile(
-        id: "discord",
-        bundleIDs: [
-            "com.hnc.Discord",
-            "com.hnc.DiscordPTB",
-            "com.hnc.DiscordCanary",
-            "com.hnc.DiscordDevelopment",
-        ],
-        displayName: "Discord",
+        app: MeetingAppRegistry.discord,
         shareTitlePatterns: [
             "stream",
             "screen share",
@@ -105,18 +92,23 @@ enum ShareAppProfiles {
         ],
         secondaryWindowIsShare: true,
         fullscreenIsShare: true,
-        popOutHint: "Pop out the stream in Discord, or fullscreen it, for the cleanest capture.",
+        popOutHint: "Pop out the stream in Discord, or fullscreen it, for the cleanest capture."
     )
 
     static let all: [ShareAppProfile] = [teams, discord]
 
+    /// Matched through the registry so helper processes resolve the same way
+    /// they do for mic detection — an exact-match table here would silently
+    /// miss `com.hnc.Discord.helper.Renderer`.
     static func profile(for bundleID: String) -> ShareAppProfile? {
-        all.first { $0.bundleIDs.contains(bundleID) }
+        guard let app = MeetingAppRegistry.profile(for: bundleID) else { return nil }
+        return all.first { $0.app == app }
     }
 
     /// Generic guidance for the settings pane, which is app-agnostic because
     /// it is read before any call is in progress.
     static var genericPopOutHint: String {
-        "Pop out the shared content (Teams) or the stream (Discord) for the cleanest capture."
+        let names = all.map(\.displayName).joined(separator: " or ")
+        return "Pop out the shared content in \(names) for the cleanest capture."
     }
 }

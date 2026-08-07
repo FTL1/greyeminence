@@ -74,9 +74,9 @@ enum ScreenFrameTriage {
     // MARK: - Share-ended placeholder
 
     /// Lowercased phrases that mark the placeholder screen Teams leaves in
-    /// the pop-out window after the presenter stops sharing. Retained as the
-    /// default so callers without an app profile behave as before; per-app
-    /// sets live in `ShareAppProfiles`.
+    /// the pop-out window after the presenter stops sharing. The default for
+    /// callers with no app profile, and the source `ShareAppProfiles.teams`
+    /// reuses rather than restating.
     static let shareEndedPhrases: [String] = [
         "content sharing has ended",
         "sharing is paused",

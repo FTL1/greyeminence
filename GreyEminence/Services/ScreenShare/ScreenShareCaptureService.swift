@@ -190,7 +190,8 @@ actor ScreenShareCaptureService {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(
             true, onScreenWindowsOnly: false
         ) else { return [] }
-        return Self.candidates(from: content.windows).sorted { $0.score > $1.score }
+        return Self.candidates(from: content.windows, displayFrames: content.displays.map(\.frame))
+            .sorted { $0.score > $1.score }
     }
 
     /// Small one-off screenshot of a candidate window for the picker grid.
@@ -259,7 +260,10 @@ actor ScreenShareCaptureService {
         // zombie logged after "recording stopped".
         guard continuation != nil else { return }
 
-        let candidates = Self.candidates(from: content.windows)
+        let candidates = Self.candidates(
+            from: content.windows,
+            displayFrames: content.displays.map(\.frame)
+        )
         reportCandidatesIfChanged(candidates)
 
         // Drop placeholder ignores whose window closed or changed title —
@@ -353,21 +357,14 @@ actor ScreenShareCaptureService {
 
     // MARK: Scoring (pure — unit-tested via scoreWindow)
 
-    /// Display bounds via CoreGraphics rather than `NSScreen`, which is
-    /// MainActor-isolated and so unreachable from this actor.
-    static func activeDisplayFrames() -> [CGRect] {
-        var count: UInt32 = 0
-        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
-        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
-        return ids.prefix(Int(count)).map { CGDisplayBounds($0) }
-    }
-
+    /// `displayFrames` comes from the same `SCShareableContent` the windows
+    /// came from — no separate display query, and no reach for `NSScreen`,
+    /// which is MainActor-isolated and unreachable from this actor.
     static func candidates(
         from windows: [SCWindow],
-        displayFrames: [CGRect]? = nil
+        displayFrames: [CGRect]
     ) -> [WindowCandidate] {
-        let displays = displayFrames ?? activeDisplayFrames()
+        let displays = displayFrames
         // Eligible windows first, so the per-app window counts below reflect
         // what the user can actually see rather than hidden helper windows.
         let eligible = windows.compactMap { window -> (SCWindow, SCRunningApplication)? in
@@ -437,7 +434,13 @@ actor ScreenShareCaptureService {
             // A second, differently-titled window of an app that pops its
             // share out — this is the Discord pop-out.
             score += 100
-        } else if profile.fullscreenIsShare && isFullscreen(frame, in: context.displayFrames) {
+        } else if profile.fullscreenIsShare
+                    && !isMainWindow
+                    && isFullscreen(frame, in: context.displayFrames) {
+            // The !isMainWindow guard matters as much here as in the branch
+            // above: a fullscreened Discord *chat* window is an ordinary thing
+            // to have on screen, and capturing it would screenshot the channel
+            // sidebar and member list — exactly what the profile exists to avoid.
             score += 100
         } else if isMainWindow {
             // The main meeting/chat window, or an untitled window (overlays,

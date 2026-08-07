@@ -12,11 +12,6 @@ actor MicrophoneCaptureService {
     /// tap revoked) without hopping actors per buffer.
     private let lastBufferAt = OSAllocatedUnfairLock<Date?>(initialState: nil)
 
-    /// Last input format observed from the engine's input node. Set on
-    /// startCapture so callers (and the watchdog) can react to format
-    /// changes.
-    nonisolated(unsafe) private var lastStartedFormat: AVAudioFormat?
-
     let bufferSize: AVAudioFrameCount = 4096
 
     /// Uptime at which this capture began. Preserved across engine rebuilds so
@@ -86,7 +81,8 @@ actor MicrophoneCaptureService {
     private func buildEngine() throws -> AVAudioEngine {
         let engine = AVAudioEngine()
 
-        let resolvedUID = requestedDeviceUID ?? UserDefaults.standard.string(forKey: "audio.preferredInputDeviceUID")
+        let resolvedUID = requestedDeviceUID
+            ?? UserDefaults.standard.string(forKey: AudioSessionManager.preferredUIDKey)
         if let resolvedUID, !resolvedUID.isEmpty {
             // Skip the AudioUnitSetProperty call when the preferred UID is
             // already the system default input. Setting CurrentDevice on the
@@ -135,7 +131,6 @@ actor MicrophoneCaptureService {
         let startTime = self.captureStartUptime
         let cont = self.continuation
         let lastBuffer = self.lastBufferAt
-        self.lastStartedFormat = inputFormat
 
         inputNode.installTap(
             onBus: 0,
@@ -158,18 +153,32 @@ actor MicrophoneCaptureService {
         return engine
     }
 
+    enum RecoveryOutcome {
+        /// Nothing was wrong, or it is too soon to try again.
+        case notNeeded
+        case recovered
+        /// Tried and could not rebuild, or the attempt budget is spent.
+        case failed
+    }
+
     /// Rebuilds only when the tap has genuinely stopped delivering. A
     /// configuration change on its own is not a fault — the device format can
     /// change while audio keeps flowing, and the engine we just started emits
     /// one as a matter of course.
-    private func recoverIfStalled(reason: String) {
-        guard isCapturing else { return }
+    ///
+    /// The single entry point for both triggers (the configuration-change
+    /// observer and the watchdog), so the stall threshold, settle window, and
+    /// retry cadence are defined once, here, next to the attempt budget.
+    @discardableResult
+    func recoverIfStalled(reason: String) -> RecoveryOutcome {
+        guard isCapturing else { return .notNeeded }
         guard Self.shouldRecoverOnConfigChange(
             now: Date(),
             lastEngineBuildAt: lastEngineBuildAt,
             lastBufferAt: lastBufferTimestamp
-        ) else { return }
-        recoverCapture(reason: reason)
+        ) else { return .notNeeded }
+        guard recoveryAttempts < Self.maxRecoveryAttempts else { return .failed }
+        return recoverCapture(reason: reason) ? .recovered : .failed
     }
 
     /// Whether a configuration-change notification warrants rebuilding.
