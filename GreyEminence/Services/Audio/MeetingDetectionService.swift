@@ -31,13 +31,14 @@ final class MeetingDetectionService {
         let pid: pid_t
         let bundleID: String?
         let appName: String?
-        /// The same process is also running output IO — i.e. it is playing
-        /// audio, not just listening.
-        let outputRunning: Bool
     }
 
     private(set) var mode: Mode = .disabled
     private(set) var externalMicInUse: Bool = false
+
+    /// True while the 5s poll is running, so callers can prefer the cached
+    /// `currentHolders` over a fresh Core Audio enumeration.
+    var isPolling: Bool { mode != .disabled }
 
     /// Everything holding the mic as of the last poll. Read by
     /// `RecordingViewModel` to stamp source-app provenance on the meeting.
@@ -55,9 +56,10 @@ final class MeetingDetectionService {
     /// meeting they just told us to stop recording.
     private var waitingForMicClear: Bool = false
 
-    /// Signature of the last logged holder set, so the 5s poll logs only when
-    /// the picture actually changes.
-    private var lastHolderIdentity: String?
+    /// Last logged holder set, so the 5s poll logs only when the picture
+    /// actually changes. Compared directly rather than via a formatted string,
+    /// which would be rebuilt on every poll only to be thrown away.
+    private var lastLoggedHolders: [MicHolder] = []
 
     /// True once we've asked about the current hold, so an ignored prompt
     /// doesn't reappear every poll. Cleared when the mic goes quiet.
@@ -68,6 +70,9 @@ final class MeetingDetectionService {
     /// Raised instead of `onStartRequested` for apps that hold the mic
     /// outside of calls — the UI asks the user.
     var onConfirmationRequested: ((MicHolder) -> Void)?
+    /// The call we asked about is over (or the app released the mic), so any
+    /// prompt still on screen is stale and should be withdrawn.
+    var onConfirmationExpired: (() -> Void)?
 
     func enable(currentlyRecording: Bool) {
         guard mode == .disabled else { return }
@@ -125,8 +130,12 @@ final class MeetingDetectionService {
             externalMicInUse = inUse
         }
         // Leaving the channel (or ending the call) re-arms the prompt, so the
-        // next call asks again.
-        if !inUse { hasPromptedForCurrentHold = false }
+        // next call asks again — and withdraws any prompt still on screen,
+        // which now refers to a call that is over.
+        if !inUse, hasPromptedForCurrentHold {
+            hasPromptedForCurrentHold = false
+            onConfirmationExpired?()
+        }
 
         switch mode {
         case .armedForStart:
@@ -280,12 +289,6 @@ final class MeetingDetectionService {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        var outputAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioProcessPropertyIsRunningOutput,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
         var holders: [MicHolder] = []
         for processObject in processObjects {
             var pid: pid_t = 0
@@ -300,15 +303,10 @@ final class MeetingDetectionService {
                 processObject, &inputAddress, 0, nil, &runningSize, &running
             ) == noErr, running == 1 else { continue }
 
-            var outputRunning: UInt32 = 0
-            var outputSize = UInt32(MemoryLayout<UInt32>.size)
-            // A failed read means "we don't know", which we treat as not
-            // playing — the conservative reading for a gate that starts
-            // recordings.
-            let outputOK = AudioObjectGetPropertyData(
-                processObject, &outputAddress, 0, nil, &outputSize, &outputRunning
-            ) == noErr
-
+            // Deliberately not reading kAudioProcessPropertyIsRunningOutput:
+            // it is continuously true for an app sitting in an empty voice
+            // channel (measured 2026-08-03), so it cannot tell a live call
+            // from an idle one and is not worth a property read per poll.
             let app = NSRunningApplication(processIdentifier: pid)
             holders.append(MicHolder(
                 pid: pid,
@@ -316,8 +314,7 @@ final class MeetingDetectionService {
                 appName: MeetingAppRegistry.displayName(
                     for: app?.bundleIdentifier,
                     fallback: app?.localizedName
-                ),
-                outputRunning: outputOK && outputRunning == 1
+                )
             ))
         }
 
@@ -328,12 +325,11 @@ final class MeetingDetectionService {
     /// Logs only on transitions — the poll runs every 5s and would otherwise
     /// flood the activity log for the entire length of a call.
     private func logHolderChange(_ holders: [MicHolder]) {
+        guard holders != lastLoggedHolders else { return }
+        lastLoggedHolders = holders
         let identity = holders
-            .map { "\($0.bundleID ?? "pid \($0.pid)")\($0.outputRunning ? "+out" : "")" }
-            .sorted()
+            .map { $0.bundleID ?? "pid \($0.pid)" }
             .joined(separator: ", ")
-        guard identity != lastHolderIdentity else { return }
-        lastHolderIdentity = identity
         if holders.isEmpty {
             LogManager.send("Meeting detector: no other app holding the mic", category: .audio)
         } else {

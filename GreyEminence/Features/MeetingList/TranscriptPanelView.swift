@@ -182,86 +182,39 @@ struct TranscriptPanelView: View {
 
     // MARK: - Transcript Toolbar
 
+    /// Three classes of control live here, and treating them as peers in one
+    /// row is what made this unreadable: selection actions are *modal* (they
+    /// exist only while selecting), the developer tools serve a different
+    /// audience entirely, and Revert is ambient and rare. So the bar switches
+    /// between a resting state and a selection state rather than accumulating
+    /// controls, and the developer tools get their own strip.
     private var transcriptToolbar: some View {
-        HStack(spacing: 12) {
-            // Selection mode toggle
+        VStack(spacing: 0) {
+            if isSelectionMode {
+                selectionBar
+            } else {
+                restingBar
+            }
+            if developerToolsEnabled {
+                developerStrip
+            }
+        }
+        .background(.bar)
+    }
+
+    /// Reading, not editing. One action in, and whatever the transcript's own
+    /// state warrants — nothing else competes for the row.
+    private var restingBar: some View {
+        HStack(spacing: 8) {
             Button {
-                isSelectionMode.toggle()
-                if !isSelectionMode {
-                    selectedSegmentIDs.removeAll()
-                }
+                isSelectionMode = true
             } label: {
-                Label(
-                    isSelectionMode ? "Done" : "Select",
-                    systemImage: isSelectionMode ? "checkmark.circle" : "checklist"
-                )
+                Label("Select", systemImage: "checklist")
             }
             .controlSize(.small)
 
-            if isSelectionMode {
-                // Select all / none
-                Button(selectedSegmentIDs.count == sortedSegments.count ? "Select None" : "Select All") {
-                    if selectedSegmentIDs.count == sortedSegments.count {
-                        selectedSegmentIDs.removeAll()
-                    } else {
-                        selectedSegmentIDs = Set(sortedSegments.map(\.id))
-                    }
-                }
-                .controlSize(.small)
+            Spacer(minLength: 8)
 
-                if !selectedSegmentIDs.isEmpty {
-                    Divider()
-                        .frame(height: 16)
-
-                    Text("\(selectedSegmentIDs.count) selected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    // Bulk reassign speaker
-                    Menu {
-                        Button("Choose Contact...") {
-                            showBulkSpeakerPicker = true
-                        }
-                        Button("Type Name...") {
-                            bulkSpeakerName = ""
-                            showBulkSpeakerRename = true
-                        }
-                        Divider()
-                        Button("Set as Me") {
-                            reassignSelectedSegments(to: .me)
-                        }
-                    } label: {
-                        Label("Assign Speaker", systemImage: "person")
-                    }
-                    .controlSize(.small)
-
-                    // Bulk delete
-                    Button(role: .destructive) {
-                        showBulkDeleteConfirmation = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .controlSize(.small)
-                }
-            }
-
-            Spacer()
-
-            if developerToolsEnabled {
-                Toggle(isOn: $showDedupDebug) {
-                    Label("Dedup Debug", systemImage: "magnifyingglass")
-                }
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
-
-                Button("Remove Duplicates") {
-                    deduplicateTranscript()
-                }
-                .controlSize(.small)
-                .foregroundStyle(.secondary)
-            }
-
-            // Revert all edits
             if editedCount > 0 {
                 Button("Revert All Edits") {
                     revertAllEdits()
@@ -270,9 +223,105 @@ struct TranscriptPanelView: View {
                 .foregroundStyle(.orange)
             }
         }
+        .lineLimit(1)
         .padding(.horizontal)
         .padding(.vertical, 6)
-        .background(.bar)
+    }
+
+    /// Selection takes over the bar rather than adding to it, so every control
+    /// present acts on the selection. Actions that need a selection appear
+    /// only once there is one — the bar grows with intent instead of showing
+    /// dead buttons. It flows to a second row in a narrow panel, which reads
+    /// as deliberate because everything wrapping belongs to one task.
+    private var selectionBar: some View {
+        // Centred because this row mixes a caption with bordered controls.
+        FlowLayout(spacing: 8, rowAlignment: .center) {
+            Button {
+                isSelectionMode = false
+                selectedSegmentIDs.removeAll()
+            } label: {
+                Label("Done", systemImage: "checkmark.circle")
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+
+            Button(allSegmentsSelected ? "Select None" : "Select All") {
+                if allSegmentsSelected {
+                    selectedSegmentIDs.removeAll()
+                } else {
+                    selectedSegmentIDs = Set(sortedSegments.map(\.id))
+                }
+            }
+            .controlSize(.small)
+
+            if selectedSegmentIDs.isEmpty {
+                Text("Choose segments to edit")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(selectedSegmentIDs.count) selected")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                Menu {
+                    Button("Choose Contact…") {
+                        showBulkSpeakerPicker = true
+                    }
+                    Button("Type Name…") {
+                        bulkSpeakerName = ""
+                        showBulkSpeakerRename = true
+                    }
+                    Divider()
+                    Button("Set as Me") {
+                        reassignSelectedSegments(to: .me)
+                    }
+                } label: {
+                    Label("Assign Speaker", systemImage: "person")
+                }
+                .controlSize(.small)
+
+                Button(role: .destructive) {
+                    showBulkDeleteConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .controlSize(.small)
+            }
+        }
+        .lineLimit(1)
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.10))
+    }
+
+    /// Diagnostics, not editing. Kept in its own strip and labelled as such so
+    /// it never reads as part of the transcript workflow — these tools inspect
+    /// and repair the pipeline's output rather than the meeting's content.
+    private var developerStrip: some View {
+        HStack(spacing: 10) {
+            StatusPill(label: "DEV", tint: .secondary)
+
+            Toggle("Dedup debug", isOn: $showDedupDebug)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .font(.caption)
+
+            Spacer(minLength: 8)
+
+            Button("Remove Duplicates") {
+                deduplicateTranscript()
+            }
+            .controlSize(.small)
+            .foregroundStyle(.secondary)
+        }
+        .lineLimit(1)
+        .padding(.horizontal)
+        .padding(.vertical, 4)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var allSegmentsSelected: Bool {
+        !sortedSegments.isEmpty && selectedSegmentIDs.count == sortedSegments.count
     }
 
     // MARK: - Transcript List

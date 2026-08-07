@@ -28,10 +28,6 @@ final class CallPromptService: NSObject {
         super.init()
     }
 
-    /// True when the last prompt could not be delivered, so the UI can offer
-    /// an in-app fallback instead of silently doing nothing.
-    private(set) var lastPromptUndeliverable = false
-
     /// Registers the notification category, takes delegate ownership, and
     /// makes sure we actually hold notification authorization — the prompt is
     /// the only way Discord calls get recorded, so a silent denial would make
@@ -102,22 +98,19 @@ final class CallPromptService: NSObject {
         // the Time Sensitive Notifications entitlement, and without it the
         // request is rejected outright and the prompt never appears.
 
+        // Delivery failure is logged, not surfaced: the in-app prompt bar is
+        // always shown alongside this, so a missing notification degrades the
+        // convenience path rather than the feature.
         Task { [weak self] in
-            guard let self else { return }
-            guard await ensureAuthorization() else {
-                lastPromptUndeliverable = true
-                return
-            }
+            guard let self, await ensureAuthorization() else { return }
             do {
                 try await center.add(UNNotificationRequest(
                     identifier: notificationID,
                     content: content,
                     trigger: nil          // deliver immediately
                 ))
-                lastPromptUndeliverable = false
                 LogManager.send("Call prompt posted for \(appName)", category: .audio)
             } catch {
-                lastPromptUndeliverable = true
                 LogManager.send(
                     "Call prompt could not be posted: \(error.localizedDescription)",
                     category: .audio,

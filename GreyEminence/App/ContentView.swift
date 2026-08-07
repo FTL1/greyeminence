@@ -103,6 +103,7 @@ struct ContentView: View {
                         }
                     }
             }
+            CallPromptBar(viewModel: recordingViewModel)
             ReProcessingStatusBar()
             TransientActivityStatusBar()
         }

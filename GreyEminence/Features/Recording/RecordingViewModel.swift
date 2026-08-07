@@ -346,6 +346,37 @@ final class RecordingViewModel {
         startScreenShareCapture(meetingID: meeting.id)
     }
 
+    /// Resolves the context for callbacks that outlive a single view update.
+    private var modelContextProvider: (@MainActor () -> ModelContext?)?
+
+    /// Name of the app whose call is awaiting an answer. Non-nil puts the
+    /// prompt bar on screen and an item in the menu bar; cleared when
+    /// answered, when the call ends, or when a recording starts by any route.
+    var pendingCallPromptApp: String?
+
+    /// The in-app state and the notification are one question, so they are
+    /// always withdrawn together — every exit path goes through here rather
+    /// than remembering both halves.
+    private func clearCallPrompt() {
+        pendingCallPromptApp = nil
+        CallPromptService.shared.dismissPrompt()
+    }
+
+    /// Start recording the call we asked about. Registered as an auto-start so
+    /// it still stops on its own when the call ends.
+    func acceptCallPrompt(in modelContext: ModelContext) {
+        // startRecording clears the prompt itself.
+        guard state == .idle else { return clearCallPrompt() }
+        startRecording(in: modelContext, autoDetected: true)
+    }
+
+    /// Decline for this call. The detector re-arms when the app releases the
+    /// mic, so the next call asks again.
+    func dismissCallPrompt() {
+        clearCallPrompt()
+        log.log("Call prompt dismissed by user", category: .audio)
+    }
+
     /// Wires detector callbacks once; safe to call repeatedly.
     func configureAutoDetection(enabled: Bool, modelContextProvider: @escaping @MainActor () -> ModelContext?) {
         if !autoDetectionConfigured {
@@ -361,14 +392,26 @@ final class RecordingViewModel {
             // Apps that hold the mic outside of calls ask first. Accepting
             // starts an *auto* recording, so it still stops on its own when
             // the call ends.
-            meetingDetector.onConfirmationRequested = { holder in
-                CallPromptService.shared.promptToRecord(
-                    appName: holder.appName ?? "Call"
-                )
+            //
+            // Asked two ways on purpose: a notification (you are in the other
+            // app, not this one) and in-app UI. Notification delivery depends
+            // on system permission and can simply not arrive, and a prompt you
+            // never see is the same as no feature at all.
+            meetingDetector.onConfirmationRequested = { [weak self] holder in
+                let appName = holder.appName ?? "Call"
+                self?.pendingCallPromptApp = appName
+                CallPromptService.shared.promptToRecord(appName: appName)
             }
+            meetingDetector.onConfirmationExpired = { [weak self] in
+                self?.clearCallPrompt()
+            }
+            // Capture only `self` weakly: CallPromptService is a process-
+            // lifetime singleton, and capturing the context provider here
+            // would pin a live ModelContext for the whole run.
+            self.modelContextProvider = modelContextProvider
             CallPromptService.shared.onStartRequested = { [weak self] in
-                guard let self, let ctx = modelContextProvider() else { return }
-                self.startRecording(in: ctx, autoDetected: true)
+                guard let self, let ctx = self.modelContextProvider?() else { return }
+                self.acceptCallPrompt(in: ctx)
             }
             autoDetectionConfigured = true
         }
@@ -406,6 +449,8 @@ final class RecordingViewModel {
 
         meetingDetector.noteStart(autoDetected ? .auto : .manual)
         autoDetectedRecordingStart = autoDetected
+        // However the recording began, the question is answered.
+        clearCallPrompt()
 
         let meeting: Meeting
         if let existing {
@@ -414,15 +459,15 @@ final class RecordingViewModel {
         } else {
             meeting = Meeting(title: "Meeting \(DateFormatter.shortDate.string(from: .now))")
 
-            // Which app is this call in? On an auto-start the detector already
-            // has a fresh poll; on a manual start take a one-shot reading.
-            // Either way this is best-effort provenance — a solo recording
-            // legitimately has no other app holding the mic.
-            let holders = autoDetected
+            // Which app is this call in? Best-effort provenance — a solo
+            // recording legitimately has no other app holding the mic. The
+            // detector's poll (≤5s old) is preferred over a fresh Core Audio
+            // enumeration, which would run inline on the record-start path
+            // for a field that is pure metadata.
+            let holders = meetingDetector.isPolling
                 ? meetingDetector.currentHolders
                 : meetingDetector.snapshotHolders()
-            if let source = MeetingDetectionService.startDecision(for: holders).holder
-                ?? holders.first {
+            if let source = holders.first {
                 meeting.sourceAppBundleID = source.bundleID
                 meeting.sourceAppName = source.appName
                 log.log("Recording source app: \(source.appName ?? source.bundleID ?? "unknown")", category: .audio)
@@ -1594,7 +1639,7 @@ final class RecordingViewModel {
             try? await Task.sleep(for: .seconds(5))  // grace for startup
             var micWarned = false
             var sysWarned = false
-            var lastMicRecoveryAt: Date?
+            var micRecoveryReported = false
             while !Task.isCancelled {
                 guard let self else { return }
                 if await self.state != .recording {
@@ -1603,37 +1648,33 @@ final class RecordingViewModel {
                 }
 
                 let now = Date()
-                if let last = micSvc.lastBufferTimestamp {
-                    let stale = now.timeIntervalSince(last)
-                    if stale > 10 && !micWarned {
-                        await MainActor.run {
-                            self.log.log("Audio watchdog: no mic buffer for \(Int(stale))s", category: .audio, level: .warning)
-                        }
-                        micWarned = true
-                    } else if stale <= 3 {
+                // Deliberately not nested in `if let lastBufferTimestamp`: the
+                // original failure delivered *no* buffers at all, so the case
+                // that needs recovery most is the one where it stays nil.
+                let micStale = micSvc.lastBufferTimestamp.map { now.timeIntervalSince($0) }
+                if let micStale, micStale <= 3 {
+                    if micWarned {
                         micWarned = false
-                        lastMicRecoveryAt = nil
                         await micSvc.noteHealthy()
                     }
-
+                } else if (micStale ?? .greatestFiniteMagnitude) > 10 {
+                    if !micWarned {
+                        micWarned = true
+                        let detail = micStale.map { "no mic buffer for \(Int($0))s" }
+                            ?? "mic delivered no buffers"
+                        await MainActor.run {
+                            self.log.log("Audio watchdog: \(detail)", category: .audio, level: .warning)
+                        }
+                    }
                     // Backstop for the configuration-change observer: some
-                    // device grabs stop the tap without posting a change
-                    // notification, and a mic that never recovers means a
-                    // recording of everyone except the user. Retried on a
-                    // cadence rather than once, so a device that needs a
-                    // moment to settle still gets picked up.
-                    let dueForRetry = lastMicRecoveryAt.map {
-                        now.timeIntervalSince($0) >= 15
-                    } ?? true
-                    if stale > 10, dueForRetry {
-                        lastMicRecoveryAt = now
-                        let recovered = await micSvc.recoverCapture(
-                            reason: "no buffers for \(Int(stale))s"
-                        )
-                        if !recovered {
-                            await MainActor.run {
-                                self.errorMessage = "Your microphone stopped feeding this recording and could not be restarted. Other participants are still being captured. Stopping and starting the recording usually clears it."
-                            }
+                    // device grabs stop the tap without posting a change. The
+                    // stall threshold and retry cadence live in the actor
+                    // alongside its attempt budget, so there is one policy
+                    // rather than a second copy here.
+                    if await micSvc.recoverIfStalled(reason: "watchdog") == .failed, !micRecoveryReported {
+                        micRecoveryReported = true
+                        await MainActor.run {
+                            self.errorMessage = "Your microphone stopped feeding this recording and could not be restarted. Other participants are still being captured. Stopping and starting the recording usually clears it."
                         }
                     }
                 }

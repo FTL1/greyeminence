@@ -53,6 +53,29 @@ struct MenuBarView: View {
                 }
 
             case .idle:
+                // A detected call we chose not to auto-record. Offered here
+                // because this menu is reachable without leaving the call.
+                if let promptApp = viewModel.pendingCallPromptApp {
+                    HStack(spacing: 6) {
+                        Image(systemName: "phone.badge.waveform.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue)
+                        Text("\(promptApp) call detected")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+
+                    Button("Record This Call") {
+                        viewModel.acceptCallPrompt(in: modelContext)
+                    }
+                    Button("Not Now") {
+                        viewModel.dismissCallPrompt()
+                    }
+
+                    Divider()
+                }
+
                 Button("Start Recording") {
                     viewModel.startRecording(in: modelContext)
                 }
