@@ -1,4 +1,8 @@
-import UserNotifications
+// @preconcurrency: CI's older SDK lacks Sendable annotations on
+// UNNotificationSettings, so awaiting `notificationSettings()` from
+// MainActor-isolated code is rejected there but accepted locally. Same
+// treatment as ScreenCaptureKit in ScreenShareCaptureService.
+@preconcurrency import UserNotifications
 
 /// Asks whether to record a detected call.
 ///
@@ -57,10 +61,20 @@ final class CallPromptService: NSObject {
 
     /// Requests authorization if it has never been asked for, and reports the
     /// outcome. Returns true when we may post.
+    /// Reads only the status, never the settings object itself: the object is
+    /// not Sendable on every SDK we build against, and the status is a plain
+    /// enum that crosses isolation cleanly.
+    private nonisolated func currentAuthorizationStatus() async -> UNAuthorizationStatus {
+        await withCheckedContinuation { continuation in
+            center.getNotificationSettings { settings in
+                continuation.resume(returning: settings.authorizationStatus)
+            }
+        }
+    }
+
     @discardableResult
     func ensureAuthorization() async -> Bool {
-        let settings = await center.notificationSettings()
-        switch settings.authorizationStatus {
+        switch await currentAuthorizationStatus() {
         case .notDetermined:
             let granted = (try? await center.requestAuthorization(
                 options: [.alert, .sound]
