@@ -310,7 +310,13 @@ actor AIIntelligenceService {
         do {
             json = try AIResponseDecoder.objectFrom(response)
         } catch {
-            LogManager.send("AI parse failed (\(error.localizedDescription)) — raw response: \(response.prefix(1000))", category: .ai, level: .error, meetingID: meetingID)
+            LogManager.send(
+                "AI parse failed (\(error.localizedDescription)) — raw response: "
+                    + AIResponseDecoder.failureExcerpt(response),
+                category: .ai,
+                level: .error,
+                meetingID: meetingID
+            )
             throw error
         }
 

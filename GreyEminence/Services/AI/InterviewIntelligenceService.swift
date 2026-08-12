@@ -330,7 +330,13 @@ actor InterviewIntelligenceService {
         do {
             json = try AIResponseDecoder.objectFrom(raw)
         } catch {
-            LogManager.send("Interview AI parse failed (\(error.localizedDescription)): \(raw.prefix(500))", category: .ai, level: .error, meetingID: meetingID)
+            LogManager.send(
+                "Interview AI parse failed (\(error.localizedDescription)): "
+                    + AIResponseDecoder.failureExcerpt(raw),
+                category: .ai,
+                level: .error,
+                meetingID: meetingID
+            )
             throw error
         }
 

@@ -53,6 +53,33 @@ enum AIResponseDecoder {
         return try parse(clipped)
     }
 
+    // MARK: - Diagnostics
+
+    /// Excerpt for logging a response that could not be parsed, keeping both
+    /// ends of the payload.
+    ///
+    /// Logging only the head records the part that was fine: a malformed
+    /// response almost always fails at its *boundary* — prose after the closing
+    /// brace, a stray fence, an unterminated string — and the decoder's
+    /// truncation salvage means anything reaching this point is not a plain
+    /// cut-off. Observed 2026-08-07: a rolling pass failed with 2,090 output
+    /// tokens against an 8,192 ceiling, and the head-only log made the cause
+    /// undiagnosable.
+    static func failureExcerpt(
+        _ response: String,
+        headLimit: Int = 700,
+        tailLimit: Int = 400
+    ) -> String {
+        let count = response.count
+        guard count > headLimit + tailLimit else {
+            return "\(count) chars: \(response)"
+        }
+        let head = response.prefix(headLimit)
+        let tail = response.suffix(tailLimit)
+        let omitted = count - headLimit - tailLimit
+        return "\(count) chars: \(head)\n…[\(omitted) chars omitted]…\n\(tail)"
+    }
+
     // MARK: - Helpers
 
     private static func stripFences(_ response: String) -> String {
