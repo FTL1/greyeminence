@@ -4,6 +4,22 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.24.1 — 2026-08-12
+
+**Fixed: Zoom's popped-out screen share was missing from the window picker**
+- Zoom pins its meeting windows above the normal window level, and the
+  window list quietly skipped anything up there. The main Zoom window
+  showed up, the popped-out shared content never did — the one window
+  you actually wanted to capture. Elevated windows are now listed.
+- Zoom also had no auto-detection rules at all, so its windows were only
+  ever manually selectable. A popped-out or fullscreened share is now
+  detected automatically, while the meeting window itself stays
+  picker-only: when nobody is sharing it is a wall of faces, and
+  screenshotting that would spend your frame budget on video thumbnails.
+- Every window considered for capture is now logged with its window level
+  in the activity log, so a share that goes undetected can be told apart
+  from one that was never offered.
+
 ## 0.24.0 — 2026-08-07
 
 **Discord calls**

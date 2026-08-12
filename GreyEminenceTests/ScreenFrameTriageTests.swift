@@ -429,6 +429,90 @@ final class ScreenFrameTriageTests: XCTestCase {
         ))
     }
 
+    // MARK: - Zoom window scoring
+
+    private static let zoom = "us.zoom.xos"
+
+    /// The reported bug: a Zoom pop-out was invisible to the picker, and even
+    /// once visible Zoom had no profile at all, so it could never be
+    /// auto-captured. A second, distinctly-titled window is the pop-out.
+    func testZoomPopOutWindowScoresAboveAutoThreshold() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Ada's screen share",
+            bundleID: Self.zoom,
+            frame: CGRect(x: 0, y: 0, width: 1400, height: 900),
+            context: .init(sameAppWindowCount: 2, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThanOrEqual(score, 100)
+    }
+
+    /// Zoom's meeting window is titled exactly "Zoom". Whenever nobody is
+    /// sharing it is a gallery of faces, so auto-capturing it would spend the
+    /// frame budget on video thumbnails — it stays picker-only.
+    func testZoomMeetingWindowIsNeverAutoSelected() {
+        for title in ["Zoom", "Zoom Meeting", "Zoom Workplace"] {
+            let score = ScreenShareCaptureService.scoreWindow(
+                title: title,
+                bundleID: Self.zoom,
+                frame: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+                context: .init(sameAppWindowCount: 2, displayFrames: [Self.display])
+            )
+            XCTAssertGreaterThan(score, 0, "\(title) should stay a picker candidate")
+            XCTAssertLessThan(score, 100, "\(title) must never be auto-captured")
+        }
+    }
+
+    /// The exact-title rule must not swallow pop-outs that merely *contain*
+    /// the chrome title — the whole reason exact matching exists.
+    func testZoomTitleContainingMeetingNameIsStillAutoSelectable() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Zoom Meeting — Ada's screen",
+            bundleID: Self.zoom,
+            frame: CGRect(x: 0, y: 0, width: 1400, height: 900),
+            context: .init(sameAppWindowCount: 2, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThanOrEqual(score, 100)
+    }
+
+    /// Zoom pins auxiliary windows above the normal window level, and the
+    /// floating video window is one of them — small enough that the size floor
+    /// keeps it out regardless of how it scores.
+    func testZoomFloatingVideoWindowIsNotACandidate() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "zoom floating video window",
+            bundleID: Self.zoom,
+            frame: CGRect(x: 0, y: 0, width: 244, height: 139),
+            context: .init(sameAppWindowCount: 3, displayFrames: [Self.display])
+        )
+        XCTAssertEqual(score, 0)
+    }
+
+    /// Even at an adequate size the floating window is chrome, not content.
+    func testZoomFloatingVideoWindowIsNeverAutoSelected() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "zoom floating video window",
+            bundleID: Self.zoom,
+            frame: CGRect(x: 0, y: 0, width: 900, height: 600),
+            context: .init(sameAppWindowCount: 3, displayFrames: [Self.display])
+        )
+        XCTAssertLessThan(score, 100)
+    }
+
+    /// Teams' share-border overlay is titled "Microsoft Teams". It is back in
+    /// the candidate list now that elevated layers are allowed, so the
+    /// main-window rule is the only thing keeping it out of auto-capture —
+    /// this is the regression the `windowLayer == 0` filter used to cover.
+    func testTeamsShareBorderOverlayStaysPickerOnly() {
+        let score = ScreenShareCaptureService.scoreWindow(
+            title: "Microsoft Teams",
+            bundleID: "com.microsoft.teams2",
+            frame: Self.display,
+            context: .init(sameAppWindowCount: 3, displayFrames: [Self.display])
+        )
+        XCTAssertGreaterThan(score, 0)
+        XCTAssertLessThan(score, 100)
+    }
+
     // MARK: - Per-app share-ended phrases
 
     func testDiscordPlaceholderUsesDiscordPhrases() {

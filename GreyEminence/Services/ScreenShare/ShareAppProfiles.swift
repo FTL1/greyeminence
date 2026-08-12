@@ -22,6 +22,14 @@ struct ShareAppProfile: Sendable, Equatable {
     /// window we must never auto-capture.
     let mainWindowPatterns: [String]
 
+    /// Lowercased *whole* titles that mark the app's chrome.
+    ///
+    /// Substring matching cannot express Zoom's naming: its meeting window is
+    /// titled exactly "Zoom", so the substring "zoom" would also swallow every
+    /// pop-out title the app could possibly use. Exact titles let a profile say
+    /// "this window and no other".
+    var mainWindowExactTitles: [String] = []
+
     /// Lowercased phrases on the placeholder screen left behind when the
     /// presenter stops sharing.
     let shareEndedPhrases: [String]
@@ -95,7 +103,55 @@ enum ShareAppProfiles {
         popOutHint: "Pop out the stream in Discord, or fullscreen it, for the cleanest capture."
     )
 
-    static let all: [ShareAppProfile] = [teams, discord]
+    /// Zoom — the viewer sees a share inside the meeting window, and can pop
+    /// the shared content into a window of its own (also what dual-monitor
+    /// mode produces). That pop-out is the clean capture; the meeting window
+    /// is a gallery of faces whenever nobody is sharing, so auto-capturing it
+    /// would burn frame budget on video thumbnails.
+    ///
+    /// Zoom pins its auxiliary windows well above the normal window level
+    /// (the floating video window measured at layer 26 on 2026-08-12), which
+    /// is why `candidates(from:)` no longer requires layer 0.
+    ///
+    /// As with Discord, the title patterns are informed guesses — taken from
+    /// Zoom's own localized strings ("You are viewing %@'s screen",
+    /// "%@'s screen share") rather than an observed pop-out. Every candidate
+    /// is logged with its title and layer under the `screen` category, so the
+    /// first real pop-out tells us what belongs here; until then the
+    /// secondary-window and fullscreen rules carry auto-detection.
+    static let zoom = ShareAppProfile(
+        app: MeetingAppRegistry.zoom,
+        shareTitlePatterns: [
+            "'s screen",         // "Alice's screen" / "Alice's screen share"
+            "’s screen",         // Zoom uses a typographic apostrophe in places
+            "screen share",
+            "is sharing",
+            "shared screen",
+        ],
+        mainWindowPatterns: [
+            "zoom workplace",
+            "floating video window",
+            "zoom group chat",
+            "advanced diagnostics",
+        ],
+        mainWindowExactTitles: [
+            "zoom",
+            "zoom meeting",
+            "login",
+            "settings",
+        ],
+        shareEndedPhrases: [
+            "screen sharing has stopped",
+            "screen sharing stopped",
+            "the shared window was closed",
+            "stopped sharing",
+        ],
+        secondaryWindowIsShare: true,
+        fullscreenIsShare: true,
+        popOutHint: "Pop the shared content out into its own window in Zoom for the cleanest capture."
+    )
+
+    static let all: [ShareAppProfile] = [teams, discord, zoom]
 
     /// Matched through the registry so helper processes resolve the same way
     /// they do for mic detection — an exact-match table here would silently
@@ -108,7 +164,7 @@ enum ShareAppProfiles {
     /// Generic guidance for the settings pane, which is app-agnostic because
     /// it is read before any call is in progress.
     static var genericPopOutHint: String {
-        let names = all.map(\.displayName).joined(separator: " or ")
+        let names = ListFormatter.localizedString(byJoining: all.map(\.displayName))
         return "Pop out the shared content in \(names) for the cleanest capture."
     }
 }

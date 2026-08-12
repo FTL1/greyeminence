@@ -36,6 +36,10 @@ struct WindowCandidate: Sendable, Identifiable, Equatable {
     let bundleID: String
     let frame: CGRect
     let score: Int
+    /// CoreGraphics window level. Purely diagnostic — it is logged so a window
+    /// that fails to show up can be told apart from one that scored badly,
+    /// which is exactly what went missing when Zoom's pop-out was invisible.
+    var windowLayer: Int = 0
 }
 
 /// One frame that survived change detection, already written to disk.
@@ -344,11 +348,13 @@ actor ScreenShareCaptureService {
         guard ids != lastReportedCandidateIDs else { return }
         lastReportedCandidateIDs = ids
         continuation?.yield(.candidatesChanged(plausible))
-        // Spike diagnostics: log what Teams exposes so the title heuristics
+        // Spike diagnostics: log what each app exposes so the title heuristics
         // can be tuned from real data (remove once patterns are confirmed).
+        // The layer is here because a pop-out that never appears is the hard
+        // failure to diagnose — Zoom's sat above the normal level unseen.
         for candidate in plausible {
             LogManager.send(
-                "Share candidate: \"\(candidate.title)\" (\(candidate.appName), \(Int(candidate.frame.width))×\(Int(candidate.frame.height)), score \(candidate.score))",
+                "Share candidate: \"\(candidate.title)\" (\(candidate.appName), \(Int(candidate.frame.width))×\(Int(candidate.frame.height)), layer \(candidate.windowLayer), score \(candidate.score))",
                 category: .screen,
                 meetingID: meetingID
             )
@@ -369,11 +375,20 @@ actor ScreenShareCaptureService {
         // what the user can actually see rather than hidden helper windows.
         let eligible = windows.compactMap { window -> (SCWindow, SCRunningApplication)? in
             guard let app = window.owningApplication else { return nil }
-            // Real, visible, normal-level windows only. This excludes hidden
-            // Electron helper windows AND share overlays like Teams' red
-            // screen-share border — a full-screen transparent window that
-            // captures as a blank frame (observed in testing 2026-07-16).
-            guard window.isOnScreen, window.windowLayer == 0 else { return nil }
+            // Real, visible windows only — this drops hidden Electron helper
+            // windows and the desktop's own negative-layer surfaces.
+            //
+            // We deliberately do NOT require `windowLayer == 0`. That check
+            // was added on 2026-07-16 to shut out Teams' red screen-share
+            // border (a full-screen transparent overlay that captures blank),
+            // but it also hides every window an app pins above the normal
+            // level — and Zoom pins plenty: its floating video window sits at
+            // layer 26 (measured 2026-08-12), and its popped-out shared
+            // content never reached the picker at all. The Teams overlay is
+            // titled "Microsoft Teams", so the main-window scoring rule
+            // already keeps it picker-only; that is the check doing the real
+            // work here, and it costs us nothing on elevated windows.
+            guard window.isOnScreen, window.windowLayer >= 0 else { return nil }
             // Windows failing the size floor are never candidates at all.
             guard window.frame.width >= 300, window.frame.height >= 200 else { return nil }
             return (window, app)
@@ -401,7 +416,8 @@ actor ScreenShareCaptureService {
                     bundleID: app.bundleIdentifier,
                     frame: window.frame,
                     context: context
-                )
+                ),
+                windowLayer: window.windowLayer
             )
         }
     }
@@ -421,9 +437,10 @@ actor ScreenShareCaptureService {
         guard frame.width >= 300, frame.height >= 200 else { return 0 }
         guard let profile = ShareAppProfiles.profile(for: bundleID) else { return 0 }
 
-        let lower = title.lowercased()
+        let lower = title.lowercased().trimmingCharacters(in: .whitespaces)
         let isMainWindow = lower.isEmpty
             || profile.mainWindowPatterns.contains(where: { lower.contains($0) })
+            || profile.mainWindowExactTitles.contains(lower)
         var score = 60  // any adequately-sized window of a known app is plausible
 
         if profile.shareTitlePatterns.contains(where: { lower.contains($0) }) {

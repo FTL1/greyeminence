@@ -36,12 +36,14 @@ enum MeetingAppRegistry {
         displayName: "Microsoft Teams"
     )
 
+    static let zoom = MeetingAppProfile(
+        bundleIDs: ["us.zoom.xos"],
+        displayName: "Zoom"
+    )
+
     static let profiles: [MeetingAppProfile] = [
         teams,
-        MeetingAppProfile(
-            bundleIDs: ["us.zoom.xos"],
-            displayName: "Zoom"
-        ),
+        zoom,
         MeetingAppProfile(
             bundleIDs: ["com.tinyspeck.slackmacgap"],
             displayName: "Slack"
