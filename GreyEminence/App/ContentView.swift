@@ -141,6 +141,13 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            // The test bundle is hosted by this app, so a test run launches it
+            // for real. None of what follows may touch the developer's live
+            // store: maintenance rewrites rows, recovery re-imports frames,
+            // auto-detection can start a recording. Tests exercise these
+            // services directly with their own contexts instead.
+            guard !TestEnvironment.isRunningTests else { return }
+
             checkForInterruptedRecording()
             recoverOrphanedInterviews()
             // Prompt for profile if not configured (with slight delay so window settles)
