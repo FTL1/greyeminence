@@ -137,6 +137,8 @@ enum AIPromptTemplates {
         case .screenSystem:   defaultScreenSystemPrompt
         case .screenAnalysis: defaultScreenAnalysisPrompt
         case .screenSessionSynthesis: defaultSessionSynthesisPrompt
+        case .reportSystem:   defaultReportSystemPrompt
+        case .reportFigureAnchors: defaultFigureAnchorPrompt
         }
     }
 
@@ -528,5 +530,76 @@ enum AIPromptTemplates {
         changed or the discussion pivoted.
         - If the transcript is empty or unrelated, recap the screen content alone \
         and say the room did not discuss it.
+        """
+
+
+    // MARK: - Report figure anchoring
+
+    static var reportSystemPrompt: String {
+        PromptStore.shared.get(.reportSystem, default: defaultReportSystemPrompt)
+    }
+
+    static func figureAnchorPrompt(sectionOutline: String, frameCatalogue: String) -> String {
+        let template = PromptStore.shared.get(.reportFigureAnchors, default: defaultFigureAnchorPrompt)
+        return PromptStore.render(template, values: [
+            "sectionOutline": sectionOutline,
+            "frameCatalogue": frameCatalogue,
+        ])
+    }
+
+    static let defaultReportSystemPrompt = """
+        You decide which screenshots belong beside which part of a written \
+        meeting report. You are strict: a screenshot earns its place only when \
+        it is direct visual evidence for what a section says. You MUST respond \
+        with ONLY valid JSON matching the schema in the user message — no \
+        prose, no markdown, no explanation before or after.
+        """
+
+    private static let defaultFigureAnchorPrompt: String = """
+        Below are the sections of a written meeting summary, and the \
+        screenshots captured from the shared screen during that meeting.
+
+        Your job is to pick the FEW screenshots that help tell the story the \
+        summary tells, and say — in one line each — what they contribute to \
+        it. This is a short summary report, not a gallery: a screenshot earns \
+        its place only by making a point in the summary land better than the \
+        words alone.
+
+        SECTIONS
+        {{sectionOutline}}
+
+        CAPTURED SCREENSHOTS
+        {{frameCatalogue}}
+
+        Return JSON of exactly this shape:
+        {"figures":[{"frame":"F3","section":"S2","caption":"one short line"}]}
+
+        Choosing:
+        - Include a screenshot ONLY when the thing a section is talking about \
+        is visible in it. A screenshot from roughly the same moment is not \
+        evidence of anything.
+        - NEVER include one showing only the video call — participant tiles, \
+        a gallery of faces, a speaker's camera, an empty meeting window.
+        - At most 2 per section, and most sections should have none. \
+        Returning three or four across the whole meeting is a good answer. \
+        Returning an empty list is a valid answer.
+        - Omit screenshots you do not choose. They are not printed. Do not \
+        include them with a null section.
+
+        Captions — the caption is the tie between picture and summary:
+        - Say what the screenshot shows AND what it establishes for the \
+        section. "The RDL suggestions under debate: two AI-proposed Joint \
+        Pain entries, both at 10%" — the reader immediately sees why it is \
+        on the page.
+        - Use the real nouns from the description: the tool, the screen, the \
+        field, the value. Never "a screen from the design tool".
+        - NEVER describe the meeting or the call — "Zoom call in progress", \
+        "during the design discussion". The reader can see it is a screen \
+        share. The window, video tiles and toolbar are chrome; caption the \
+        content inside them.
+        - Under 20 words. Do not begin with "Screenshot of", "This shows", \
+        "A view of", "The user is".
+        - Use only what the description states. Invent nothing.
+        - Use only the S and F identifiers given above.
         """
 }

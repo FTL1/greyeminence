@@ -61,6 +61,29 @@ final class StorageManager: Sendable {
         try? FileManager.default.removeItem(at: reProcessCheckpointURL(for: meetingID))
     }
 
+    /// Cached report figure-anchoring plan. A sidecar file rather than a
+    /// SwiftData field: it is derived data that can always be recomputed, so
+    /// storing it here buys the cache without a schema version bump.
+    func reportAnchorPlanURL(for meetingID: UUID) -> URL {
+        recordingDirectory(for: meetingID).appendingPathComponent("report-anchors.json")
+    }
+
+    /// Returns the plan only if it was computed against `insightID` — a
+    /// regenerated analysis produces different sections, so an older plan
+    /// would anchor figures to headings that no longer exist.
+    func loadReportAnchorPlan(for meetingID: UUID, insightID: UUID) -> ReportAnchorPlan? {
+        let url = reportAnchorPlanURL(for: meetingID)
+        guard let data = try? Data(contentsOf: url),
+              let plan = try? JSONDecoder().decode(ReportAnchorPlan.self, from: data),
+              plan.isValid(forInsight: insightID) else { return nil }
+        return plan
+    }
+
+    func saveReportAnchorPlan(_ plan: ReportAnchorPlan, for meetingID: UUID) {
+        guard let data = try? JSONEncoder().encode(plan) else { return }
+        try? data.write(to: reportAnchorPlanURL(for: meetingID), options: .atomic)
+    }
+
     /// Remove the entire recording directory for a meeting (mic + system
     /// chunks, plus any sidecar files). Returns true if something was
     /// actually removed. Missing-file is not an error.

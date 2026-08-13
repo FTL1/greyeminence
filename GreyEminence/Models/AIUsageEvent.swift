@@ -9,6 +9,10 @@ enum AIUsagePurpose: String, Codable, Sendable, CaseIterable {
     case transcriptFinal
     case frameAnalysis
     case sessionSynthesis
+    /// Deciding which captured screenshots evidence which summary section
+    /// when exporting a report. Text-only and cached per insight, so it
+    /// should appear at most once per meeting however many times you export.
+    case reportFigureAnchors
     case reanalysis
     case ask
     case interview
@@ -22,6 +26,7 @@ enum AIUsagePurpose: String, Codable, Sendable, CaseIterable {
         case .transcriptFinal: "Final analysis"
         case .frameAnalysis: "Frame analysis"
         case .sessionSynthesis: "Session recaps"
+        case .reportFigureAnchors: "Report figures"
         case .reanalysis: "Reanalysis"
         case .ask: "Ask"
         case .interview: "Interview"
@@ -35,6 +40,7 @@ enum AIUsagePurpose: String, Codable, Sendable, CaseIterable {
         case .transcriptInitial, .transcriptRolling: .transcript
         case .transcriptFinal, .reanalysis: .finalAnalysis
         case .frameAnalysis, .sessionSynthesis: .screenShare
+        case .reportFigureAnchors: .reports
         case .ask, .interview, .prep, .other: .other
         }
     }
@@ -50,6 +56,8 @@ enum AIUsageGroup: String, CaseIterable, Sendable {
     case finalAnalysis
     /// Frame vision + session recap synthesis.
     case screenShare
+    /// Everything spent turning a meeting into a shareable report.
+    case reports
     case other
 
     var displayName: String {
@@ -57,6 +65,7 @@ enum AIUsageGroup: String, CaseIterable, Sendable {
         case .transcript: "Transcript processing"
         case .finalAnalysis: "Final analysis"
         case .screenShare: "Screen shares"
+        case .reports: "Reports"
         case .other: "Everything else"
         }
     }

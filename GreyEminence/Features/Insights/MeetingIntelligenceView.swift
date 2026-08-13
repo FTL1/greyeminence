@@ -12,6 +12,13 @@ struct MeetingIntelligenceView: View {
     @State private var reanalysisError: String?
     @State private var reanalyzeTask: Task<Void, Never>?
     @State private var reanalyzeSharesTrigger = false
+    @State private var isExportingReport = false
+    @State private var exportError: String?
+    @AppStorage("reportTemplateID") private var reportTemplateID = ReportTemplateCatalog.plain.id
+    /// Screenshots collected at the end and cross-linked, or set inline with
+    /// the summary. Inline reads better when the pictures are good; at the
+    /// end keeps the prose continuous and is what makes the links useful.
+    @AppStorage("reportFiguresAtEnd") private var reportFiguresAtEnd = true
 
     var body: some View {
         ScrollView {
@@ -34,6 +41,50 @@ struct MeetingIntelligenceView: View {
                     // controls must never be pushed off screen by a caption.
                     MeetingAIUsageCaption(meetingID: meeting.id, isAnalyzing: isReanalyzing || meeting.isAnalyzing)
                         .layoutPriority(-1)
+
+                    if meeting.status == .completed {
+                        if isExportingReport {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("Exporting…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            // Click exports with the last-used template; the
+                            // arrow picks a different one — the same shape as
+                            // the Reanalyze control beside it.
+                            Menu {
+                                Picker("Template", selection: $reportTemplateID) {
+                                    ForEach(ReportTemplateCatalog.all) { template in
+                                        // The code is in the filename, so
+                                        // showing it here tells you which
+                                        // file on disk came from which theme.
+                                        Text("\(template.name)  (\(template.code))").tag(template.id)
+                                    }
+                                }
+                                .pickerStyle(.inline)
+                                Divider()
+                                Picker("Screenshots", selection: $reportFiguresAtEnd) {
+                                    Text("Collected at the end").tag(true)
+                                    Text("Inline with the summary").tag(false)
+                                }
+                                .pickerStyle(.inline)
+                                Divider()
+                                Text(ReportTemplateCatalog.template(id: reportTemplateID).summary)
+                            } label: {
+                                Label("Export PDF", systemImage: "doc.richtext")
+                                    .font(.caption)
+                            } primaryAction: {
+                                exportReport()
+                            }
+                            .menuStyle(.button)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .fixedSize()
+                            .help("Click: export as \(ReportTemplateCatalog.template(id: reportTemplateID).name). Arrow: choose a template.")
+                        }
+                    }
 
                     if meeting.status == .completed && !meeting.segments.isEmpty {
                         if isReanalyzing || meeting.isAnalyzing {
@@ -83,7 +134,7 @@ struct MeetingIntelligenceView: View {
                 }
                 .padding(.horizontal)
 
-                if let error = reanalysisError ?? meeting.analysisError {
+                if let error = exportError ?? reanalysisError ?? meeting.analysisError {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -92,6 +143,7 @@ struct MeetingIntelligenceView: View {
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("Dismiss") {
+                            exportError = nil
                             reanalysisError = nil
                             meeting.analysisError = nil
                         }
@@ -148,6 +200,29 @@ struct MeetingIntelligenceView: View {
                 }
             }
             .padding(.vertical)
+        }
+    }
+
+    private func exportReport() {
+        guard !isExportingReport else { return }
+        isExportingReport = true
+        exportError = nil
+        Task { @MainActor in
+            defer { isExportingReport = false }
+            do {
+                let template = ReportTemplateCatalog.template(id: reportTemplateID)
+                if let url = try await ReportExportService.exportPDF(
+                    for: meeting,
+                    template: template,
+                    figuresAtEnd: reportFiguresAtEnd
+                ) {
+                    // Reveal rather than open: the user almost always wants to
+                    // attach or send the file next, not read it in Preview.
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            } catch {
+                exportError = error.localizedDescription
+            }
         }
     }
 

@@ -4,6 +4,204 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.28.3 — 2026-08-12
+
+**The masthead now reaches the top of the page**
+- Trajector and Matthew Purdon reports opened with a white strip above the
+  coloured header band. The band now starts at the paper's edge. Pages
+  after the first keep their margins, and the templates whose header is
+  plain text are unaffected.
+
+## 0.28.2 — 2026-08-12
+
+**Fixed: the header sat in the middle of the page instead of spanning it**
+- Every template's masthead was inset by exactly one page margin, so it read
+  as a floating rectangle rather than a band across the top. A negative
+  margin cannot escape the page's own margin — the renderer clips it — so
+  the side margins now come from the page body, which leaves the masthead
+  room to reach both edges. Continuation pages keep their margins.
+
+## 0.28.1 — 2026-08-12
+
+**Fixed: contents entries were numbered twice, and brand colours vanished**
+- The contents list showed "1. 1. AI-first workflow" — an ordered list
+  drawing both its own number and the styled one.
+- Every background colour was being dropped on export, because printing
+  omits them by default. The Trajector report was printing white text on
+  white paper where its navy header should be, and every tinted panel was
+  invisible.
+- The Matthew Purdon template now leads with a full-bleed cream masthead
+  rather than trying to tint the whole sheet, which is not something the
+  PDF renderer can do.
+
+## 0.28.0 — 2026-08-12
+
+**The report is a summary again, and screenshots carry the story**
+- Only the few screenshots that make a point in the summary are printed,
+  and they sit beside the point they make. The rest are not printed at all
+  — they made the report long without making it clearer, and everything
+  captured is still in the app.
+- Captions now say what the screenshot shows *and* what it establishes for
+  that part of the summary, so a picture explains why it is on the page
+  rather than restating what you can see.
+- Screenshots are set inline with the summary by default. Collecting them
+  at the end, cross-linked, is still available in the Export PDF menu for
+  when the prose should read uninterrupted.
+- Without AI configured nothing can be tied to a section, so a report keeps
+  at most three screenshots spread across the meeting rather than all of
+  them.
+
+## 0.27.2 — 2026-08-12
+
+**Fixed: captions described the meeting instead of the screenshot**
+- A screenshot of a document being reviewed was captioned "Zoom call in
+  progress during early discussion of the design workflow" — text taken
+  from the key moment, which describes what was happening in the meeting,
+  not what is in the picture. Captions now come from the screenshot's own
+  description, so they name the tool, the screen and the values on it.
+- The AI captioner was also only seeing the first 300 characters of each
+  screenshot's description. The specifics are spread through the whole
+  paragraph, so it was left describing the application window rather than
+  the contents. It now sees enough to be specific, and is told outright
+  that the call, the video tiles and the toolbar are chrome — caption what
+  is inside them.
+
+## 0.27.1 — 2026-08-12
+
+**Fixed: exports were named after the AI's title, not the meeting's**
+- The report title and filename used the AI-generated title in preference to
+  the meeting's actual name. For a meeting linked to a calendar event that
+  meant exporting under a name the app never shows, and if you had renamed a
+  meeting yourself it ignored the rename entirely. Exports are now titled
+  whatever the meeting is called at the moment you export it.
+
+## 0.27.0 — 2026-08-12
+
+**Every screenshot now says what it is and why it's there**
+- Each figure gets a short caption naming what you're looking at and, where
+  it relates to something the summary discusses, naming that too. Previously
+  only the handful of screenshots tied to a summary section got a written
+  caption; the rest carried either a bare timestamp label or the entire
+  100–250 word description the vision pass had written, printed raw under
+  the picture.
+- The same pass that decides which screenshots belong beside which section
+  now captions all of them, so this costs nothing extra.
+- Without AI configured, captions fall back to the first sentence of the
+  description, clipped at a word boundary, rather than the whole paragraph.
+
+## 0.26.2 — 2026-08-12
+
+**Fixed: improved screenshot picking didn't reach meetings you'd already exported**
+- The figure-anchoring result is cached per meeting, and the only thing that
+  expired it was re-running the analysis. So a meeting exported before
+  today's improvements would have kept its old choices forever. Worse, the
+  cached anchors named screenshots the new selection no longer picks, which
+  would have quietly produced a report with no links at all.
+- The cache now expires when the anchoring logic itself changes, so
+  improvements land on the next export with nothing to re-run.
+
+## 0.26.1 — 2026-08-12
+
+**Better screenshots, and you choose where they go**
+- Screenshot selection now favours actual content over the video call. It
+  weighs what the frame was identified as — a slide, document, diagram,
+  code, dashboard — and how much text is on it, so a gallery of faces
+  loses to a slide. The AI is told the same thing explicitly: never anchor
+  a frame showing only participant tiles or a speaker's camera.
+- Key moments now pick the best frame *near* the moment rather than the
+  nearest one, since the closest frame in time is often a cut to whoever
+  was speaking.
+- The Export PDF menu now lets you choose between screenshots collected at
+  the end (cross-linked to the summary) and set inline with the summary.
+- Sections no longer start on their own page — on real reports it left
+  pages of white space and a lot of scrolling. The contents list stays.
+
+## 0.26.0 — 2026-08-12
+
+**Contents page, and a page per section**
+- Reports now open with a linked table of contents, and each section of the
+  summary starts on its own page. Contents entries are clickable in the
+  exported PDF. Plain stays plain — it has neither.
+
+**Fixed: the screenshot cross-links never appeared**
+- The links between a screenshot and the part of the summary it supports
+  only worked when screenshots were collected at the end, which only the
+  Report template did. Every template now collects them at the end, which
+  is what makes the links exist: a screenshot set inside its own section
+  has nothing to link to, and the leftovers at the back had nothing to
+  link back to.
+
+## 0.25.3 — 2026-08-12
+
+**Exports no longer overwrite each other**
+- The suggested filename now carries a two-letter tag for the template it
+  was made with — "Braintrust — 2026-08-12 (TJ).pdf" — so you can export
+  one meeting under every theme into the same folder and compare them,
+  instead of each export replacing the last. The tag is shown beside each
+  template in the picker.
+
+## 0.25.2 — 2026-08-12
+
+**Jump between a screenshot and the part of the summary it belongs to**
+- Screenshots printed in the appendix now carry a link back to the section
+  they evidence, and that section links forward to them. Both work as real
+  clickable links in the exported PDF, so you can read a point, jump to the
+  picture, and come straight back.
+- The Report template now collects every screenshot at the end and refers
+  to them from the text, the way a formal report does. The other templates
+  keep setting them beside the prose.
+
+**Easier-to-read bullets**
+- Summary points used an em dash as their marker, which was hard to pick
+  out at a glance. Each template now uses a mark you can actually see.
+
+## 0.25.1 — 2026-08-12
+
+**Five report templates, and a picker**
+- Export PDF is now a split button: click exports with your last-used
+  template, the arrow picks a different one. Plain, Report (formal and
+  numbered), Trajector, Matthew Purdon, and PurdonMoi.
+
+**Fixed: reports exported with no screenshots at all**
+- A shared screen only made it into a report if its AI session recap had
+  also been generated. If that pass never ran, every screenshot from that
+  share was silently dropped. Screenshots now stand on their own, and a
+  share with no recap contributes a spread across its length instead.
+- If a report still comes out with no figures, the activity log now says
+  which reason it was.
+
+## 0.25.0 — 2026-08-12
+
+**Screenshots land beside the part of the summary they prove**
+- Exporting a report now works out which captured screenshots are direct
+  evidence for which section of the summary, and prints them there rather
+  than in a lump at the end. A screenshot from roughly the same moment
+  doesn't qualify — it has to actually show the thing being discussed.
+- Most screenshots don't earn a place, and that's the intended outcome.
+  Whatever no section claims still appears in the "Shared screens"
+  appendix, so nothing you captured is thrown away.
+- It costs one small text-only AI call per meeting — no images are
+  uploaded, since the screenshots were already described during the
+  recording. The result is cached, so switching templates or exporting
+  the same meeting again is free. Re-running the analysis recomputes it.
+- Shows up in AI Usage under a new "Reports" group.
+- If AI isn't configured, or the call fails, the report still exports with
+  its figures in the appendix.
+
+## 0.24.3 — 2026-08-12
+
+**Export a meeting as a PDF report**
+- Meeting Intelligence has an "Export PDF" button. It turns the summary,
+  action items, open questions and shared screens into a proper paginated
+  document you can send to someone who doesn't run Grey Eminence — real
+  pages, selectable text, and screenshots embedded in the file rather than
+  linked to it.
+- Screenshots are chosen rather than dumped: each share session contributes
+  the frames tied to the key moments the analysis already identified, and a
+  figure never gets separated from its caption across a page break.
+- One "Plain" template for now. Branded templates, a template picker, and
+  chatting at a template to restyle it are next.
+
 ## 0.24.1 — 2026-08-12
 
 **Fixed: Zoom's popped-out screen share was missing from the window picker**
