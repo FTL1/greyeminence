@@ -4,6 +4,14 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.28.4 — 2026-08-13
+
+**Fixed: the release build failed to compile**
+- A test set up its scratch directory in `setUpWithError`, which is a
+  nonisolated override and so cannot touch a property of a main-actor
+  test case. The local toolchain allowed it; the one CI builds with did
+  not, so 0.28.3 never produced a release.
+
 ## 0.28.3 — 2026-08-12
 
 **The masthead now reaches the top of the page**

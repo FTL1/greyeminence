@@ -8,16 +8,18 @@ import XCTest
 @MainActor
 final class ReportPDFRendererTests: XCTestCase {
 
-    private var scratch: URL!
-
-    override func setUpWithError() throws {
-        scratch = URL(fileURLWithPath: NSTemporaryDirectory())
+    /// A fresh output path, with its directory cleaned up after the test.
+    ///
+    /// Deliberately not `setUpWithError`/`tearDownWithError`: those overrides
+    /// are nonisolated, so on a `@MainActor` test case they cannot touch a
+    /// stored property of the case. Xcode's bundled toolchain let it pass;
+    /// CI's rejected it outright.
+    private func scratchURL(_ filename: String) throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("report-pdf-tests-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-    }
-
-    override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: scratch)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory.appendingPathComponent(filename)
     }
 
     /// Enough paragraphs to overflow one Letter page several times over.
@@ -34,7 +36,7 @@ final class ReportPDFRendererTests: XCTestCase {
     }
 
     func testWritesAPaginatedPDF() async throws {
-        let url = scratch.appendingPathComponent("long.pdf")
+        let url = try scratchURL("long.pdf")
         try await ReportPDFRenderer.writePDF(html: longHTML(paragraphs: 60), to: url)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "no PDF was written")
@@ -49,7 +51,7 @@ final class ReportPDFRendererTests: XCTestCase {
     /// as tall as the whole document, which is the failure mode this renderer
     /// exists to avoid.
     func testPagesAreLetterSized() async throws {
-        let url = scratch.appendingPathComponent("sized.pdf")
+        let url = try scratchURL("sized.pdf")
         try await ReportPDFRenderer.writePDF(html: longHTML(paragraphs: 40), to: url)
 
         let document = try XCTUnwrap(PDFDocument(url: url))
@@ -61,7 +63,7 @@ final class ReportPDFRendererTests: XCTestCase {
     /// Text must survive as selectable text, not be rasterized — a report you
     /// cannot search or copy from is a screenshot with extra steps.
     func testTextIsExtractable() async throws {
-        let url = scratch.appendingPathComponent("text.pdf")
+        let url = try scratchURL("text.pdf")
         try await ReportPDFRenderer.writePDF(
             html: "<html><body><h1>Migration plan</h1><p>Distinctive marker phrase.</p></body></html>",
             to: url
@@ -77,7 +79,7 @@ final class ReportPDFRendererTests: XCTestCase {
     /// in the PDF as real link annotations. HTML that merely *looks* linked
     /// produces a document where nothing is clickable, with no other symptom.
     func testInternalLinksBecomeClickablePDFAnnotations() async throws {
-        let url = scratch.appendingPathComponent("links.pdf")
+        let url = try scratchURL("links.pdf")
         let filler = String(repeating: "<p>Filler to push the target onto a later page.</p>", count: 40)
         try await ReportPDFRenderer.writePDF(
             html: """
@@ -102,7 +104,7 @@ final class ReportPDFRendererTests: XCTestCase {
     /// Base64 data-URI images are how every figure reaches the page, so a
     /// failure here takes the entire figure feature with it.
     func testDataURIImageRenders() async throws {
-        let url = scratch.appendingPathComponent("image.pdf")
+        let url = try scratchURL("image.pdf")
         // 2x2 red PNG.
         let png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVQIHWP8z8Dwn4EIwEREGVjZqIYBAFYgAQnhx6Y8AAAAAElFTkSuQmCC"
         try await ReportPDFRenderer.writePDF(
