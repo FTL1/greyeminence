@@ -148,8 +148,14 @@ struct ContentView: View {
             // services directly with their own contexts instead.
             guard !TestEnvironment.isRunningTests else { return }
 
-            checkForInterruptedRecording()
-            recoverOrphanedInterviews()
+            // Both fetch from SwiftData on the main actor, so they are worth
+            // naming: silence during them is indistinguishable from a hang.
+            TransientActivityCoordinator.shared.run("Checking for an interrupted recording…") {
+                checkForInterruptedRecording()
+            }
+            TransientActivityCoordinator.shared.run("Checking interviews…") {
+                recoverOrphanedInterviews()
+            }
             // Prompt for profile if not configured (with slight delay so window settles)
             if myContactIDString.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
@@ -170,7 +176,11 @@ struct ContentView: View {
                 // Unthrottled (unlike maintenance): rows lost to a schema
                 // downgrade should come back on the very next launch, and
                 // the no-op case costs one fetch + a directory check.
-                let recovered = await ScreenFrameRecoveryService.recoverAtLaunch(modelContext: modelContext)
+                let recovered = await TransientActivityCoordinator.shared.runAsync(
+                    "Checking screen-share frames…"
+                ) {
+                    await ScreenFrameRecoveryService.recoverAtLaunch(modelContext: modelContext)
+                }
                 if recovered > 0 {
                     TransientActivityCoordinator.shared.flash("Recovered \(recovered) screen-share frame(s)")
                 }

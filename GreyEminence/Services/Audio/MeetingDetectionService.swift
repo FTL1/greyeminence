@@ -121,9 +121,24 @@ final class MeetingDetectionService {
         clearSince = nil
     }
 
+    /// Set while a poll is in flight, so a slow CoreAudio round-trip cannot
+    /// stack ticks on top of each other.
+    private var pollInFlight = false
+
     private func tick() {
+        guard mode != .disabled, !pollInFlight else { return }
+        pollInFlight = true
+        Task { [weak self] in
+            let holders = await Self.holdersOffMainThread()
+            guard let self else { return }
+            self.pollInFlight = false
+            self.apply(holders)
+        }
+    }
+
+    private func apply(_ holders: [MicHolder]) {
         guard mode != .disabled else { return }
-        let holders = snapshotHolders()
+        logHolderChange(holders)
         currentHolders = holders
         let inUse = !holders.isEmpty
         if externalMicInUse != inUse {
@@ -256,7 +271,31 @@ final class MeetingDetectionService {
     ///
     /// Safe to call when disabled — `RecordingViewModel` uses it for a
     /// one-shot read when a recording is started manually.
+    /// Off-main wrapper for the poll.
+    ///
+    /// The CoreAudio calls below are synchronous mach round-trips to
+    /// coreaudiod — one to list process objects, then two per process — and
+    /// the very first of them makes the HAL check out an instance, load its
+    /// plug-ins and enumerate every device. Run on the main thread that is a
+    /// beachball at launch, which is exactly where it showed up: the sample
+    /// caught `tick()` inside `HALSystem::InitializeDevices()`.
+    nonisolated static func holdersOffMainThread() async -> [MicHolder] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(returning: snapshotHoldersSynchronously())
+            }
+        }
+    }
+
+    /// Synchronous read. Only for the one-shot check when a recording is
+    /// started by hand — never on a timer, and never during launch.
     func snapshotHolders() -> [MicHolder] {
+        let holders = Self.snapshotHoldersSynchronously()
+        logHolderChange(holders)
+        return holders
+    }
+
+    nonisolated static func snapshotHoldersSynchronously() -> [MicHolder] {
         let myPID = getpid()
         var listAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
@@ -318,7 +357,6 @@ final class MeetingDetectionService {
             ))
         }
 
-        logHolderChange(holders)
         return holders
     }
 

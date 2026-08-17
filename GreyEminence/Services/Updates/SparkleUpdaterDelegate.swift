@@ -77,6 +77,7 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
         return false
         #else
         Self.log("updaterMayCheckForUpdates -> true")
+        Self.announce("Checking for updates…")
         return true
         #endif
     }
@@ -93,10 +94,12 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
 
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         Self.log("Found valid update — \(Self.describe(item))")
+        Self.announce("Update available: \(item.displayVersionString)")
     }
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
         Self.log("No update available")
+        Self.announce("Up to date")
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didDownloadUpdate item: SUAppcastItem) {
@@ -152,5 +155,15 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
 
     func standardUserDriverDidShowModalAlert() {
         Self.log("UserDriver: did show modal alert")
+    }
+
+    /// Surface an update-check phase in the footer bar.
+    ///
+    /// Sparkle's delegate callbacks are nonisolated and can arrive on any
+    /// thread, so this hops to the main actor.
+    nonisolated private static func announce(_ label: String) {
+        Task { @MainActor in
+            TransientActivityCoordinator.shared.flash(label)
+        }
     }
 }
