@@ -75,6 +75,16 @@ enum ReportModelBuilder {
     /// Summaries are stored as JSON `[SummarySection]` by the current
     /// analysis pipeline, but older meetings hold a flat markdown string.
     /// Those still deserve a report, so they become one untitled section.
+    /// Section ids and titles, without doing any of the expensive work.
+    ///
+    /// The export picker lists these, and the ids it hands back index into
+    /// the model the builder produces — so both must come from one place or a
+    /// legacy flat-string summary would be numbered differently in the picker
+    /// than in the report. Reads no images, so it is cheap enough for a view.
+    static func sectionTitles(for meeting: Meeting) -> [(id: Int, title: String)] {
+        sections(from: meeting.latestInsight).map { ($0.id, $0.title) }
+    }
+
     private static func sections(from insight: MeetingInsight?) -> [ReportModel.Section] {
         guard let summary = insight?.summary,
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

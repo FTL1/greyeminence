@@ -25,13 +25,11 @@ enum ReportExportService {
     /// Build and save a PDF for `meeting`. Returns the chosen URL, or nil if
     /// the user cancelled the save panel.
     @discardableResult
-    /// `figuresAtEnd` overrides the template's own preference when the user
-    /// has expressed one; nil keeps whatever the template asks for.
     static func exportPDF(
         for meeting: Meeting,
-        template: ReportTemplate = ReportTemplateCatalog.plain,
-        figuresAtEnd: Bool? = nil
+        options: ReportExportOptions
     ) async throws -> URL? {
+        let template = options.template
         var report = ReportModelBuilder.build(
             from: meeting,
             includeTranscript: template.includesTranscript
@@ -46,7 +44,7 @@ enum ReportExportService {
             if let plan = await anchorPlan(for: meeting, report: report) {
                 report = report.applyingAnchors(
                     plan,
-                    figuresAtEnd: figuresAtEnd ?? template.figuresAtEnd,
+                    figuresAtEnd: template.figuresAtEnd,
                     keepsUnpicked: template.includesUnpickedFigures
                 )
             } else {
@@ -57,6 +55,10 @@ enum ReportExportService {
                 report = report.keepingBestFigures(limit: Self.unplannedFigureLimit)
             }
         }
+
+        // Last, so the anchoring above still sees the full section list its
+        // cached plan was computed against.
+        report = report.keepingSections(options.sectionIDs)
 
         let html = ReportHTMLRenderer.render(report, template: template)
         try await ReportPDFRenderer.writePDF(html: html, to: destination)

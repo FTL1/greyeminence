@@ -45,7 +45,8 @@ struct RecordingView: View {
                     shareObservations: viewModel.screenObservationLog,
                     isCapturingShare: {
                         if case .capturing = viewModel.screenCaptureState { true } else { false }
-                    }()
+                    }(),
+                    meeting: viewModel.currentMeeting
                 )
             }
 

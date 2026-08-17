@@ -4,6 +4,55 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.29.3 — 2026-08-17
+
+**Cancelled meetings no longer appear**
+- A called-off meeting still showed up in "Which meeting are you
+  recording?". Cancelled events are now dropped from both calendar
+  sources, which also stops them being auto-linked to a recording or
+  used for meeting prep.
+- Detection covers both ways a cancellation arrives: the event's own
+  status, and the "Canceled: …" title Exchange and Outlook substitute
+  when they deliver a cancellation without changing the status the app
+  can read — which is the case that was getting through.
+
+## 0.29.2 — 2026-08-17
+
+**Screenshots now appear while you're recording**
+- The shared-screen thumbnails only ever showed on a finished meeting's
+  page. During a recording you got a text list of what the AI had seen
+  and no pictures. The recording view now shows the same screenshot strip
+  as the meeting details page, filling in as frames are captured. The
+  text list remains for the gap between a share starting and its first
+  frame landing.
+
+## 0.29.1 — 2026-08-14
+
+**Fixed: the beachball on launch**
+- Meeting auto-detection polls Core Audio to see which apps hold the
+  microphone, and it was doing that on the main thread. The first poll
+  after launch makes Core Audio load its plug-ins and enumerate every
+  audio device, which is slow enough to freeze the window — so the app
+  beachballed on startup and stuttered every five seconds afterwards.
+  The poll now runs off the main thread.
+
+**The status bar says what launch is doing**
+- Checking for an interrupted recording, checking interviews and checking
+  screen-share frames now name themselves in the footer the way startup
+  maintenance already did. Update checks appear there too — "Checking for
+  updates…", then whether one was found.
+
+## 0.29.0 — 2026-08-14
+
+**Choose what goes into a report**
+- Export PDF now opens a sheet listing the summary's sections with a
+  checkbox each, so you can leave parts out. Everything starts ticked.
+- Action items, open questions, shared screens and the full transcript are
+  separate switches, and only appear when the meeting actually has them.
+  The transcript stays off unless you ask for it — it adds many pages.
+- The template and screenshot placement pickers moved into the same sheet,
+  with the template's description shown under it.
+
 ## 0.28.4 — 2026-08-13
 
 **Fixed: the release build failed to compile**

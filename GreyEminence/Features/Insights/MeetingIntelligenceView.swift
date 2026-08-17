@@ -14,11 +14,7 @@ struct MeetingIntelligenceView: View {
     @State private var reanalyzeSharesTrigger = false
     @State private var isExportingReport = false
     @State private var exportError: String?
-    @AppStorage("reportTemplateID") private var reportTemplateID = ReportTemplateCatalog.plain.id
-    /// Screenshots collected at the end and cross-linked, or set inline with
-    /// the summary. Inline reads better when the pictures are good; at the
-    /// end keeps the prose continuous and is what makes the links useful.
-    @AppStorage("reportFiguresAtEnd") private var reportFiguresAtEnd = true
+    @State private var showExportSheet = false
 
     var body: some View {
         ScrollView {
@@ -51,38 +47,15 @@ struct MeetingIntelligenceView: View {
                                     .foregroundStyle(.secondary)
                             }
                         } else {
-                            // Click exports with the last-used template; the
-                            // arrow picks a different one — the same shape as
-                            // the Reanalyze control beside it.
-                            Menu {
-                                Picker("Template", selection: $reportTemplateID) {
-                                    ForEach(ReportTemplateCatalog.all) { template in
-                                        // The code is in the filename, so
-                                        // showing it here tells you which
-                                        // file on disk came from which theme.
-                                        Text("\(template.name)  (\(template.code))").tag(template.id)
-                                    }
-                                }
-                                .pickerStyle(.inline)
-                                Divider()
-                                Picker("Screenshots", selection: $reportFiguresAtEnd) {
-                                    Text("Collected at the end").tag(true)
-                                    Text("Inline with the summary").tag(false)
-                                }
-                                .pickerStyle(.inline)
-                                Divider()
-                                Text(ReportTemplateCatalog.template(id: reportTemplateID).summary)
+                            Button {
+                                showExportSheet = true
                             } label: {
                                 Label("Export PDF", systemImage: "doc.richtext")
                                     .font(.caption)
-                            } primaryAction: {
-                                exportReport()
                             }
-                            .menuStyle(.button)
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .fixedSize()
-                            .help("Click: export as \(ReportTemplateCatalog.template(id: reportTemplateID).name). Arrow: choose a template.")
+                            .help("Choose what to include, then export as a PDF report")
                         }
                     }
 
@@ -201,21 +174,21 @@ struct MeetingIntelligenceView: View {
             }
             .padding(.vertical)
         }
+        .sheet(isPresented: $showExportSheet) {
+            ReportExportSheet(meeting: meeting) { options in
+                exportReport(options)
+            }
+        }
     }
 
-    private func exportReport() {
+    private func exportReport(_ options: ReportExportOptions) {
         guard !isExportingReport else { return }
         isExportingReport = true
         exportError = nil
         Task { @MainActor in
             defer { isExportingReport = false }
             do {
-                let template = ReportTemplateCatalog.template(id: reportTemplateID)
-                if let url = try await ReportExportService.exportPDF(
-                    for: meeting,
-                    template: template,
-                    figuresAtEnd: reportFiguresAtEnd
-                ) {
+                if let url = try await ReportExportService.exportPDF(for: meeting, options: options) {
                     // Reveal rather than open: the user almost always wants to
                     // attach or send the file next, not read it in Preview.
                     NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -392,6 +365,11 @@ struct LiveMeetingIntelligenceView: View {
     var aiActivityState: RecordingViewModel.AIActivityState = .idle
     var shareObservations: [ScreenFrameAnalysisService.FrameObservation] = []
     var isCapturingShare: Bool = false
+    /// The in-progress meeting, when there is one. Everything else here is a
+    /// plain value; this is needed because the screenshot player reads frames
+    /// from the model, and without it a live recording could only ever show
+    /// the observations as text.
+    var meeting: Meeting?
 
     private var hasResults: Bool {
         !summary.isEmpty || !actionItems.isEmpty
@@ -447,7 +425,15 @@ struct LiveMeetingIntelligenceView: View {
                     AISummarySection(summary: summary)
                 }
 
-                if !shareObservations.isEmpty {
+                // Thumbnails once frames exist; the text list is the fallback
+                // for the window between a share starting and its first frame
+                // being captured, when there is something to say but nothing
+                // to show yet.
+                if let meeting, !meeting.screenFrames.isEmpty {
+                    // No transcript sync while recording: the live view has
+                    // no playhead to drive, so the seek binding is inert.
+                    ScreenSharePlayerSection(meeting: meeting, pendingSeekTime: .constant(nil))
+                } else if !shareObservations.isEmpty {
                     LiveSharedContentSection(
                         observations: shareObservations,
                         isCapturing: isCapturingShare

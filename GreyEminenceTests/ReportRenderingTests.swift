@@ -398,6 +398,67 @@ final class ReportRenderingTests: XCTestCase {
         )
     }
 
+    // MARK: - Export options
+
+    func testOptionsApplyTheirSwitchesToTheTemplate() {
+        var options = ReportExportOptions.defaults(
+            templateID: ReportTemplateCatalog.plain.id,
+            sectionIDs: [0, 1],
+            figuresAtEnd: true
+        )
+        XCTAssertTrue(options.template.includesActionItems)
+        XCTAssertTrue(options.template.figuresAtEnd)
+
+        options.includesActionItems = false
+        options.includesTranscript = true
+        options.figuresAtEnd = false
+        XCTAssertFalse(options.template.includesActionItems)
+        XCTAssertTrue(options.template.includesTranscript)
+        XCTAssertFalse(options.template.figuresAtEnd)
+    }
+
+    /// Everything ticked by default — leaving a part out should be deliberate.
+    func testDefaultsIncludeEverythingExceptTheTranscript() {
+        let options = ReportExportOptions.defaults(
+            templateID: ReportTemplateCatalog.plain.id,
+            sectionIDs: [0, 1, 2],
+            figuresAtEnd: false
+        )
+        XCTAssertEqual(options.sectionIDs.count, 3)
+        XCTAssertTrue(options.includesActionItems)
+        XCTAssertTrue(options.includesFollowUps)
+        XCTAssertTrue(options.includesSharedScreens)
+        XCTAssertFalse(options.includesTranscript, "a transcript turns a summary into a record")
+        XCTAssertFalse(options.isEmpty)
+    }
+
+    func testEmptySelectionIsRecognized() {
+        var options = ReportExportOptions.defaults(
+            templateID: ReportTemplateCatalog.plain.id,
+            sectionIDs: [],
+            figuresAtEnd: false
+        )
+        options.includesActionItems = false
+        options.includesFollowUps = false
+        options.includesSharedScreens = false
+        XCTAssertTrue(options.isEmpty)
+    }
+
+    /// The picker and the builder must number sections identically, or a
+    /// legacy flat-string summary is ticked in one place and dropped in
+    /// another.
+    @MainActor
+    func testPickerTitlesMatchTheBuiltReportSections() {
+        let meeting = Meeting(title: "Sync", date: .now, duration: 600, status: .completed)
+        let insight = MeetingInsight(summary: "A legacy flat summary with no JSON structure at all.")
+        meeting.insights = [insight]
+
+        let titles = ReportModelBuilder.sectionTitles(for: meeting)
+        let built = ReportModelBuilder.build(from: meeting)
+        XCTAssertEqual(titles.map(\.id), built.sections.map(\.id))
+        XCTAssertEqual(titles.map(\.title), built.sections.map(\.title))
+    }
+
     // MARK: - Report title
     //
     // The report must be titled whatever the meeting is called when you
