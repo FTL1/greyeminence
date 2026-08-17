@@ -146,4 +146,24 @@ final class GraphCalendarTests: XCTestCase {
         let events = try GraphCalendarProvider.decodeEvents(from: Data(json.utf8))
         XCTAssertTrue(events.isEmpty)
     }
+
+    /// Graph reports cancellation properly, via `isCancelled` on the event.
+    func testGraphEventDecodesCancellationFlag() throws {
+        let json = """
+        {"id":"abc","subject":"Design Session","isCancelled":true}
+        """
+        let event = try JSONDecoder().decode(GraphEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.isCancelled, true)
+    }
+
+    /// The field is absent on most events, and absent must not read as
+    /// cancelled or the calendar would empty itself.
+    func testMissingCancellationFlagIsNotCancelled() throws {
+        let json = """
+        {"id":"abc","subject":"Design Session"}
+        """
+        let event = try JSONDecoder().decode(GraphEvent.self, from: Data(json.utf8))
+        XCTAssertNil(event.isCancelled)
+        XCTAssertFalse(event.isCancelled == true)
+    }
 }

@@ -81,7 +81,7 @@ final class GraphCalendarProvider {
             queryItems: [
                 .init(name: "startDateTime", value: iso.string(from: around.addingTimeInterval(-minutes * 60))),
                 .init(name: "endDateTime", value: iso.string(from: around.addingTimeInterval(minutes * 60))),
-                .init(name: "$select", value: "subject,start,end,attendees,seriesMasterId,type,isAllDay"),
+                .init(name: "$select", value: "subject,start,end,attendees,seriesMasterId,type,isAllDay,isCancelled"),
                 .init(name: "$orderby", value: "start/dateTime"),
                 .init(name: "$top", value: "50"),
             ],
@@ -144,6 +144,8 @@ final class GraphCalendarProvider {
             endDate: end,
             attendees: attendees,
             isRecurring: isRecurring,
+            isCancelled: ev.isCancelled == true
+                || CalendarEvent.titleIndicatesCancellation(ev.subject),
             source: .microsoftGraph
         )
     }
@@ -186,6 +188,7 @@ struct GraphEvent: Decodable {
     let end: GraphDateTime?
     let attendees: [GraphAttendee]?
     let isAllDay: Bool?
+    let isCancelled: Bool?
 }
 
 struct GraphDateTime: Decodable {

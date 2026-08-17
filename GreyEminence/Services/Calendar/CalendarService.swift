@@ -122,9 +122,16 @@ final class CalendarService {
             merged = deduplicate(local: merged, remote: graphEvents)
         }
 
-        return merged.sorted {
-            abs($0.startDate.timeIntervalSince(date)) < abs($1.startDate.timeIntervalSince(date))
-        }
+        // Dropped here rather than in the picker, so a called-off meeting can
+        // also never be auto-linked to a recording or fed to meeting prep.
+        // After deduplication: a cancellation that reached only one of the two
+        // stores still removes the pair, because the surviving copy is matched
+        // and dropped on its own merits.
+        return merged
+            .filter { !$0.isCancelled }
+            .sorted {
+                abs($0.startDate.timeIntervalSince(date)) < abs($1.startDate.timeIntervalSince(date))
+            }
     }
 
     /// Drop Graph events that are the same meeting as a local one (the account
@@ -212,6 +219,8 @@ final class CalendarService {
             endDate: event.endDate ?? event.startDate,
             attendees: attendeeNames(for: event),
             isRecurring: event.hasRecurrenceRules,
+            isCancelled: event.status == .canceled
+                || CalendarEvent.titleIndicatesCancellation(event.title),
             source: .eventKit
         )
     }

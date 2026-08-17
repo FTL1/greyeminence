@@ -142,4 +142,28 @@ final class CalendarAttendeeTests: XCTestCase {
         let contacts = try context.fetch(FetchDescriptor<Contact>())
         XCTAssertEqual(contacts.map(\.name), ["Sam Lee"])       // no record for me
     }
+
+    // MARK: - Cancelled events
+
+    /// Exchange and Outlook usually deliver a cancellation by retitling the
+    /// event rather than by setting a status the client can read, so the
+    /// prefix is the signal that actually fires in practice — it is what put
+    /// "Canceled: OLP AIDC Design Session" in the recording picker.
+    func testCancellationIsDetectedFromTheTitlePrefix() {
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("Canceled: OLP AIDC Design Session"))
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("Cancelled: Weekly sync"))
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("CANCELED: Shouty meeting"))
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("  Canceled: leading space"))
+    }
+
+    /// The prefix has to be a prefix. A meeting *about* cancellations, or one
+    /// that merely mentions the word, is still happening.
+    func testOrdinaryTitlesAreNotTreatedAsCancelled() {
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Agentic Checkin"))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Discuss canceled orders"))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Cancellation policy review"))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Canceled"), "no colon, no cancellation")
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation(nil))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation(""))
+    }
 }
