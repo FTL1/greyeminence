@@ -246,6 +246,67 @@ final class ReportRenderingTests: XCTestCase {
         }
     }
 
+    // MARK: - Open questions placement
+
+    /// Given the same heading treatment as the summary, open questions read
+    /// as one more of its sections. They lead the document and use the
+    /// callout styling instead.
+    func testOpenQuestionsLeadTheDocumentAndAreNotStyledAsASection() {
+        let html = ReportHTMLRenderer.render(
+            report(
+                sections: [
+                    .init(id: 0, title: "Messages vs tasks", intro: nil, points: [], figures: []),
+                    .init(id: 1, title: "Document service", intro: nil, points: [], figures: []),
+                ],
+                actionItems: [.init(text: "Ship it", assignee: nil, isCompleted: false)],
+                followUps: ["What are the reporting requirements?"]
+            ),
+            template: ReportTemplateCatalog.plain
+        )
+
+        let questions = try! XCTUnwrap(html.range(of: "id=\"ge-followups\""))
+        let firstSection = try! XCTUnwrap(html.range(of: "id=\"\(ReportHTMLRenderer.sectionAnchor(0))\""))
+        let actions = try! XCTUnwrap(html.range(of: "id=\"ge-actions\""))
+
+        XCTAssertLessThan(questions.lowerBound, firstSection.lowerBound, "open questions should come before the summary")
+        XCTAssertLessThan(firstSection.lowerBound, actions.lowerBound, "action items should still come last")
+
+        XCTAssertTrue(html.contains("<section class=\"ge-callout ge-followups\""))
+        XCTAssertTrue(html.contains("<h2 class=\"ge-callout-title\">Open questions</h2>"))
+        XCTAssertFalse(
+            html.contains("ge-section ge-followups"),
+            "reusing the section class is what made it look like part of the summary"
+        )
+    }
+
+    /// The contents list has to follow document order or it misdirects.
+    func testContentsListsOpenQuestionsFirst() {
+        var template = ReportTemplateCatalog.plain
+        template.includesTableOfContents = true
+        let html = ReportHTMLRenderer.render(
+            report(
+                sections: [.init(id: 0, title: "Messages vs tasks", intro: nil, points: [], figures: [])],
+                followUps: ["A question?"]
+            ),
+            template: template
+        )
+        // Anchor on the markup: the stylesheet also contains "ge-toc-list",
+        // and matching that would start the window inside the CSS.
+        let toc = String(html[html.range(of: "<ol class=\"ge-toc-list\">")!.lowerBound...].prefix(400))
+        let questions = try! XCTUnwrap(toc.range(of: "Open questions"))
+        let section = try! XCTUnwrap(toc.range(of: "Messages vs tasks"))
+        XCTAssertLessThan(questions.lowerBound, section.lowerBound)
+    }
+
+    func testEveryTemplateStylesTheCallout() {
+        for template in ReportTemplateCatalog.all {
+            XCTAssertTrue(
+                template.css.contains(".ge-callout-title"),
+                "\(template.id) leaves open questions unstyled, so they fall back to looking like body text"
+            )
+        }
+    }
+
     // MARK: - Table of contents
 
     func testTableOfContentsListsEverySectionAndBlock() {

@@ -4,6 +4,14 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.30.1 — 2026-08-20
+
+**Open questions lead the report, and look like a callout**
+- They used the same heading treatment as the summary, so they read as one
+  more of its sections. They now sit above the summary in a bordered
+  callout with its own label — what is still unresolved is what a reader
+  most needs first. The contents list follows the new order.
+
 ## 0.30.0 — 2026-08-20
 
 **Copying a summary now pastes properly into Teams**

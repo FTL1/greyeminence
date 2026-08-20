@@ -38,6 +38,14 @@ enum ReportHTMLRenderer {
             body.append(tableOfContentsHTML(report, template: template))
         }
 
+        // Ahead of the summary, and styled as a callout rather than a
+        // section: what is still unresolved is what a reader most needs, and
+        // given the same heading treatment as the summary it read as one more
+        // of its sections.
+        if template.includesFollowUps, !report.followUpQuestions.isEmpty {
+            body.append(followUpsHTML(report.followUpQuestions))
+        }
+
         for section in report.sections {
             body.append(sectionHTML(
                 section,
@@ -49,10 +57,6 @@ enum ReportHTMLRenderer {
 
         if template.includesActionItems, !report.actionItems.isEmpty {
             body.append(actionItemsHTML(report.actionItems))
-        }
-
-        if template.includesFollowUps, !report.followUpQuestions.isEmpty {
-            body.append(followUpsHTML(report.followUpQuestions))
         }
 
         if template.includesShareAppendix {
@@ -133,11 +137,11 @@ enum ReportHTMLRenderer {
         var entries: [(anchor: String, title: String)] = report.sections.map {
             (sectionAnchor($0.id), $0.title)
         }
+        if template.includesFollowUps, !report.followUpQuestions.isEmpty {
+            entries.insert(("ge-followups", "Open questions"), at: 0)
+        }
         if template.includesActionItems, !report.actionItems.isEmpty {
             entries.append(("ge-actions", "Action items"))
-        }
-        if template.includesFollowUps, !report.followUpQuestions.isEmpty {
-            entries.append(("ge-followups", "Open questions"))
         }
         if template.includesShareAppendix,
            report.shareSessions.contains(where: { !$0.narrative.isEmpty || !$0.figures.isEmpty }) {
@@ -275,8 +279,8 @@ enum ReportHTMLRenderer {
     private static func followUpsHTML(_ questions: [String]) -> String {
         let items = questions.map { "<li class=\"ge-followup\">\(escape($0))</li>" }
         return """
-        <section class="ge-section ge-followups" id="ge-followups">
-        <h2 class="ge-section-title">Open questions</h2>
+        <section class="ge-callout ge-followups" id="ge-followups">
+        <h2 class="ge-callout-title">Open questions</h2>
         <ul class="ge-followup-list">\(items.joined())</ul>
         </section>
         """
