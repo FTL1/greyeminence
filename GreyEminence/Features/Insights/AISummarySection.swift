@@ -37,7 +37,11 @@ struct AISummarySection: View {
                 .buttonStyle(.plain)
 
                 if !summary.isEmpty {
-                    CopyButton(label: "Copy", help: "Copy the full summary") { plainText(from: summary) }
+                    CopyButton(
+                        label: "Copy",
+                        help: "Copy the full summary",
+                        html: { htmlText(from: summary) }
+                    ) { plainText(from: summary) }
                 }
             }
 
@@ -59,14 +63,17 @@ struct AISummarySection: View {
 
     private func plainText(from raw: String) -> String {
         guard let sections = SummarySection.parse(raw) else { return raw }
-        return sections.enumerated().map { idx, section in
-            var lines = ["\(idx + 1). \(section.title)"]
-            if let intro = section.intro { lines.append(intro) }
-            for point in section.points {
-                lines.append("  • \(point.label): \(point.detail)")
-            }
-            return lines.joined(separator: "\n")
-        }.joined(separator: "\n\n")
+        return RichClipboard.summaryPlainText(sections)
+    }
+
+    /// Rich flavour for the same content. A legacy flat-string summary has no
+    /// structure to mark up, so it is escaped and sent as one paragraph
+    /// rather than being dressed in headings it does not have.
+    private func htmlText(from raw: String) -> String {
+        guard let sections = SummarySection.parse(raw) else {
+            return "<p>\(RichClipboard.escape(raw))</p>"
+        }
+        return RichClipboard.summaryHTML(sections)
     }
 }
 
@@ -112,7 +119,9 @@ private struct SectionCard: View {
                 Spacer()
 
                 if isHovered {
-                    CopyButton(label: nil) { sectionPlainText() }
+                    CopyButton(label: nil, html: { RichClipboard.summaryHTML([section]) }) {
+                        sectionPlainText()
+                    }
                         .transition(.opacity)
                 }
 

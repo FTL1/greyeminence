@@ -6,6 +6,10 @@ import AppKit
 /// icon; omit it for icon-only.
 struct CopyButton: View {
     let content: () -> String
+    /// Optional HTML flavour, written alongside the plain text so apps that
+    /// accept rich paste (Teams, Slack, Outlook) render structure rather than
+    /// showing the bullet and numbering characters literally.
+    var html: (() -> String)? = nil
     var label: String? = nil
     var help: String? = nil
     var font: Font = .caption
@@ -29,9 +33,11 @@ struct CopyButton: View {
         label: String? = nil,
         help: String? = nil,
         font: Font = .caption,
+        html: (() -> String)? = nil,
         content: @escaping () -> String
     ) {
         self.content = content
+        self.html = html
         self.label = label
         self.help = help
         self.font = font
@@ -39,8 +45,12 @@ struct CopyButton: View {
 
     var body: some View {
         Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(content(), forType: .string)
+            if let html {
+                RichClipboard.copy(plain: content(), html: html())
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(content(), forType: .string)
+            }
             withAnimation { copied = true }
             resetTask?.cancel()
             resetTask = Task {

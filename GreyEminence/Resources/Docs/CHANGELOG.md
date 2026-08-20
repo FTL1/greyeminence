@@ -4,6 +4,17 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.30.0 — 2026-08-20
+
+**Copying a summary now pastes properly into Teams**
+- Copy put plain text on the clipboard, so a summary pasted into Teams
+  arrived as a wall of lines where "1." was just a digit and "•" just a
+  bullet character — no headings, no list, no emphasis. Copy now carries a
+  formatted version alongside the plain one, so Teams, Slack, Outlook and
+  Notes render numbered bold headings and real bullet lists. Anywhere that
+  only takes plain text still gets the same readable text as before.
+- The per-section copy button does the same for a single section.
+
 ## 0.29.3 — 2026-08-17
 
 **Cancelled meetings no longer appear**
