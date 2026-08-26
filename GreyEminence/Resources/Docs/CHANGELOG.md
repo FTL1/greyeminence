@@ -28,6 +28,27 @@ full detail; older ones are summarized. The version number tracks
 - Your previous Ask history is converted into single-question
   conversations, so nothing is lost.
 
+**Search can now use a real embedding model**
+- Settings → Ask has a Method picker. On-device stays the default; the new
+  option is Amazon Titan Text Embeddings V2, running over Bedrock on the
+  AWS credentials the app already uses for analysis. Apple's on-device
+  embedding averages word vectors, so a question that paraphrases what
+  was said — "couldn't process due to costs" against "there's no way we
+  can turn this on" — has little to match on. A real sentence encoder
+  does.
+- Meeting text stays inside the same AWS account that already runs the
+  analysis. A dedicated embedding vendor scored higher in benchmarks and
+  its free tier would have covered this index outright, but it would have
+  meant sending transcripts to a third party, so it is deliberately not
+  offered.
+- Switching methods empties the search until the index is rebuilt —
+  vectors from different models can't be compared. The picker now says so
+  at the moment you switch, shows how much of the index the selected
+  method has actually produced, and offers to rebuild on the spot.
+- Rebuilding used to run one item at a time, which for an index this size
+  meant the better part of an hour over a network. It now runs several at
+  once, and embedding tokens are recorded in the AI usage ledger.
+
 **A person's name now filters the search instead of skewing it**
 - Asking "what did Stephen Smith say about X" used to return the
   passages where somebody *said* Stephen's name, not the ones where he

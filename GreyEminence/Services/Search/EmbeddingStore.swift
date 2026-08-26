@@ -167,6 +167,16 @@ final class EmbeddingStore {
         (try? context.fetchCount(FetchDescriptor<EmbeddingRecord>())) ?? 0
     }
 
+    /// Records produced by one embedding model. The total on its own hides a
+    /// half-migrated index: after switching methods the store can be full and
+    /// the search still find nothing.
+    func count(forModel modelIdentifier: String) -> Int {
+        let descriptor = FetchDescriptor<EmbeddingRecord>(
+            predicate: #Predicate { $0.modelIdentifier == modelIdentifier }
+        )
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
     /// Quick coverage check used by the header bar to decide whether to show
     /// the "Index this meeting" affordance, and by the backfill scan.
     func recordCount(forMeetingID meetingID: UUID) -> Int {

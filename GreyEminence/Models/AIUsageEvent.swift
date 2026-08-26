@@ -15,6 +15,9 @@ enum AIUsagePurpose: String, Codable, Sendable, CaseIterable {
     case reportFigureAnchors
     case reanalysis
     case ask
+    /// Building search vectors. Free on-device; billed per token on Bedrock,
+    /// which is the whole reason it needs a line in the ledger.
+    case embedding
     case interview
     case prep
     case other
@@ -29,6 +32,7 @@ enum AIUsagePurpose: String, Codable, Sendable, CaseIterable {
         case .reportFigureAnchors: "Report figures"
         case .reanalysis: "Reanalysis"
         case .ask: "Ask"
+        case .embedding: "Search index"
         case .interview: "Interview"
         case .prep: "Meeting prep"
         case .other: "Other"
@@ -41,7 +45,7 @@ enum AIUsagePurpose: String, Codable, Sendable, CaseIterable {
         case .transcriptFinal, .reanalysis: .finalAnalysis
         case .frameAnalysis, .sessionSynthesis: .screenShare
         case .reportFigureAnchors: .reports
-        case .ask, .interview, .prep, .other: .other
+        case .ask, .embedding, .interview, .prep, .other: .other
         }
     }
 }

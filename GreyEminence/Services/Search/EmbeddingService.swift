@@ -5,6 +5,54 @@ protocol EmbeddingService: Sendable {
     var modelIdentifier: String { get }
     var isAvailable: Bool { get }
     func embed(_ text: String) async -> [Float]?
+
+    /// How many `embed` calls may be in flight at once. On-device embedding
+    /// is CPU-bound and must be serialized; a network provider is latency-
+    /// bound and a full reindex is unusable without concurrency — 34,000
+    /// sequential round trips is the better part of an hour.
+    var maxConcurrency: Int { get }
+
+    /// Embed many texts, honouring `maxConcurrency`. Results are positional:
+    /// index i is the vector for texts[i], or nil if that one failed.
+    func embedAll(_ texts: [String]) async -> [[Float]?]
+}
+
+extension EmbeddingService {
+    var maxConcurrency: Int { 1 }
+
+    func embedAll(_ texts: [String]) async -> [[Float]?] {
+        guard maxConcurrency > 1 else {
+            var results: [[Float]?] = []
+            results.reserveCapacity(texts.count)
+            for text in texts {
+                results.append(await embed(text))
+            }
+            return results
+        }
+
+        // Bounded fan-out: seed the group to the concurrency limit, then feed
+        // one more in as each finishes. A group of 34,000 child tasks would
+        // queue every request up front and lose the back-pressure.
+        var results = [[Float]?](repeating: nil, count: texts.count)
+        await withTaskGroup(of: (Int, [Float]?).self) { group in
+            var next = 0
+            let limit = min(maxConcurrency, texts.count)
+            while next < limit {
+                let index = next
+                group.addTask { (index, await self.embed(texts[index])) }
+                next += 1
+            }
+            while let (index, vector) = await group.next() {
+                results[index] = vector
+                if next < texts.count {
+                    let index = next
+                    group.addTask { (index, await self.embed(texts[index])) }
+                    next += 1
+                }
+            }
+        }
+        return results
+    }
 }
 
 /// Apple's built-in sentence embedding. Offline, free, ~300-dim vectors.
@@ -47,24 +95,4 @@ final class NLEmbeddingService: EmbeddingService, @unchecked Sendable {
         defer { embeddingLock.unlock() }
         return embedding.vector(for: text)
     }
-}
-
-/// TODO: Voyage AI embeddings.
-/// - Endpoint: https://api.voyageai.com/v1/embeddings
-/// - Recommended model: voyage-3 (1024 dims)
-/// - API key in Keychain under "voyageAPIKey"
-/// - Anthropic recommends Voyage for RAG with Claude.
-final class VoyageEmbeddingService: EmbeddingService, @unchecked Sendable {
-    let modelIdentifier = "voyage-3"
-    var isAvailable: Bool { false }
-    func embed(_ text: String) async -> [Float]? { nil }
-}
-
-/// TODO: AWS Bedrock Titan Text Embeddings V2.
-/// - Model id: amazon.titan-embed-text-v2:0 (configurable 256/512/1024 dims)
-/// - Reuses existing AWS SSO credentials from `AWSCredentialLoader`.
-final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
-    let modelIdentifier = "amazon.titan-embed-text-v2:0"
-    var isAvailable: Bool { false }
-    func embed(_ text: String) async -> [Float]? { nil }
 }

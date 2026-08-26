@@ -12,24 +12,65 @@ struct AskSettingsView: View {
     @State private var reindexDone = 0
     @State private var isReindexing = false
     @State private var embeddingCount = 0
+    @State private var coverage = Coverage(indexed: 0, total: 0)
+    @State private var showReindexPrompt = false
+    @State private var previousProviderRaw: String?
+
+    private var provider: EmbeddingProvider {
+        EmbeddingProvider(rawValue: embeddingProviderRaw) ?? .nlEmbedding
+    }
+
+    /// How much of the index the *currently selected* method has produced.
+    /// The headline count includes records from every method ever used, so on
+    /// its own it hides exactly the problem this pane needs to show.
+    struct Coverage {
+        let indexed: Int
+        let total: Int
+
+        var label: String {
+            total == 0 ? "\(indexed)" : "\(indexed) of \(total)"
+        }
+    }
 
     var body: some View {
         Form {
             Section {
-                Picker("Provider", selection: $embeddingProviderRaw) {
-                    ForEach(EmbeddingProvider.allCases) { provider in
-                        Text(provider.label).tag(provider.rawValue)
+                Picker("Method", selection: $embeddingProviderRaw) {
+                    ForEach(EmbeddingProvider.allCases) { option in
+                        Text(option.label)
+                            .tag(option.rawValue)
                     }
                 }
-                if let provider = EmbeddingProvider(rawValue: embeddingProviderRaw), !provider.isAvailable {
-                    Text("This provider isn't implemented yet — falling back to on-device for searches.")
+                .onChange(of: embeddingProviderRaw) { previous, _ in
+                    // Vectors from different models aren't comparable, and a
+                    // search only consults records embedded by the current
+                    // one — so until the index is rebuilt, Ask finds nothing.
+                    // Say so at the moment of the switch rather than letting
+                    // it look like the search broke.
+                    previousProviderRaw = previous
+                    coverage = currentModelCoverage()
+                    showReindexPrompt = coverage.indexed == 0
+                }
+
+                Text(provider.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if !provider.isAvailable {
+                    Label(provider.unavailableReason, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+
                 LabeledContent("Indexed items") {
                     Text("\(embeddingCount)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                }
+                LabeledContent("Indexed with this method") {
+                    Text(coverage.label)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(coverage.indexed == 0 ? .orange : .secondary)
                 }
                 LabeledContent("Last reindex") {
                     Text(lastReindexAt > 0
@@ -123,7 +164,42 @@ struct AskSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { embeddingCount = EmbeddingStore.shared?.count() ?? 0 }
+        .onAppear {
+            embeddingCount = EmbeddingStore.shared?.count() ?? 0
+            coverage = currentModelCoverage()
+        }
+        .alert("Rebuild the search index?", isPresented: $showReindexPrompt) {
+            Button("Rebuild now") {
+                Task { await reindexAll() }
+            }
+            Button("Switch back", role: .cancel) {
+                if let previousProviderRaw { embeddingProviderRaw = previousProviderRaw }
+                coverage = currentModelCoverage()
+            }
+            Button("Later", role: .destructive) {}
+        } message: {
+            Text("\(provider.shortLabel) hasn't indexed anything yet, and Ask only searches what the selected method produced — until it's rebuilt, questions will come back empty.\n\n\(rebuildEstimate)")
+        }
+    }
+
+    /// What rebuilding actually entails, in the terms someone deciding would
+    /// want: how long, and whether it costs money.
+    private var rebuildEstimate: String {
+        switch provider {
+        case .nlEmbedding:
+            "Runs on-device: no network, no cost, a few minutes."
+        case .titan:
+            "Runs through Bedrock on your existing AWS credentials. Roughly 5.4M tokens for a full index — cents at Titan's rate — and a handful of minutes."
+        case .voyage:
+            "Not available."
+        }
+    }
+
+    private func currentModelCoverage() -> Coverage {
+        guard let store = EmbeddingStore.shared else { return Coverage(indexed: 0, total: 0) }
+        let total = store.count()
+        let identifier = provider.makeService().modelIdentifier
+        return Coverage(indexed: store.count(forModel: identifier), total: total)
     }
 
     @State private var isMaintaining = false
@@ -161,6 +237,7 @@ struct AskSettingsView: View {
         defer {
             isReindexing = false
             embeddingCount = store.count()
+            coverage = currentModelCoverage()
         }
         let indexer = EmbeddingIndexer(store: store, service: service)
         await indexer.reindexAll(mainContext: modelContext) { done, total in

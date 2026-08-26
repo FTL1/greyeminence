@@ -14,6 +14,18 @@ final class EmbeddingIndexer {
         self.service = service
     }
 
+    /// One thing to embed, resolved before any network call happens.
+    private struct WorkItem {
+        let id: String
+        let sourceID: UUID
+        let kind: EmbeddingRecord.SourceKind
+        /// Text sent to the embedding model — may carry a meeting-title
+        /// prefix the display text doesn't.
+        let embeddingText: String
+        /// Text stored on the record and shown to the user.
+        let displayText: String
+    }
+
     /// Embed everything in a single meeting. Writes one SwiftData save at the end.
     func indexMeeting(_ meeting: Meeting) async {
         guard service.isAvailable else { return }
@@ -24,111 +36,108 @@ final class EmbeddingIndexer {
         // `service.embed(...)`. After resumption, accessing tombstoned
         // SwiftData properties is at best lossy and at worst a crash.
         let snapshot = MeetingSnapshot(meeting: meeting)
+        let items = Self.workItems(for: snapshot)
+        guard !items.isEmpty else { return }
 
-        for chunk in Self.buildTranscriptChunks(segments: snapshot.segments, meetingTitle: snapshot.title) {
-            guard let vec = await service.embed(chunk.embeddingText) else { continue }
-            let record = EmbeddingRecord(
-                id: "chunk:\(chunk.firstSegmentID)",
-                sourceID: chunk.firstSegmentID,
-                sourceKind: .transcriptSegment,
-                meetingID: snapshot.id,
-                meetingTitle: snapshot.title,
-                meetingDate: snapshot.date,
-                text: chunk.displayText,
-                vector: vec,
-                modelIdentifier: service.modelIdentifier
-            )
-            store.upsert(record)
-        }
-
-        for action in snapshot.actionItems {
-            guard let vec = await service.embed(action.text) else { continue }
-            let record = EmbeddingRecord(
-                id: "action:\(action.id)",
-                sourceID: action.id,
-                sourceKind: .actionItem,
-                meetingID: snapshot.id,
-                meetingTitle: snapshot.title,
-                meetingDate: snapshot.date,
-                text: action.text,
-                vector: vec,
-                modelIdentifier: service.modelIdentifier
-            )
-            store.upsert(record)
-        }
-
-        for insight in snapshot.insights {
-            if !insight.summary.isEmpty, let vec = await service.embed(insight.summary) {
-                let record = EmbeddingRecord(
-                    id: "summary:\(insight.id)",
-                    sourceID: insight.id,
-                    sourceKind: .meetingSummary,
-                    meetingID: snapshot.id,
-                    meetingTitle: snapshot.title,
-                    meetingDate: snapshot.date,
-                    text: insight.summary,
-                    vector: vec,
-                    modelIdentifier: service.modelIdentifier
-                )
-                store.upsert(record)
-            }
-            for (i, question) in insight.followUpQuestions.enumerated() {
-                guard let vec = await service.embed(question) else { continue }
-                let record = EmbeddingRecord(
-                    id: "followup:\(insight.id):\(i)",
-                    sourceID: insight.id,
-                    sourceKind: .followUpQuestion,
-                    meetingID: snapshot.id,
-                    meetingTitle: snapshot.title,
-                    meetingDate: snapshot.date,
-                    text: question,
-                    vector: vec,
-                    modelIdentifier: service.modelIdentifier
-                )
-                store.upsert(record)
-            }
-        }
+        // One batched call so a network-backed provider can fan out. The
+        // on-device provider still runs these strictly serially — its
+        // framework aborts the process under concurrent access.
+        let vectors = await service.embedAll(items.map(\.embeddingText))
 
         var indexedFrames = 0
-        for frame in snapshot.screenFrames {
-            guard let text = Self.frameEmbeddingText(observation: frame.observation, ocrText: frame.ocrText) else { continue }
-            guard let vec = await service.embed("Meeting: \(snapshot.title) — screen share\n\(text)") else { continue }
-            let record = EmbeddingRecord(
-                id: "frame:\(frame.id)",
-                sourceID: frame.id,
-                sourceKind: .screenObservation,
+        for (item, vector) in zip(items, vectors) {
+            guard let vector else { continue }
+            store.upsert(EmbeddingRecord(
+                id: item.id,
+                sourceID: item.sourceID,
+                sourceKind: item.kind,
                 meetingID: snapshot.id,
                 meetingTitle: snapshot.title,
                 meetingDate: snapshot.date,
-                text: text,
-                vector: vec,
+                text: item.displayText,
+                vector: vector,
                 modelIdentifier: service.modelIdentifier
-            )
-            store.upsert(record)
-            indexedFrames += 1
+            ))
+            if item.kind == .screenObservation { indexedFrames += 1 }
         }
         if !snapshot.screenFrames.isEmpty {
             LogManager.send("Indexed \(indexedFrames)/\(snapshot.screenFrames.count) screen frame(s) for search", category: .screen, meetingID: snapshot.id)
         }
 
-        for summary in snapshot.sessionSummaries {
-            guard !summary.narrative.isEmpty,
-                  let vec = await service.embed("Meeting: \(snapshot.title) — screen share recap\n\(summary.narrative)") else { continue }
-            let record = EmbeddingRecord(
-                id: "sessionSummary:\(summary.sessionID.uuidString)",
-                sourceID: summary.sessionID,
-                sourceKind: .sessionNarrative,
-                meetingID: snapshot.id,
-                meetingTitle: snapshot.title,
-                meetingDate: snapshot.date,
-                text: summary.narrative,
-                vector: vec,
-                modelIdentifier: service.modelIdentifier
-            )
-            store.upsert(record)
+        store.save()
+    }
+
+    /// Everything in a meeting that gets a vector, in one flat list.
+    ///
+    /// Pure and snapshot-driven so the whole set can be handed to the provider
+    /// at once — which is what lets a network provider run them concurrently
+    /// instead of 34,000 sequential round trips.
+    private static func workItems(for snapshot: MeetingSnapshot) -> [WorkItem] {
+        var items: [WorkItem] = []
+
+        for chunk in buildTranscriptChunks(segments: snapshot.segments, meetingTitle: snapshot.title) {
+            items.append(WorkItem(
+                id: "chunk:\(chunk.firstSegmentID)",
+                sourceID: chunk.firstSegmentID,
+                kind: .transcriptSegment,
+                embeddingText: chunk.embeddingText,
+                displayText: chunk.displayText
+            ))
         }
 
-        store.save()
+        for action in snapshot.actionItems {
+            items.append(WorkItem(
+                id: "action:\(action.id)",
+                sourceID: action.id,
+                kind: .actionItem,
+                embeddingText: action.text,
+                displayText: action.text
+            ))
+        }
+
+        for insight in snapshot.insights {
+            if !insight.summary.isEmpty {
+                items.append(WorkItem(
+                    id: "summary:\(insight.id)",
+                    sourceID: insight.id,
+                    kind: .meetingSummary,
+                    embeddingText: insight.summary,
+                    displayText: insight.summary
+                ))
+            }
+            for (i, question) in insight.followUpQuestions.enumerated() {
+                items.append(WorkItem(
+                    id: "followup:\(insight.id):\(i)",
+                    sourceID: insight.id,
+                    kind: .followUpQuestion,
+                    embeddingText: question,
+                    displayText: question
+                ))
+            }
+        }
+
+        for frame in snapshot.screenFrames {
+            guard let text = frameEmbeddingText(observation: frame.observation, ocrText: frame.ocrText) else { continue }
+            items.append(WorkItem(
+                id: "frame:\(frame.id)",
+                sourceID: frame.id,
+                kind: .screenObservation,
+                embeddingText: "Meeting: \(snapshot.title) — screen share\n\(text)",
+                displayText: text
+            ))
+        }
+
+        for summary in snapshot.sessionSummaries where !summary.narrative.isEmpty {
+            items.append(WorkItem(
+                id: "sessionSummary:\(summary.sessionID.uuidString)",
+                sourceID: summary.sessionID,
+                kind: .sessionNarrative,
+                embeddingText: "Meeting: \(snapshot.title) — screen share recap\n\(summary.narrative)",
+                displayText: summary.narrative
+            ))
+        }
+
+        return items
     }
 
     /// What gets embedded for a frame: the observation (semantics) plus an
@@ -147,7 +156,7 @@ final class EmbeddingIndexer {
         return ocrExcerpt
     }
 
-    private struct MeetingSnapshot {
+    struct MeetingSnapshot {
         let id: UUID
         let title: String
         let date: Date
@@ -178,23 +187,23 @@ final class EmbeddingIndexer {
         }
     }
 
-    private struct SessionSummarySnapshot {
+    struct SessionSummarySnapshot {
         let sessionID: UUID
         let narrative: String
     }
 
-    private struct FrameSnapshot {
+    struct FrameSnapshot {
         let id: UUID
         let observation: String?
         let ocrText: String?
     }
 
-    private struct ActionSnapshot {
+    struct ActionSnapshot {
         let id: UUID
         let text: String
     }
 
-    private struct InsightSnapshot {
+    struct InsightSnapshot {
         let id: UUID
         let summary: String
         let followUpQuestions: [String]
