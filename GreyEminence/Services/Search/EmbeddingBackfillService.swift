@@ -60,14 +60,20 @@ enum EmbeddingBackfillService {
             "EmbeddingBackfill: indexing \(missing.count) un-covered meeting(s)",
             category: .general
         )
-        let label = "Indexing \(missing.count) meeting\(missing.count == 1 ? "" : "s") for search…"
+        // The count lives in the progress readout now, so the label just names
+        // the work. A backfill of several hundred meetings runs for minutes —
+        // long enough that a bare spinner reads as a hang.
+        let label = "Indexing meetings for search…"
         await TransientActivityCoordinator.shared.runAsync(label) {
             let indexer = EmbeddingIndexer(store: store, service: service)
-            for meeting in missing {
+            let coordinator = TransientActivityCoordinator.shared
+            coordinator.setProgress(completed: 0, total: missing.count)
+            for (index, meeting) in missing.enumerated() {
                 // Re-check mid-loop: a reprocess might have started, or the
                 // meeting might have been deleted by the user. Indexing a
                 // tombstoned meeting accesses lazy SwiftData properties
                 // that will trap.
+                defer { coordinator.setProgress(completed: index + 1, total: missing.count) }
                 guard meeting.reProcessingState == nil else { continue }
                 await indexer.indexMeeting(meeting)
             }

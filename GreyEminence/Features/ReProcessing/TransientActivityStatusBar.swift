@@ -20,6 +20,15 @@ struct TransientActivityStatusBar: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
+                if let progress = current?.progress {
+                    ProgressView(value: progress.fraction)
+                        .progressViewStyle(.linear)
+                        .frame(width: 120)
+                    Text("\(progress.completed) of \(progress.total)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer(minLength: 8)
             }
             .bottomActivityBarStyle()
@@ -30,8 +39,17 @@ struct TransientActivityStatusBar: View {
 
     @ViewBuilder
     private var statusIcon: some View {
-        if current != nil {
-            ProgressView().controlSize(.small)
+        if let current {
+            // The spinner is redundant next to a determinate bar, but keeping
+            // the slot occupied stops the label jumping left when progress
+            // arrives a moment after the activity starts.
+            if current.progress == nil {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "arrow.trianglehead.2.clockwise")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
         } else if completed != nil {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 13))
