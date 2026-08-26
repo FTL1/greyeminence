@@ -16,7 +16,7 @@ struct AskSettingsView: View {
     @State private var showReindexPrompt = false
     @State private var previousProviderRaw: String?
     @State private var reindexError: String?
-    @State private var awsProfiles: [String] = []
+    @State private var describedProfiles: [AWSCredentialLoader.ProfileInfo] = []
     @State private var isTestingTitan = false
     @State private var titanTest: TestResult?
 
@@ -194,7 +194,7 @@ struct AskSettingsView: View {
             embeddingCount = EmbeddingStore.shared?.count() ?? 0
             coverage = currentModelCoverage()
             AWSCredentialLoader.restoreAccess()
-            awsProfiles = AWSCredentialLoader.availableProfiles()
+            describedProfiles = AWSCredentialLoader.describedProfiles()
         }
         .alert("Rebuild the search index?", isPresented: $showReindexPrompt) {
             Button("Rebuild now") {
@@ -254,8 +254,8 @@ struct AskSettingsView: View {
     private var titanAccountControls: some View {
         Picker("AWS profile", selection: $embeddingProfile) {
             Text("Same as AI settings (\(fallbackProfile))").tag("")
-            ForEach(awsProfiles, id: \.self) { profile in
-                Text(profile).tag(profile)
+            ForEach(usableProfiles) { info in
+                Text("\(info.name) — \(info.kind.reason)").tag(info.name)
             }
         }
         .onChange(of: embeddingProfile) { _, profile in
@@ -281,6 +281,16 @@ struct AskSettingsView: View {
         }
         .onChange(of: embeddingRegion) { titanTest = nil }
 
+        if !unusableProfiles.isEmpty {
+            // Naming these is the point. They were previously offered in the
+            // picker and failed with "profile not found" at the first request,
+            // which reads as a bug in the app rather than a property of the
+            // profile.
+            Text("Not selectable: \(unusableProfiles.map { "\($0.name) (\($0.kind.reason))" }.joined(separator: ", ")).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         HStack(spacing: 8) {
             Button(isTestingTitan ? "Testing…" : "Test connection") {
                 Task { await testTitan() }
@@ -305,6 +315,14 @@ struct AskSettingsView: View {
         }
     }
 
+    private var usableProfiles: [AWSCredentialLoader.ProfileInfo] {
+        describedProfiles.filter(\.isSupported)
+    }
+
+    private var unusableProfiles: [AWSCredentialLoader.ProfileInfo] {
+        describedProfiles.filter { !$0.isSupported }
+    }
+
     private var fallbackProfile: String {
         UserDefaults.standard.string(forKey: "awsProfile") ?? "default"
     }
@@ -321,7 +339,14 @@ struct AskSettingsView: View {
         let service = TitanEmbeddingService()
         let where_ = "\(service.resolvedProfile) · \(service.resolvedRegion)"
         guard service.isAvailable else {
-            titanTest = .failure("No AWS profiles found.")
+            titanTest = .failure("No AWS profiles this app can authenticate as.")
+            return
+        }
+        // Catch an unusable profile before spending a request on it — most
+        // often the inherited one, when Settings → AI points at something the
+        // loader can't follow either.
+        if let info = describedProfiles.first(where: { $0.name == service.resolvedProfile }), !info.isSupported {
+            titanTest = .failure("Profile \(info.name) \(info.kind.reason).")
             return
         }
         if let vector = await service.embed("Grey Eminence search index probe") {

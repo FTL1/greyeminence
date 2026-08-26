@@ -102,6 +102,102 @@ enum AWSCredentialLoader {
         }.sorted()
     }
 
+    /// How a profile obtains credentials, and whether this app can follow it.
+    ///
+    /// `availableProfiles()` lists everything in the config file, including
+    /// profiles that can never authenticate here — offering one of those in a
+    /// picker produces a baffling "profile not found" at the first request,
+    /// which is exactly what happened. Classify instead, so the UI can offer
+    /// only what works and say why the rest don't.
+    enum ProfileKind: Equatable {
+        case sso
+        case staticCredentials
+        /// `role_arn` + `source_profile`: needs an STS AssumeRole call that
+        /// isn't implemented yet.
+        case assumeRole(source: String?)
+        /// `credential_process`: shells out to an external helper. The app is
+        /// sandboxed, so it cannot spawn one — this is a permanent no, not a
+        /// missing feature.
+        case credentialProcess
+        case noCredentials
+
+        var isSupported: Bool {
+            switch self {
+            case .sso, .staticCredentials: true
+            case .assumeRole, .credentialProcess, .noCredentials: false
+            }
+        }
+
+        var reason: String {
+            switch self {
+            case .sso: "AWS SSO"
+            case .staticCredentials: "access key"
+            case .assumeRole(let source):
+                "assumes a role via \(source ?? "another profile") — not supported yet"
+            case .credentialProcess:
+                "uses credential_process, which a sandboxed app can't run"
+            case .noCredentials:
+                "no credentials configured"
+            }
+        }
+    }
+
+    struct ProfileInfo: Equatable, Identifiable {
+        let name: String
+        let kind: ProfileKind
+        let region: String?
+
+        var id: String { name }
+        var isSupported: Bool { kind.isSupported }
+    }
+
+    /// Every profile from both `~/.aws/config` and `~/.aws/credentials`,
+    /// classified. Credentials-file-only profiles are included: they
+    /// authenticate perfectly well and were invisible before, because the
+    /// listing only ever read the config file.
+    static func describedProfiles() -> [ProfileInfo] {
+        var config: [String: [String: String]] = [:]
+        if let url = try? resolveConfigFile(), let content = try? String(contentsOf: url, encoding: .utf8) {
+            config = parseINI(content)
+        }
+        var credentials: [String: [String: String]] = [:]
+        if let url = try? resolveCredentialsFile(), let content = try? String(contentsOf: url, encoding: .utf8) {
+            credentials = parseINI(content)
+        }
+
+        var infos: [String: ProfileInfo] = [:]
+        for (section, values) in config {
+            // sso-session blocks are shared configuration, not profiles.
+            guard !section.hasPrefix("sso-session") else { continue }
+            let name = section == "default" ? "default" : (section.hasPrefix("profile ") ? String(section.dropFirst(8)) : section)
+            let kind: ProfileKind
+            if values["sso_start_url"] != nil || values["sso_session"] != nil {
+                kind = .sso
+            } else if values["role_arn"] != nil {
+                kind = .assumeRole(source: values["source_profile"])
+            } else if values["credential_process"] != nil {
+                kind = .credentialProcess
+            } else if credentials[name]?["aws_access_key_id"] != nil {
+                kind = .staticCredentials
+            } else {
+                kind = .noCredentials
+            }
+            infos[name] = ProfileInfo(name: name, kind: kind, region: values["region"])
+        }
+
+        for (name, values) in credentials where infos[name] == nil {
+            guard values["aws_access_key_id"] != nil else { continue }
+            infos[name] = ProfileInfo(name: name, kind: .staticCredentials, region: nil)
+        }
+
+        return infos.values.sorted { $0.name < $1.name }
+    }
+
+    /// Profiles this app can actually authenticate as.
+    static func usableProfiles() -> [ProfileInfo] {
+        describedProfiles().filter(\.isSupported)
+    }
+
     // MARK: - Static Credentials
 
     private static func loadStaticCredentials(profile: String) throws -> AWSCredentials {

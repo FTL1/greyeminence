@@ -85,7 +85,7 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
     /// with analysis on the Anthropic API. All that's required is an AWS
     /// profile to authenticate as.
     var isAvailable: Bool {
-        !AWSCredentialLoader.availableProfiles().isEmpty
+        !AWSCredentialLoader.usableProfiles().isEmpty
     }
 
     func embed(_ text: String) async -> [Float]? {

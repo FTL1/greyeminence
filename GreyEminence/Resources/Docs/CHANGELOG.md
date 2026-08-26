@@ -41,6 +41,13 @@ full detail; older ones are summarized. The version number tracks
   its free tier would have covered this index outright, but it would have
   meant sending transcripts to a third party, so it is deliberately not
   offered.
+- The AWS profile list now only offers profiles the app can actually
+  authenticate as — SSO and access-key ones. Profiles that assume a role
+  or shell out to `credential_process` were listed and then failed with
+  "profile not found" on the first request, which read as a bug rather
+  than a property of the profile; they're now named as unselectable with
+  the reason. Profiles that live only in `~/.aws/credentials` are offered
+  for the first time — they always worked, they were just never listed.
 - The embedding account is chosen separately from the analysis account.
   A role scoped to the Anthropic models can't invoke Titan at all, and
   the practical answer is usually a second AWS account rather than a

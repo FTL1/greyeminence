@@ -134,6 +134,7 @@
 		75CD7EF11CFD80D27C067EE9 /* TopicDetailPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28472798341F1E27B7D42F4 /* TopicDetailPanel.swift */; };
 		768C41869E0CB2E13A3D5875 /* Team.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42B56FC793823CAFBBB617DF /* Team.swift */; };
 		7699EF292CB0F123ED431524 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = BA1A084FCAEDCA30D57F7BF5 /* Assets.xcassets */; };
+		76A5975832C9A7259278AFA8 /* AWSProfileClassificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 005DE71EA8DE1BBCC390CF17 /* AWSProfileClassificationTests.swift */; };
 		77072DF00BC4524199A52DC2 /* SpeakerDiarizationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EAE39B31598DBAB6A3CFFFB /* SpeakerDiarizationService.swift */; };
 		777499478FD70265752E1BC4 /* ReProcessingQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92551E29994E7C2FCDC046A7 /* ReProcessingQueue.swift */; };
 		7960F6A714486B5DAF8348B3 /* MeetingUnlinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE98E78710B13E2714E2AE7 /* MeetingUnlinkTests.swift */; };
@@ -309,6 +310,7 @@
 
 /* Begin PBXFileReference section */
 		00113CB03ECCACD1B6516101 /* ModelDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadManager.swift; sourceTree = "<group>"; };
+		005DE71EA8DE1BBCC390CF17 /* AWSProfileClassificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AWSProfileClassificationTests.swift; sourceTree = "<group>"; };
 		01A04196F7926C630F7DC3BC /* ResumeTextExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeTextExtractor.swift; sourceTree = "<group>"; };
 		02203A251A6442629C7C3EA5 /* SparkleUpdaterDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleUpdaterDelegate.swift; sourceTree = "<group>"; };
 		035F3AE9352BFA1B1EC72E90 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
@@ -814,6 +816,7 @@
 				3D0F42CB4EB93B43535261F5 /* AskPersonFilterTests.swift */,
 				C4EF91E8F82E0C8EF8ED9093 /* AudioFileWriterEncoderTests.swift */,
 				8EE1444D1BB821BCF57E37F6 /* AudioFileWriterTests.swift */,
+				005DE71EA8DE1BBCC390CF17 /* AWSProfileClassificationTests.swift */,
 				7C90E4A998AC4D102675200A /* CalendarAttendeeTests.swift */,
 				CD7BC2C7230991ECDBD5ABA8 /* EmbeddingProviderTests.swift */,
 				C8D7127B99A5B16285D765CB /* FeatureHighlightTests.swift */,
@@ -1615,6 +1618,7 @@
 				3CC4FEBCE37C2A964DD56B8A /* AIResponseExcerptTests.swift in Sources */,
 				6E45CEDA458C896848FE2178 /* AIRetryTests.swift in Sources */,
 				BF7FB8850CF54A9DE5406C39 /* AIUsageTests.swift in Sources */,
+				76A5975832C9A7259278AFA8 /* AWSProfileClassificationTests.swift in Sources */,
 				0B71B37A9D1D33DDB115A4C8 /* ActionItemOwnershipTests.swift in Sources */,
 				EC2047881AC96B6FFF429704 /* AskConversationTests.swift in Sources */,
 				9505449D69A1AA8A4E7D33BF /* AskPersonFilterTests.swift in Sources */,

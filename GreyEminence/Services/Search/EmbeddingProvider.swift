@@ -30,7 +30,7 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
         // analysis uses. Embeddings can run on a second account, which is
         // often the only way to reach Titan when the primary role is scoped
         // to the Anthropic models.
-        case .titan: !AWSCredentialLoader.availableProfiles().isEmpty
+        case .titan: !AWSCredentialLoader.usableProfiles().isEmpty
         case .voyage: false
         }
     }
@@ -55,7 +55,7 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
         case .nlEmbedding:
             ""
         case .titan:
-            "No AWS profiles found. Point Settings → AI at your ~/.aws directory first."
+            "No AWS profile this app can authenticate as. It supports SSO and access-key profiles; assume-role and credential_process profiles aren't usable from a sandboxed app."
         case .voyage:
             "Not implemented — Bedrock keeps meeting text inside your own AWS account, which Voyage would not."
         }
