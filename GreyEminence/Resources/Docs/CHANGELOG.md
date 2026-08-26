@@ -4,6 +4,30 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.31.0 — 2026-08-26
+
+**Ask holds a conversation**
+- Ask answered one question and forgot it. It now keeps threads: ask a
+  follow-up and it continues where it left off, with a conversation list
+  on the left and the whole exchange in the middle.
+- A follow-up that leans on what came before — "what did she say about
+  that?" — is rewritten into a standalone query before the search runs,
+  because the search is keyword-sensitive and the nouns live in the
+  earlier turns. When that happens, the rewritten query is shown under
+  your question.
+- Matched snippets moved to the right-hand panel, where transcripts sit
+  everywhere else in the app. They are numbered to match the citations in
+  the answers: tap `[3]` and the panel scrolls to snippet 3; click the
+  snippet and it opens the meeting at that moment. Filter to just the
+  ones an answer actually cited, or narrow to the sources behind a single
+  answer.
+- Citation numbers are stable for the life of a thread, so a snippet
+  found in the first question can still be cited in the tenth answer —
+  and evidence an earlier answer cited is carried into later questions
+  rather than being lost when the search moves on.
+- Your previous Ask history is converted into single-question
+  conversations, so nothing is lost.
+
 ## 0.30.1 — 2026-08-20
 
 **Open questions lead the report, and look like a callout**

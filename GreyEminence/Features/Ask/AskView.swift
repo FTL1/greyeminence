@@ -1,24 +1,29 @@
 import SwiftUI
 import SwiftData
 
+/// Ask, as a conversation. The centre is the dialogue; the conversation list
+/// sits on the left and the retrieved snippets go in the app's right-hand
+/// inspector slot (see `ContentView`), where transcripts live everywhere else.
 struct AskView: View {
-    @Environment(\.modelContext) private var modelContext
     @AppStorage("embeddingProvider") private var providerRaw: String = EmbeddingProvider.nlEmbedding.rawValue
-    @AppStorage("askSnippetCount") private var snippetCount: Int = 15
-    @AppStorage("askContextWindow") private var contextWindow: Int = 2
-    @AppStorage("askDateFilter") private var dateFilterRaw: String = AskDateFilter.anyTime.rawValue
+    @AppStorage("askDateFilter") private var defaultDateFilterRaw: String = AskDateFilter.anyTime.rawValue
+    @AppStorage("askShowConversations") private var showConversations: Bool = true
 
     @Bindable var viewModel: AskViewModel
-    var onResultSelected: ((SearchResult) -> Void)?
 
-    @State private var showHistory: Bool = true
+    @State private var renaming: AskConversation?
+    @State private var renameText: String = ""
 
     private var provider: EmbeddingProvider {
         EmbeddingProvider(rawValue: providerRaw) ?? .nlEmbedding
     }
 
+    /// The open conversation's filter, or the saved default for a thread that
+    /// hasn't been created yet.
     private var dateFilter: AskDateFilter {
-        AskDateFilter(rawValue: dateFilterRaw) ?? .anyTime
+        viewModel.currentConversation?.dateFilter
+            ?? AskDateFilter(rawValue: defaultDateFilterRaw)
+            ?? .anyTime
     }
 
     var body: some View {
@@ -26,36 +31,124 @@ struct AskView: View {
             header
             Divider()
             HStack(spacing: 0) {
-                if showHistory {
-                    historySidebar
-                        .frame(width: 200)
+                if showConversations {
+                    conversationSidebar
+                        .frame(width: 210)
                     Divider()
                 }
-                mainContent
+                AskChatView(viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .alert("Rename conversation", isPresented: renameBinding) {
+            TextField("Name", text: $renameText)
+            Button("Cancel", role: .cancel) { renaming = nil }
+            Button("Rename") {
+                if let renaming { viewModel.rename(renaming, to: renameText) }
+                renaming = nil
             }
         }
     }
 
-    // MARK: - History sidebar
+    private var renameBinding: Binding<Bool> {
+        Binding(
+            get: { renaming != nil },
+            set: { if !$0 { renaming = nil } }
+        )
+    }
+
+    // MARK: - Header
 
     @ViewBuilder
-    private var historySidebar: some View {
+    private var header: some View {
+        HStack(spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { showConversations.toggle() }
+            } label: {
+                Image(systemName: "sidebar.left")
+            }
+            .buttonStyle(.bordered)
+            .help(showConversations ? "Hide conversations" : "Show conversations")
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(viewModel.currentConversation?.title ?? "New conversation")
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Menu {
+                ForEach(AskDateFilter.allCases) { option in
+                    Button {
+                        // Retrieval is per-turn, so this applies from the next
+                        // question on rather than re-running what's already
+                        // been asked.
+                        defaultDateFilterRaw = option.rawValue
+                        viewModel.setDateFilter(option)
+                    } label: {
+                        if option == dateFilter {
+                            Label(option.label, systemImage: "checkmark")
+                        } else {
+                            Text(option.label)
+                        }
+                    }
+                }
+            } label: {
+                Label(dateFilter.label, systemImage: "calendar")
+                    .font(.caption)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Limit new questions to meetings in this range")
+
+            Button {
+                viewModel.startNewConversation()
+            } label: {
+                Label("New", systemImage: "square.and.pencil")
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("n", modifiers: [.command, .shift])
+            .help("Start a new conversation (⇧⌘N)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.background)
+    }
+
+    private var subtitle: String {
+        guard let conversation = viewModel.currentConversation, !conversation.turns.isEmpty else {
+            return "Grounded in your transcripts and screen shares · \(provider.shortLabel)"
+        }
+        let turns = conversation.turns.count
+        let sources = conversation.sources.count
+        return "\(turns) \(turns == 1 ? "question" : "questions") · \(sources) \(sources == 1 ? "source" : "sources") · \(provider.shortLabel)"
+    }
+
+    // MARK: - Conversation sidebar
+
+    @ViewBuilder
+    private var conversationSidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("History")
+                Text("Conversations")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if !viewModel.history.isEmpty {
+                if !viewModel.conversations.isEmpty {
                     Button {
-                        viewModel.clearHistory()
+                        viewModel.deleteAll()
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 10))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .help("Clear history")
+                    .help("Delete all conversations")
                 }
             }
             .padding(.horizontal, 10)
@@ -63,17 +156,18 @@ struct AskView: View {
 
             Divider()
 
-            if viewModel.history.isEmpty {
-                Text("Past searches will appear here.")
+            if viewModel.conversations.isEmpty {
+                Text("Your conversations will be listed here.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer()
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(viewModel.history) { entry in
-                            historyRow(entry)
+                        ForEach(viewModel.sortedConversations) { conversation in
+                            conversationRow(conversation)
                         }
                     }
                     .padding(6)
@@ -83,27 +177,27 @@ struct AskView: View {
     }
 
     @ViewBuilder
-    private func historyRow(_ entry: AskHistoryEntry) -> some View {
-        let isCurrent = entry.query == viewModel.query && !viewModel.results.isEmpty
+    private func conversationRow(_ conversation: AskConversation) -> some View {
+        let isCurrent = conversation.id == viewModel.selectedConversationID
         Button {
-            viewModel.restore(entry)
-            if let raw = entry.dateFilterRaw, AskDateFilter(rawValue: raw) != nil {
-                dateFilterRaw = raw
-            }
+            viewModel.select(conversation)
         } label: {
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.query)
+                Text(conversation.title)
                     .font(.caption.weight(.medium))
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .foregroundStyle(.primary)
                 HStack(spacing: 4) {
-                    Text(entry.timestamp, format: .relative(presentation: .numeric))
-                    Text("·")
-                    Text("\(entry.results.count) results")
+                    Text(conversation.updatedAt, format: .relative(presentation: .numeric))
+                    if conversation.turns.count > 1 {
+                        Text("·")
+                        Text("\(conversation.turns.count) turns")
+                    }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)
@@ -115,302 +209,17 @@ struct AskView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                renameText = conversation.title
+                renaming = conversation
+            } label: {
+                Label("Rename…", systemImage: "pencil")
+            }
             Button(role: .destructive) {
-                viewModel.deleteHistory(entry)
+                viewModel.delete(conversation)
             } label: {
                 Label("Delete", systemImage: "trash")
             }
-        }
-    }
-
-    // MARK: - Main content
-
-    @ViewBuilder
-    private var mainContent: some View {
-        if viewModel.isSearching && viewModel.results.isEmpty {
-            VStack(spacing: 12) {
-                ProgressView().controlSize(.large)
-                Text("Searching your meetings…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if viewModel.results.isEmpty && viewModel.synthesizedAnswer == nil && !viewModel.isSynthesizing {
-            ContentUnavailableView(
-                "Ask a question",
-                systemImage: "sparkles.square.filled.on.square",
-                description: Text("Try: \"What did I want to bring up with Erin in my next 1:1?\" or \"Open questions about authentication\"")
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            resultsList
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        showHistory.toggle()
-                    }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                }
-                .buttonStyle(.bordered)
-                .help(showHistory ? "Hide history" : "Show history")
-
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Ask anything about your meetings…", text: $viewModel.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15))
-                    .onSubmit(runSearch)
-
-                Menu {
-                    ForEach(AskDateFilter.allCases) { option in
-                        Button {
-                            dateFilterRaw = option.rawValue
-                        } label: {
-                            if option == dateFilter {
-                                Label(option.label, systemImage: "checkmark")
-                            } else {
-                                Text(option.label)
-                            }
-                        }
-                    }
-                } label: {
-                    Label(dateFilter.label, systemImage: "calendar")
-                        .labelStyle(.titleAndIcon)
-                        .font(.caption)
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Limit search to meetings within a date range")
-
-                if viewModel.isSearching || viewModel.isSynthesizing {
-                    ProgressView().controlSize(.small)
-                }
-                Button("Ask") { runSearch() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSearching)
-                    .keyboardShortcut(.return, modifiers: [])
-            }
-
-            HStack(spacing: 10) {
-                if let err = viewModel.errorMessage {
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text("Top \(snippetCount) snippets ±\(contextWindow) context · \(dateFilter.label)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text("Provider: \(provider.shortLabel)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.background)
-    }
-
-    @ViewBuilder
-    private var resultsList: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if viewModel.isSynthesizing {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Synthesizing answer from \(viewModel.results.prefix(snippetCount).count) snippets…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                } else if let answer = viewModel.synthesizedAnswer {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Answer", systemImage: "sparkles")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        MarkdownText(markdown: answer)
-                            .font(.body)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-                }
-
-                if !viewModel.results.isEmpty {
-                    HStack {
-                        Text("Ranked snippets")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text("(\(viewModel.results.count))")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                        Text("most relevant first")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-
-                ForEach(Array(viewModel.results.enumerated()), id: \.element.id) { i, result in
-                    Button {
-                        onResultSelected?(result)
-                    } label: {
-                        resultRow(result, index: i + 1, sentToLLM: i < snippetCount)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(16)
-        }
-    }
-
-    @ViewBuilder
-    private func resultRow(_ result: SearchResult, index: Int, sentToLLM: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("\(index)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .frame(minWidth: 18, alignment: .trailing)
-                Text(kindLabel(result.sourceKind))
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(kindColor(result.sourceKind).opacity(0.18), in: Capsule())
-                    .foregroundStyle(kindColor(result.sourceKind))
-                Text(result.meetingTitle)
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                Text(result.meetingDate, format: .dateTime.month(.abbreviated).day().year())
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if sentToLLM {
-                    Image(systemName: "sparkles")
-                        .font(.caption2)
-                        .foregroundStyle(Color.accentColor)
-                        .help("Included in the LLM context")
-                }
-                Text(percentage(result.score))
-                    .font(.caption.monospacedDigit().weight(.medium))
-                    .foregroundStyle(scoreColor(result.score))
-            }
-            if result.sourceKind == .screenObservation {
-                HStack(alignment: .top, spacing: 8) {
-                    ScreenResultThumb(frameID: result.sourceID, meetingID: result.meetingID)
-                    Text(result.text)
-                        .font(.callout)
-                        .lineLimit(3)
-                        .foregroundStyle(.primary)
-                }
-            } else {
-                Text(result.text)
-                    .font(.callout)
-                    .lineLimit(3)
-                    .foregroundStyle(.primary)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-    }
-
-    private func kindLabel(_ kind: EmbeddingRecord.SourceKind) -> String {
-        switch kind {
-        case .transcriptSegment: "TRANSCRIPT"
-        case .actionItem: "TASK"
-        case .followUpQuestion: "QUESTION"
-        case .meetingSummary: "SUMMARY"
-        case .screenObservation: "SCREEN"
-        case .sessionNarrative: "RECAP"
-        }
-    }
-
-    private func kindColor(_ kind: EmbeddingRecord.SourceKind) -> Color {
-        switch kind {
-        case .transcriptSegment: .indigo
-        case .actionItem: .orange
-        case .followUpQuestion: .teal
-        case .meetingSummary: .purple
-        case .screenObservation: .cyan
-        case .sessionNarrative: .mint
-        }
-    }
-
-    private func percentage(_ score: Float) -> String {
-        let pct = Int((max(0, min(1, score)) * 100).rounded())
-        return "\(pct)%"
-    }
-
-    private func scoreColor(_ score: Float) -> Color {
-        if score >= 0.7 { return .green }
-        if score >= 0.5 { return .primary }
-        if score >= 0.3 { return .secondary }
-        return .secondary.opacity(0.6)
-    }
-
-    private func runSearch() {
-        Task {
-            await viewModel.runSearch(
-                mainContext: modelContext,
-                snippetCount: snippetCount,
-                contextWindow: contextWindow,
-                dateFilter: dateFilter
-            )
-        }
-    }
-}
-
-/// Small thumbnail for a screen-observation search hit. Resolves the frame
-/// row at render time (imagePath isn't stored in the embedding record) and
-/// falls back to a placeholder when the frame or file is gone.
-private struct ScreenResultThumb: View {
-    let frameID: UUID
-    let meetingID: UUID
-
-    @Environment(\.modelContext) private var modelContext
-    @State private var image: CGImage?
-    @State private var missing = false
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(.quaternary)
-            if let image {
-                Image(decorative: image, scale: 2)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 48, height: 30)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            } else {
-                Image(systemName: missing ? "photo.badge.exclamationmark" : "photo")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .frame(width: 48, height: 30)
-        .task(id: frameID) {
-            let id = frameID
-            var descriptor = FetchDescriptor<ScreenShareFrame>(predicate: #Predicate { $0.id == id })
-            descriptor.fetchLimit = 1
-            guard let frame = try? modelContext.fetch(descriptor).first else {
-                missing = true
-                return
-            }
-            let url = StorageManager.shared.frameURL(for: meetingID, relativePath: frame.imagePath)
-            image = await FrameThumbnailCache.shared.thumbnail(at: url, size: .strip)
-            missing = image == nil
         }
     }
 }

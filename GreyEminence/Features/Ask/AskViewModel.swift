@@ -1,254 +1,378 @@
 import Foundation
 import SwiftData
 
-struct AskHistoryEntry: Codable, Identifiable {
-    var id: UUID = UUID()
-    var query: String
-    var timestamp: Date
-    var results: [CodableSearchResult]
-    var synthesizedAnswer: String?
-    var dateFilterRaw: String?
-}
-
-enum AskDateFilter: String, CaseIterable, Identifiable {
-    case anyTime
-    case last7Days
-    case last30Days
-    case last3Months
-    case lastYear
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .anyTime: "Any time"
-        case .last7Days: "Last 7 days"
-        case .last30Days: "Last 30 days"
-        case .last3Months: "Last 3 months"
-        case .lastYear: "Last year"
-        }
-    }
-
-    func range(now: Date = .now) -> ClosedRange<Date>? {
-        let cal = Calendar.current
-        switch self {
-        case .anyTime: return nil
-        case .last7Days: return (cal.date(byAdding: .day, value: -7, to: now) ?? now)...now
-        case .last30Days: return (cal.date(byAdding: .day, value: -30, to: now) ?? now)...now
-        case .last3Months: return (cal.date(byAdding: .month, value: -3, to: now) ?? now)...now
-        case .lastYear: return (cal.date(byAdding: .year, value: -1, to: now) ?? now)...now
-        }
-    }
-}
-
-struct CodableSearchResult: Codable {
-    var id: String
-    var sourceKindRaw: String
-    var sourceID: UUID
-    var meetingID: UUID
-    var meetingTitle: String
-    var meetingDate: Date
-    var text: String
-    var score: Float
-
-    init(_ r: SearchResult) {
-        self.id = r.id
-        self.sourceKindRaw = r.sourceKind.rawValue
-        self.sourceID = r.sourceID
-        self.meetingID = r.meetingID
-        self.meetingTitle = r.meetingTitle
-        self.meetingDate = r.meetingDate
-        self.text = r.text
-        self.score = r.score
-    }
-
-    var toSearchResult: SearchResult {
-        SearchResult(
-            id: id,
-            sourceKind: EmbeddingRecord.SourceKind(rawValue: sourceKindRaw) ?? .transcriptSegment,
-            sourceID: sourceID,
-            meetingID: meetingID,
-            meetingTitle: meetingTitle,
-            meetingDate: meetingDate,
-            text: text,
-            score: score
-        )
-    }
-}
-
 @Observable
 @MainActor
 final class AskViewModel {
-    var query: String = ""
-    var results: [SearchResult] = []
-    var synthesizedAnswer: String?
-    var isSearching: Bool = false
-    var isSynthesizing: Bool = false
-    var errorMessage: String?
-    var history: [AskHistoryEntry] = []
+    enum Phase: Equatable {
+        case idle
+        /// Rewriting a follow-up into a standalone search query.
+        case condensing
+        case searching
+        case answering
+    }
 
-    private let historyKey = "askHistory"
-    private let maxHistoryItems = 30
+    var conversations: [AskConversation] = []
+    var selectedConversationID: UUID?
+    var draft: String = ""
+    var phase: Phase = .idle
+    /// Citation tapped in an answer — the sources panel scrolls to it and
+    /// highlights it.
+    var selectedSourceNumber: Int?
+    /// When set, the sources panel narrows to the snippets that grounded one
+    /// turn instead of the whole pool.
+    var focusedTurnID: UUID?
+
+    private var activeTask: Task<Void, Never>?
+    /// Turn the in-flight task belongs to. Its completion block checks this
+    /// before touching shared state: cancelling and immediately asking again
+    /// leaves the old task still unwinding, and without the check its tail
+    /// would reset the phase and drop the *new* task's handle.
+    private var activeTurnID: UUID?
+
+    /// How many prior answers' citations get carried into the next prompt.
+    /// Two covers the common "and what about…" chain without dragging the
+    /// whole thread's evidence along forever.
+    private let carryForwardTurns = 2
+
+    var isBusy: Bool { phase != .idle }
+
+    var currentConversation: AskConversation? {
+        guard let id = selectedConversationID else { return nil }
+        return conversations.first { $0.id == id }
+    }
+
+    var sortedConversations: [AskConversation] {
+        conversations.sorted { $0.updatedAt > $1.updatedAt }
+    }
 
     init() {
-        loadHistory()
+        conversations = AskConversationStore.load()
+        selectedConversationID = sortedConversations.first?.id
     }
 
-    func runSearch(mainContext: ModelContext, snippetCount: Int, contextWindow: Int, dateFilter: AskDateFilter) async {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard let store = EmbeddingStore.shared else {
-            errorMessage = "Embedding store unavailable"
+    // MARK: - Conversation management
+
+    func startNewConversation() {
+        activeTask?.cancel()
+        activeTurnID = nil
+        phase = .idle
+        draft = ""
+        selectedSourceNumber = nil
+        focusedTurnID = nil
+        // An empty thread is a scratch pad, not history: reuse the one that's
+        // already open rather than stacking up untouched "New conversation"
+        // rows every time the button is pressed.
+        if let existing = conversations.first(where: { $0.turns.isEmpty }) {
+            selectedConversationID = existing.id
             return
         }
+        selectedConversationID = nil
+    }
 
+    func select(_ conversation: AskConversation) {
+        guard conversation.id != selectedConversationID else { return }
+        activeTask?.cancel()
+        activeTurnID = nil
+        phase = .idle
+        selectedConversationID = conversation.id
+        selectedSourceNumber = nil
+        focusedTurnID = nil
+    }
+
+    func delete(_ conversation: AskConversation) {
+        conversations.removeAll { $0.id == conversation.id }
+        if selectedConversationID == conversation.id {
+            activeTask?.cancel()
+            activeTurnID = nil
+            phase = .idle
+            selectedConversationID = sortedConversations.first?.id
+            selectedSourceNumber = nil
+            focusedTurnID = nil
+        }
+        persist()
+    }
+
+    func deleteAll() {
+        activeTask?.cancel()
+        activeTurnID = nil
+        phase = .idle
+        conversations = []
+        selectedConversationID = nil
+        selectedSourceNumber = nil
+        focusedTurnID = nil
+        persist()
+    }
+
+    func rename(_ conversation: AskConversation, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let index = conversations.firstIndex(where: { $0.id == conversation.id }) else { return }
+        conversations[index].title = trimmed
+        persist()
+    }
+
+    func setDateFilter(_ filter: AskDateFilter) {
+        guard let index = selectedIndex else { return }
+        conversations[index].dateFilterRaw = filter.rawValue
+        persist()
+    }
+
+    func cancel() {
+        activeTask?.cancel()
+        activeTask = nil
+        activeTurnID = nil
+        phase = .idle
+        // A turn that was mid-flight has no answer and never will — mark it so
+        // the bubble reads as cancelled rather than hanging on a spinner.
+        guard let index = selectedIndex,
+              let last = conversations[index].turns.indices.last,
+              conversations[index].turns[last].answer == nil,
+              conversations[index].turns[last].errorMessage == nil else { return }
+        conversations[index].turns[last].errorMessage = "Cancelled."
+        persist()
+    }
+
+    /// Drop the last exchange and ask it again — for a failed turn, or an
+    /// answer that missed. The snippets it pulled in stay in the pool.
+    func retryLastTurn(mainContext: ModelContext, snippetCount: Int, contextWindow: Int) {
+        guard !isBusy, let index = selectedIndex else { return }
+        guard let last = conversations[index].turns.popLast() else { return }
+        persist()
+        send(
+            question: last.question,
+            mainContext: mainContext,
+            snippetCount: snippetCount,
+            contextWindow: contextWindow
+        )
+    }
+
+    // MARK: - Asking
+
+    func submitDraft(mainContext: ModelContext, snippetCount: Int, contextWindow: Int, defaultFilter: AskDateFilter) {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isBusy else { return }
+        draft = ""
+        ensureConversation(defaultFilter: defaultFilter)
+        send(
+            question: trimmed,
+            mainContext: mainContext,
+            snippetCount: snippetCount,
+            contextWindow: contextWindow
+        )
+    }
+
+    private func send(question: String, mainContext: ModelContext, snippetCount: Int, contextWindow: Int) {
+        guard let index = selectedIndex else { return }
+
+        let turn = AskTurn(question: question)
+        conversations[index].turns.append(turn)
+        conversations[index].updatedAt = .now
+        if conversations[index].turns.count == 1 {
+            conversations[index].title = AskConversation.title(fromFirstQuestion: question)
+        }
+        focusedTurnID = nil
+        selectedSourceNumber = nil
+        persist()
+
+        let conversationID = conversations[index].id
+        let turnID = turn.id
+        activeTurnID = turnID
+        activeTask = Task { [weak self] in
+            await self?.run(
+                turnID: turnID,
+                conversationID: conversationID,
+                question: question,
+                mainContext: mainContext,
+                snippetCount: snippetCount,
+                contextWindow: contextWindow
+            )
+            guard let self, self.activeTurnID == turnID else { return }
+            self.phase = .idle
+            self.activeTask = nil
+            self.activeTurnID = nil
+        }
+    }
+
+    private func run(
+        turnID: UUID,
+        conversationID: UUID,
+        question: String,
+        mainContext: ModelContext,
+        snippetCount: Int,
+        contextWindow: Int
+    ) async {
+        guard let store = EmbeddingStore.shared else {
+            failTurn(turnID, in: conversationID, message: "The embedding store isn't available, so there's nothing to search.")
+            return
+        }
         let providerRaw = UserDefaults.standard.string(forKey: "embeddingProvider") ?? EmbeddingProvider.nlEmbedding.rawValue
         let provider = EmbeddingProvider(rawValue: providerRaw) ?? .nlEmbedding
-        let service = provider.makeService()
-        guard service.isAvailable else {
-            errorMessage = "The \(provider.shortLabel) provider isn't implemented yet. Switch to On-device in Settings."
+        let embedding = provider.makeService()
+        guard embedding.isAvailable else {
+            failTurn(turnID, in: conversationID, message: "The \(provider.shortLabel) embedding provider isn't implemented yet. Switch to On-device in Settings → Ask.")
             return
         }
+        guard let client = try? await AIClientFactory.makeClient() else {
+            failTurn(turnID, in: conversationID, message: "No AI client is configured, so snippets can't be turned into an answer. Check Settings → AI.")
+            return
+        }
+        guard !Task.isCancelled else { return }
 
-        isSearching = true
-        errorMessage = nil
-        synthesizedAnswer = nil
-        defer { isSearching = false }
+        // 1. Condense a follow-up into a standalone query.
+        let priorTurns = conversation(conversationID)?.turns.dropLast().filter { $0.answer != nil } ?? []
+        var searchQuery = question
+        if !priorTurns.isEmpty {
+            phase = .condensing
+            searchQuery = await condense(question: question, history: Array(priorTurns), client: client)
+            guard !Task.isCancelled else { return }
+            updateTurn(turnID, in: conversationID) { $0.searchQuery = searchQuery }
+        }
 
-        let search = SemanticSearchService(store: store, service: service)
-        // Restrict to raw transcript snippets plus screen-share observations.
-        // Other derived artifacts (questions, tasks, summaries) stay excluded —
-        // short, generic AI-generated text crowded out the actual conversation.
-        // Screen observations are different: they're the ONLY record of what
-        // was shown (diagrams, dashboards, code), not a paraphrase of speech.
+        // 2. Retrieve.
+        phase = .searching
+        let search = SemanticSearchService(store: store, service: embedding)
+        // Raw transcript snippets plus screen-share observations and recaps.
+        // Derived artifacts (questions, tasks, summaries) stay excluded — short,
+        // generic AI-generated text crowded out the actual conversation. Screen
+        // observations are different: they're the ONLY record of what was shown.
         let found = await search.search(
-            trimmed,
+            searchQuery,
             topK: 40,
-            dateRange: dateFilter.range(),
+            dateRange: conversation(conversationID)?.dateFilter.range(),
             kinds: [.transcriptSegment, .screenObservation, .sessionNarrative]
         )
-        results = found
+        guard !Task.isCancelled else { return }
 
-        guard !found.isEmpty else {
-            errorMessage = dateFilter == .anyTime
-                ? "No matches. Try \"Reindex all meetings\" in Settings to backfill embeddings."
-                : "No matches in \(dateFilter.label.lowercased()). Try widening the date range."
+        guard let conversationIndex = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        let retrieved = conversations[conversationIndex].absorb(found, turnID: turnID)
+        let carried = conversations[conversationIndex].recentlyCitedNumbers(lastTurns: carryForwardTurns)
+        updateTurn(turnID, in: conversationID) { $0.retrievedNumbers = retrieved }
+
+        // New hits lead; snippets carried from earlier answers follow, so a
+        // follow-up still sees the evidence it's asking about.
+        var prompted = Array(retrieved.prefix(snippetCount))
+        for number in carried where !prompted.contains(number) {
+            prompted.append(number)
+        }
+
+        guard !prompted.isEmpty else {
+            let filter = conversations[conversationIndex].dateFilter
+            failTurn(
+                turnID,
+                in: conversationID,
+                message: filter == .anyTime
+                    ? "Nothing in the index matched that. If meetings are missing, run \"Reindex all meetings\" in Settings → Ask."
+                    : "Nothing matched within \(filter.label.lowercased()). Try widening the date range."
+            )
             return
         }
 
-        await synthesize(found: found, mainContext: mainContext, snippetCount: snippetCount, contextWindow: contextWindow)
-
-        saveToHistory(query: trimmed, results: found, answer: synthesizedAnswer, dateFilter: dateFilter)
-    }
-
-    private func synthesize(found: [SearchResult], mainContext: ModelContext, snippetCount: Int, contextWindow: Int) async {
-        guard let client = try? await AIClientFactory.makeClient() else {
-            errorMessage = "AI client unavailable — showing ranked snippets only."
-            return
-        }
-        isSynthesizing = true
-        defer { isSynthesizing = false }
-
-        let context = buildContext(from: Array(found.prefix(snippetCount)), mainContext: mainContext, contextWindow: contextWindow)
-
-        let prompt = """
-        You are answering a question based only on snippets from the user's past meetings.
-
-        QUESTION:
-        \(query)
-
-        SNIPPETS (ordered by relevance, most relevant first):
-        \(context)
-
-        Give a concise, direct answer grounded in the snippets. Cite snippets by their bracket number [1], [2] inline. If the snippets don't contain enough to answer, say so briefly.
-        """
-
-        do {
-            let response = try await AIUsageContext.attribute(.ask) {
-                try await client.sendMessage(
-                    system: "You help the user recall things from their past meetings.",
-                    userContent: prompt
-                )
-            }
-            synthesizedAnswer = response
-        } catch {
-            synthesizedAnswer = "Couldn't synthesize an answer: \(error.localizedDescription)"
-        }
-    }
-
-    private func buildContext(from results: [SearchResult], mainContext: ModelContext, contextWindow: Int) -> String {
-        results.enumerated().map { i, r in
-            let number = i + 1
-            let prefix = "[\(number)] (\(r.meetingTitle), \(DateFormatter.shortDate.string(from: r.meetingDate)))"
-            // Transcript records are now ~paragraph chunks, so r.text already
-            // carries enough conversational context. The contextWindow setting
-            // adds N segments before the chunk's start anchor for cases where
-            // the user wants a wider lead-in.
-            if r.sourceKind == .transcriptSegment, contextWindow > 0 {
-                let lead = fetchSegmentLeadIn(
-                    meetingID: r.meetingID,
-                    segmentID: r.sourceID,
-                    window: contextWindow,
-                    mainContext: mainContext
-                )
-                if !lead.isEmpty {
-                    return "\(prefix)\n\(lead)\n\(r.text)"
-                }
-            }
-            return "\(prefix)\n\(r.text)"
-        }.joined(separator: "\n\n")
-    }
-
-    private func fetchSegmentLeadIn(meetingID: UUID, segmentID: UUID, window: Int, mainContext: ModelContext) -> String {
-        let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.id == meetingID })
-        guard let meeting = try? mainContext.fetch(descriptor).first else { return "" }
-        let around = meeting.segments.segments(around: segmentID, lead: window, trail: 0)
-        guard let last = around.last, last.id == segmentID, around.count > 1 else { return "" }
-        return around.dropLast().map { "\($0.speaker.displayName): \($0.text)" }.joined(separator: "\n")
-    }
-
-    // MARK: - History
-
-    func restore(_ entry: AskHistoryEntry) {
-        query = entry.query
-        results = entry.results.map { $0.toSearchResult }
-        synthesizedAnswer = entry.synthesizedAnswer
-        errorMessage = nil
-    }
-
-    func clearHistory() {
-        history = []
-        persistHistory()
-    }
-
-    func deleteHistory(_ entry: AskHistoryEntry) {
-        history.removeAll { $0.id == entry.id }
-        persistHistory()
-    }
-
-    private func saveToHistory(query: String, results: [SearchResult], answer: String?, dateFilter: AskDateFilter) {
-        history.removeAll { $0.query.caseInsensitiveCompare(query) == .orderedSame }
-        let entry = AskHistoryEntry(
-            query: query,
-            timestamp: .now,
-            results: results.map { CodableSearchResult($0) },
-            synthesizedAnswer: answer,
-            dateFilterRaw: dateFilter == .anyTime ? nil : dateFilter.rawValue
+        // 3. Answer.
+        let sources = prompted.compactMap { conversations[conversationIndex].source(number: $0) }
+        let leadIns = leadIns(for: sources, window: contextWindow, mainContext: mainContext)
+        let block = AskPromptBuilder.sourcesBlock(sources, leadIns: leadIns)
+        let history = conversations[conversationIndex].turns.dropLast()
+        let messages = AskPromptBuilder.messages(
+            history: Array(history),
+            question: question,
+            sourcesBlock: block
         )
-        history.insert(entry, at: 0)
-        if history.count > maxHistoryItems {
-            history = Array(history.prefix(maxHistoryItems))
+        updateTurn(turnID, in: conversationID) { $0.promptedNumbers = prompted }
+
+        phase = .answering
+        do {
+            let answer = try await AIUsageContext.attribute(.ask) {
+                try await client.sendConversation(
+                    system: AskPromptBuilder.system,
+                    messages: messages,
+                    maxTokens: 4096
+                )
+            }
+            guard !Task.isCancelled else { return }
+            updateTurn(turnID, in: conversationID) {
+                $0.answer = answer
+                $0.citedNumbers = AskCitations.cited(in: answer)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            failTurn(turnID, in: conversationID, message: error.localizedDescription)
         }
-        persistHistory()
     }
 
-    private func loadHistory() {
-        guard let data = UserDefaults.standard.data(forKey: historyKey) else { return }
-        history = (try? JSONDecoder().decode([AskHistoryEntry].self, from: data)) ?? []
+    private func condense(question: String, history: [AskTurn], client: any AIClient) async -> String {
+        do {
+            let raw = try await AIUsageContext.attribute(.ask) {
+                try await client.sendMessage(
+                    system: "You rewrite conversational follow-ups into standalone search queries. Output only the query.",
+                    userContent: AskPromptBuilder.condensePrompt(history: history, question: question),
+                    maxTokens: 200
+                )
+            }
+            return AskPromptBuilder.sanitizeCondensed(raw, fallback: question)
+        } catch {
+            // A failed rewrite is not a failed turn — searching the raw
+            // question is worse, not broken.
+            LogManager.send("Ask: query rewrite failed, searching verbatim: \(error.localizedDescription)", category: .ai, level: .warning)
+            return question
+        }
     }
 
-    private func persistHistory() {
-        guard let data = try? JSONEncoder().encode(history) else { return }
-        UserDefaults.standard.set(data, forKey: historyKey)
+    /// A few segments of run-up for transcript hits, so a snippet that starts
+    /// mid-thought reads in context. Screen observations are self-contained
+    /// and get none.
+    private func leadIns(for sources: [AskSource], window: Int, mainContext: ModelContext) -> [String: String] {
+        guard window > 0 else { return [:] }
+        var result: [String: String] = [:]
+        for source in sources where source.result.sourceKind == .transcriptSegment {
+            let meetingID = source.result.meetingID
+            let descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.id == meetingID })
+            guard let meeting = try? mainContext.fetch(descriptor).first else { continue }
+            let around = meeting.segments.segments(around: source.result.sourceID, lead: window, trail: 0)
+            guard let last = around.last, last.id == source.result.sourceID, around.count > 1 else { continue }
+            result[source.id] = around.dropLast()
+                .map { "\($0.speaker.displayName): \($0.text)" }
+                .joined(separator: "\n")
+        }
+        return result
+    }
+
+    // MARK: - Mutation helpers
+
+    private var selectedIndex: Int? {
+        guard let id = selectedConversationID else { return nil }
+        return conversations.firstIndex { $0.id == id }
+    }
+
+    private func conversation(_ id: UUID) -> AskConversation? {
+        conversations.first { $0.id == id }
+    }
+
+    private func ensureConversation(defaultFilter: AskDateFilter) {
+        if selectedIndex != nil { return }
+        let conversation = AskConversation(
+            title: "New conversation",
+            dateFilterRaw: defaultFilter.rawValue
+        )
+        conversations.append(conversation)
+        selectedConversationID = conversation.id
+    }
+
+    private func updateTurn(_ turnID: UUID, in conversationID: UUID, _ body: (inout AskTurn) -> Void) {
+        guard let conversationIndex = conversations.firstIndex(where: { $0.id == conversationID }),
+              let turnIndex = conversations[conversationIndex].turns.firstIndex(where: { $0.id == turnID })
+        else { return }
+        body(&conversations[conversationIndex].turns[turnIndex])
+        conversations[conversationIndex].updatedAt = .now
+        persist()
+    }
+
+    private func failTurn(_ turnID: UUID, in conversationID: UUID, message: String) {
+        updateTurn(turnID, in: conversationID) { $0.errorMessage = message }
+    }
+
+    private func persist() {
+        AskConversationStore.save(conversations)
     }
 }

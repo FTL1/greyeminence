@@ -112,7 +112,7 @@ struct ContentView: View {
             ToolbarItem(placement: .navigation) {
                 DevBuildBanner()
             }
-            if selectedDestination == .meetings || selectedDestination == .archive || selectedDestination == .recording || selectedDestination == .interviews {
+            if selectedDestination == .meetings || selectedDestination == .archive || selectedDestination == .recording || selectedDestination == .interviews || selectedDestination == .ask {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showInspector.toggle()
@@ -467,6 +467,33 @@ struct ContentView: View {
             }
     }
 
+    /// Jump from an Ask snippet to the moment it came from: select its
+    /// meeting, then scroll the transcript (or seek the screen-share player)
+    /// once the detail view has mounted.
+    private func openMeeting(for result: SearchResult) {
+        let descriptor = FetchDescriptor<Meeting>()
+        guard let meeting = (try? modelContext.fetch(descriptor))?.first(where: { $0.id == result.meetingID }) else { return }
+        selectedMeeting = meeting
+        selectedDestination = .meetings
+        switch result.sourceKind {
+        case .transcriptSegment:
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                pendingScrollSegmentID = result.sourceID
+            }
+        case .screenObservation:
+            // The embedding record doesn't carry the frame's timestamp —
+            // resolve it at click time and seek the player there.
+            let timestamp = meeting.screenFrames.first(where: { $0.id == result.sourceID })?.timestamp
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                if let timestamp {
+                    pendingSeekTime = timestamp
+                }
+            }
+        default:
+            break
+        }
+    }
+
     @ViewBuilder
     private var contentArea: some View {
         switch selectedDestination {
@@ -617,29 +644,28 @@ struct ContentView: View {
                 selectedDestination = .meetings
             })
         case .ask:
-            AskView(viewModel: askViewModel, onResultSelected: { result in
-                let descriptor = FetchDescriptor<Meeting>()
-                if let meeting = (try? modelContext.fetch(descriptor))?.first(where: { $0.id == result.meetingID }) {
-                    selectedMeeting = meeting
-                    selectedDestination = .meetings
-                    if result.sourceKind == .transcriptSegment {
-                        // Delay so MeetingDetailView mounts before we try to scroll
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            pendingScrollSegmentID = result.sourceID
-                        }
-                    } else if result.sourceKind == .screenObservation {
-                        // Resolve the frame's timestamp at click time (the
-                        // embedding record doesn't carry it) and seek the
-                        // screen-share player there once the view mounts.
-                        let timestamp = meeting.screenFrames.first(where: { $0.id == result.sourceID })?.timestamp
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            if let timestamp {
-                                pendingSeekTime = timestamp
-                            }
-                        }
+            GeometryReader { geo in
+                // Same split as the meeting detail: conversation on the left,
+                // the evidence behind it in the inspector slot where the
+                // transcript sits everywhere else in the app.
+                let defaultWidth = geo.size.width * 0.32
+                let width = inspectorWidth ?? defaultWidth
+                let clampedWidth = min(max(width, 280), geo.size.width * 0.45)
+
+                HStack(spacing: 0) {
+                    AskView(viewModel: askViewModel)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(2)
+                    if showInspector {
+                        inspectorDragHandle(containerWidth: geo.size.width)
+                        AskSourcesPanel(viewModel: askViewModel, onResultSelected: { result in
+                            openMeeting(for: result)
+                        })
+                        .frame(width: clampedWidth)
+                        .layoutPriority(0)
                     }
                 }
-            })
+            }
         case .activityLog:
             LogView()
         case .settings:

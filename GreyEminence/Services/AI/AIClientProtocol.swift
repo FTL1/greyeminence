@@ -27,6 +27,24 @@ enum AIClientError: LocalizedError {
     }
 }
 
+/// One turn in a multi-turn exchange. Text only: the conversational surfaces
+/// (Ask) are grounded in retrieved snippets, not images, and keeping the type
+/// text-only means the flattening fallback below is always lossless.
+struct AIChatMessage: Sendable {
+    enum Role: String, Sendable {
+        case user
+        case assistant
+    }
+
+    let role: Role
+    let text: String
+
+    init(role: Role, text: String) {
+        self.role = role
+        self.text = text
+    }
+}
+
 protocol AIClient: Sendable {
     /// Stable identifier for the model this client is bound to. Persisted with AI
     /// output as provenance so re-runs can be compared against older output.
@@ -42,6 +60,13 @@ protocol AIClient: Sendable {
     /// Vision variant: `images` are placed before the text content, per API
     /// guidance. Default implementation throws `imagesNotSupported`.
     func sendMessage(system: String, userContent: String, images: [AIImageContent], maxTokens: Int) async throws -> String
+
+    /// Multi-turn variant. `messages` must alternate starting with `.user` and
+    /// end with a `.user` turn — the Anthropic API rejects anything else, and
+    /// callers building a chat naturally satisfy it. The default implementation
+    /// flattens the exchange into a single labelled user message so a client
+    /// that only knows how to send one message still answers in context.
+    func sendConversation(system: String, messages: [AIChatMessage], maxTokens: Int) async throws -> String
 }
 
 extension AIClient {
@@ -53,6 +78,20 @@ extension AIClient {
 
     func sendMessage(system: String, userContent: String, images: [AIImageContent], maxTokens: Int) async throws -> String {
         throw AIClientError.imagesNotSupported(clientName: modelIdentifier)
+    }
+
+    func sendConversation(system: String, messages: [AIChatMessage], maxTokens: Int) async throws -> String {
+        let flattened = messages
+            .map { message in
+                let label = message.role == .user ? "User" : "Assistant"
+                return "\(label): \(message.text)"
+            }
+            .joined(separator: "\n\n")
+        return try await sendMessage(system: system, userContent: flattened, maxTokens: maxTokens)
+    }
+
+    func sendConversation(system: String, messages: [AIChatMessage]) async throws -> String {
+        try await sendConversation(system: system, messages: messages, maxTokens: 8192)
     }
 }
 

@@ -37,16 +37,41 @@ struct BedrockAPIClient: AIClient, Sendable {
         )
     }
 
+    func sendConversation(
+        system: String,
+        messages: [AIChatMessage],
+        maxTokens: Int
+    ) async throws -> String {
+        try await send(
+            system: system,
+            messages: messages.map { Message(role: $0.role.rawValue, content: [.text($0.text)]) },
+            maxTokens: maxTokens
+        )
+    }
+
     private func send(
         system: String,
         blocks: [AIMessageContentBlock],
         maxTokens: Int
     ) async throws -> String {
+        try await send(
+            system: system,
+            messages: [Message(role: "user", content: blocks)],
+            maxTokens: maxTokens
+        )
+    }
+
+    private func send(
+        system: String,
+        messages: [Message],
+        maxTokens: Int
+    ) async throws -> String {
+        let blocks = messages.flatMap(\.content)
         let body = RequestBody(
             anthropic_version: "bedrock-2023-05-31",
             max_tokens: maxTokens,
             system: system,
-            messages: [Message(role: "user", content: blocks)],
+            messages: messages,
             thinking: .disabled
         )
 

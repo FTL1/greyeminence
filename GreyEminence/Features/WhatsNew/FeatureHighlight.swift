@@ -24,6 +24,15 @@ enum FeatureHighlightCatalog {
     /// set its `version` to that release's MARKETING_VERSION.
     static let all: [FeatureHighlight] = [
         FeatureHighlight(
+            id: "ask-conversations",
+            version: "0.31.0",
+            title: "Ask is a conversation now",
+            summary: "Ask keeps the thread: follow up, dig in, change your mind, and it carries the context — including a follow-up like \"what did she say about that?\", which it works out before searching. The snippets behind every answer sit in the side panel, numbered to match the citations, so you can tap [3] and land on the moment it came from.",
+            systemImage: "bubble.left.and.text.bubble.right",
+            tint: .purple,
+            destination: .ask
+        ),
+        FeatureHighlight(
             id: "discord-calls",
             version: "0.24.0",
             title: "Record Discord calls",
