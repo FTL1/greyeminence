@@ -26,9 +26,13 @@ final class EmbeddingIndexer {
         let displayText: String
     }
 
-    /// Embed everything in a single meeting. Writes one SwiftData save at the end.
-    func indexMeeting(_ meeting: Meeting) async {
-        guard service.isAvailable else { return }
+    /// Embed everything in a single meeting. Writes one SwiftData save at the
+    /// end. Returns how many records were written, so a caller running a full
+    /// reindex can tell "this meeting had nothing to index" from "every call
+    /// to the provider failed".
+    @discardableResult
+    func indexMeeting(_ meeting: Meeting) async -> Int {
+        guard service.isAvailable else { return 0 }
 
         // Snapshot every value we need BEFORE the first await. Indexing kicks
         // off from stopRecording, which means the meeting is on screen — and
@@ -37,7 +41,9 @@ final class EmbeddingIndexer {
         // SwiftData properties is at best lossy and at worst a crash.
         let snapshot = MeetingSnapshot(meeting: meeting)
         let items = Self.workItems(for: snapshot)
-        guard !items.isEmpty else { return }
+        // No content is a success with nothing to do — distinct from a
+        // provider that failed on everything it was given.
+        guard !items.isEmpty else { return 0 }
 
         // One batched call so a network-backed provider can fan out. The
         // on-device provider still runs these strictly serially — its
@@ -45,8 +51,10 @@ final class EmbeddingIndexer {
         let vectors = await service.embedAll(items.map(\.embeddingText))
 
         var indexedFrames = 0
+        var written = 0
         for (item, vector) in zip(items, vectors) {
             guard let vector else { continue }
+            written += 1
             store.upsert(EmbeddingRecord(
                 id: item.id,
                 sourceID: item.sourceID,
@@ -65,6 +73,7 @@ final class EmbeddingIndexer {
         }
 
         store.save()
+        return written
     }
 
     /// Everything in a meeting that gets a vector, in one flat list.
@@ -211,16 +220,65 @@ final class EmbeddingIndexer {
 
     /// Full reindex across all meetings in the main store. Call after the user
     /// switches embedding providers or presses "Reindex all".
-    func reindexAll(mainContext: ModelContext, onProgress: @MainActor @escaping (Int, Int) -> Void) async {
-        store.deleteRecords(matching: service.modelIdentifier)
+    enum ReindexOutcome: Sendable, Equatable {
+        case completed(meetings: Int)
+        /// Nothing was destroyed — the previous index is still intact.
+        case unavailable(String)
+        /// Aborted mid-run after repeated failures.
+        case aborted(String)
+    }
+
+    /// Give up after this many meetings produce no vectors at all. A provider
+    /// that is misconfigured fails identically on every record, and grinding
+    /// through 433 meetings to prove it wastes minutes and fills the log with
+    /// hundreds of copies of one error.
+    private static let failureAbortThreshold = 3
+
+    /// Rebuild the whole index with the current service.
+    ///
+    /// Order matters here and it did not used to. The old index is left alone
+    /// until the new provider has proved it can actually produce a vector:
+    /// a provider that 403s on every call used to leave the user with no index
+    /// at all, having deleted a working one before discovering it couldn't
+    /// replace it.
+    func reindexAll(mainContext: ModelContext, onProgress: @MainActor @escaping (Int, Int) -> Void) async -> ReindexOutcome {
+        guard service.isAvailable else {
+            return .unavailable("\(service.modelIdentifier) isn't configured.")
+        }
+        // Canary. One real call, before anything is deleted.
+        guard await service.embed("Grey Eminence search index probe") != nil else {
+            return .unavailable(
+                "Couldn't produce a test vector — the index was left untouched. Check the Activity Log for the provider's error."
+            )
+        }
 
         let meetings = (try? mainContext.fetch(FetchDescriptor<Meeting>())) ?? []
         let total = meetings.count
+        var consecutiveFailures = 0
+
         for (i, meeting) in meetings.enumerated() {
             onProgress(i, total)
-            await indexMeeting(meeting)
+            let indexed = await indexMeeting(meeting)
+            if indexed == 0 {
+                consecutiveFailures += 1
+                if consecutiveFailures >= Self.failureAbortThreshold {
+                    return .aborted(
+                        "Stopped after \(Self.failureAbortThreshold) meetings produced nothing — see the Activity Log. \(i) of \(total) were indexed."
+                    )
+                }
+            } else {
+                consecutiveFailures = 0
+            }
         }
         onProgress(total, total)
+
+        // Only now that a full index exists is it safe to retire the previous
+        // model's records.
+        let pruned = store.deleteRecords(notMatchingModel: service.modelIdentifier)
+        if pruned > 0 {
+            LogManager.send("Reindex: retired \(pruned) record(s) from the previous embedding model", category: .general)
+        }
+        return .completed(meetings: total)
     }
 
     // MARK: - Chunking

@@ -15,6 +15,7 @@ struct AskSettingsView: View {
     @State private var coverage = Coverage(indexed: 0, total: 0)
     @State private var showReindexPrompt = false
     @State private var previousProviderRaw: String?
+    @State private var reindexError: String?
 
     private var provider: EmbeddingProvider {
         EmbeddingProvider(rawValue: embeddingProviderRaw) ?? .nlEmbedding
@@ -79,15 +80,25 @@ struct AskSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if let reindexError {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(reindexError)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+                }
                 HStack {
                     Button(isReindexing ? "Reindexing…" : "Reindex all meetings") {
                         Task { await reindexAll() }
                     }
-                    .disabled(isReindexing)
+                    .disabled(isReindexing || !provider.isAvailable)
                     if isReindexing && reindexTotal > 0 {
                         ProgressView(value: Double(reindexDone), total: Double(reindexTotal))
                             .frame(width: 120)
-                        Text("\(reindexDone)/\(reindexTotal)")
+                        Text("\(reindexDone)/\(reindexTotal) meetings")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
@@ -231,19 +242,24 @@ struct AskSettingsView: View {
         guard let store = EmbeddingStore.shared else { return }
         let provider = EmbeddingProvider(rawValue: embeddingProviderRaw) ?? .nlEmbedding
         let service = provider.makeService()
-        guard service.isAvailable else { return }
-
         isReindexing = true
+        reindexError = nil
         defer {
             isReindexing = false
             embeddingCount = store.count()
             coverage = currentModelCoverage()
         }
         let indexer = EmbeddingIndexer(store: store, service: service)
-        await indexer.reindexAll(mainContext: modelContext) { done, total in
+        let outcome = await indexer.reindexAll(mainContext: modelContext) { done, total in
             reindexDone = done
             reindexTotal = total
         }
-        lastReindexAt = Date.now.timeIntervalSince1970
+        switch outcome {
+        case .completed:
+            reindexError = nil
+            lastReindexAt = Date.now.timeIntervalSince1970
+        case .unavailable(let message), .aborted(let message):
+            reindexError = message
+        }
     }
 }

@@ -112,10 +112,19 @@ final class EmbeddingStore {
         save()
     }
 
-    func deleteRecords(matching modelIdentifier: String) {
+    /// Drop every record NOT produced by `modelIdentifier` — the index only
+    /// ever serves one model, so the others are dead weight.
+    ///
+    /// Named for what it deletes. It was called `deleteRecords(matching:)`
+    /// while deleting the complement, which read as a safe no-op at the top of
+    /// a reindex and was in fact the line that destroyed the working index.
+    @discardableResult
+    func deleteRecords(notMatchingModel modelIdentifier: String) -> Int {
         let predicate = #Predicate<EmbeddingRecord> { $0.modelIdentifier != modelIdentifier }
+        let count = (try? context.fetchCount(FetchDescriptor<EmbeddingRecord>(predicate: predicate))) ?? 0
         try? context.delete(model: EmbeddingRecord.self, where: predicate)
         save()
+        return count
     }
 
     /// Remove every embedding for a single meeting. Called when the meeting is
