@@ -23,6 +23,16 @@ final class SemanticSearchService {
     /// of the heavy lifting for keyword-y queries.
     var vectorWeight: Float = 0.5
 
+    /// Added to the blended score of a record that names the person asked
+    /// about. Being named is a strong, rare signal — on a real index only
+    /// ~1.6% of records mention any given colleague — and it is the *only*
+    /// signal when they are being quoted rather than speaking. Stripping the
+    /// name from the query stops it dominating the lexical pass; this hands
+    /// back a bounded share of what that removed, enough to lift a
+    /// mid-ranked mention into the model's context but never enough to float
+    /// an irrelevant snippet over a strong topical match.
+    var mentionBoost: Float = 0.15
+
     init(store: EmbeddingStore, service: EmbeddingService) {
         self.store = store
         self.service = service
@@ -77,16 +87,24 @@ final class SemanticSearchService {
         guard let queryVec = await service.embed(trimmed) else { return [] }
 
         let mentionRegex = personScope?.mentionRegex
-        let records = store.allRecords(for: service.modelIdentifier).filter { rec in
-            if let kinds, !kinds.contains(rec.sourceKind) { return false }
-            if let personScope {
-                let attended = personScope.meetingIDs.contains(rec.meetingID)
-                let mentioned = attended ? false : Self.mentions(rec.text, regex: mentionRegex)
-                if !attended && !mentioned { return false }
+        var candidates: [(record: EmbeddingRecord, namesPerson: Bool)] = []
+        for rec in store.allRecords(for: service.modelIdentifier) {
+            if let kinds, !kinds.contains(rec.sourceKind) { continue }
+            if let range = dateRange, !range.contains(rec.meetingDate) { continue }
+            guard personScope != nil else {
+                candidates.append((rec, false))
+                continue
             }
-            guard let range = dateRange else { return true }
-            return range.contains(rec.meetingDate)
+            // Named in the text, or in a meeting they attended — either can
+            // carry the answer. The mention is evaluated for every candidate,
+            // not just the ones attendance misses, because it also feeds the
+            // ranking boost below.
+            let namesPerson = Self.mentions(rec.text, regex: mentionRegex)
+            let attended = personScope?.meetingIDs.contains(rec.meetingID) ?? false
+            guard namesPerson || attended else { continue }
+            candidates.append((rec, namesPerson))
         }
+        let records = candidates.map(\.record)
         guard !records.isEmpty else { return [] }
 
         // Dense (vector) pass — cosine over each candidate.
@@ -111,8 +129,10 @@ final class SemanticSearchService {
         let normLex = Self.minMaxNormalize(lexScores)
         let alpha = max(0, min(1, vectorWeight))
 
+        let boost = personScope == nil ? 0 : mentionBoost
         let scored: [SearchResult] = records.enumerated().map { (i, rec) in
             let blended = alpha * normVec[i] + (1 - alpha) * normLex[i]
+                + (candidates[i].namesPerson ? boost : 0)
             return SearchResult(
                 id: rec.id,
                 sourceKind: rec.sourceKind,

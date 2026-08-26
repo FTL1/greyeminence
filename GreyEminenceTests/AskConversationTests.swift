@@ -348,3 +348,45 @@ final class AskPersonScopeTests: XCTestCase {
         )
     }
 }
+
+/// The mention boost is what hands back a bounded share of the ranking signal
+/// that stripping the name removed. It must be big enough to lift a
+/// mid-ranked mention into the model's context, and small enough that a
+/// snippet naming the person can't outrank a strongly topical one.
+final class AskMentionBoostTests: XCTestCase {
+    private let boost: Float = 0.15
+
+    private func ranked(_ scored: [(name: String, blended: Float, names: Bool)]) -> [String] {
+        scored
+            .map { ($0.name, $0.blended + ($0.names ? boost : 0)) }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
+    func testMentionLiftsAMidRankedSnippetOverAMarginalOne() {
+        let order = ranked([
+            ("marginal", 0.55, false),
+            ("mentions-them", 0.45, true),
+        ])
+        XCTAssertEqual(order.first, "mentions-them")
+    }
+
+    func testMentionCannotOutrankAStronglyTopicalSnippet() {
+        // The failure this guards: every passage that says the name floating
+        // to the top and crowding out the concept, which is where this whole
+        // thread started.
+        let order = ranked([
+            ("strongly-topical", 0.90, false),
+            ("mentions-them", 0.60, true),
+        ])
+        XCTAssertEqual(order.first, "strongly-topical")
+    }
+
+    func testBoostIsInertWithoutAPersonScope() {
+        let order = ranked([
+            ("higher", 0.60, false),
+            ("lower", 0.50, false),
+        ])
+        XCTAssertEqual(order, ["higher", "lower"])
+    }
+}

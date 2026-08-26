@@ -262,7 +262,14 @@ final class AskViewModel {
 
         // New hits lead; snippets carried from earlier answers follow, so a
         // follow-up still sees the evidence it's asking about.
-        var prompted = Array(retrieved.prefix(snippetCount))
+        //
+        // A person-scoped pool is both small and precise, so widening what
+        // reaches the model costs little and matters a lot: the model bridges
+        // "couldn't process due to costs" to "there's no way we can turn this
+        // on" far better than word-averaged on-device embeddings ever will.
+        // Getting the snippet in front of it is most of the battle.
+        let promptedCount = people == nil ? snippetCount : max(snippetCount, 25)
+        var prompted = Array(retrieved.prefix(promptedCount))
         for number in carried where !prompted.contains(number) {
             prompted.append(number)
         }
