@@ -34,10 +34,12 @@ full detail; older ones are summarized. The version number tracks
   discussed X — his name is a rare word, so it dominated the match, and
   speakers are labelled "Speaker 3" rather than by name, so it carried no
   attribution signal at all.
-- A name recognised from your contacts now narrows the search to the
-  meetings that person attended, and is removed from the query text so
-  the rest of the question does the matching. The narrowing is shown
-  under your question, along with how many meetings it left.
+- A name recognised from your contacts now narrows the search to
+  material connected to them — the meetings they attended *and*
+  anywhere they are named — and is removed from the query text so the
+  rest of the question drives the ranking. Both halves matter: people
+  get quoted in rooms they were never in, and that relayed remark is
+  often the answer. The narrowing is shown under your question.
 - Full names always count. A bare first or last name counts only
   alongside an attribution cue ("what did Erin *say*", "Erin's
   *concerns*"), so "can you mark that as done" doesn't quietly restrict

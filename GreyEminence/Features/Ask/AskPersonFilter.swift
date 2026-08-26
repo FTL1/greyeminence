@@ -132,72 +132,101 @@ enum AskPersonFilter {
 
     private static func containsCapitalized(_ token: String, in query: String) -> Bool {
         let capitalized = token.prefix(1).uppercased() + token.dropFirst()
-        return rawTokens(query).contains(capitalized)
+        return wordSpans(query).contains { $0.text == capitalized }
     }
 
-    /// Remove each matched span from the query, preserving everything else.
+    /// Remove each matched span from the query.
+    ///
+    /// Splices the original string rather than rebuilding it from tokens, so
+    /// contractions and punctuation survive: rebuilding turned "we couldn't
+    /// process" into "we couldnt process", and "couldnt" matches nothing in
+    /// the index.
     private static func strip(spans: [[String]], from query: String) -> String {
-        let raw = rawTokens(query)
-        var drop = Set<Int>()
+        let words = wordSpans(query)
+        var cut: [Range<String.Index>] = []
         for span in spans {
             var index = 0
-            while index + span.count <= raw.count {
-                let window = raw[index..<(index + span.count)].map { $0.lowercased() }
+            while index + span.count <= words.count {
+                let window = words[index..<(index + span.count)].map { $0.text.lowercased() }
                 if window == span {
-                    for offset in 0..<span.count { drop.insert(index + offset) }
+                    cut.append(words[index].range.lowerBound..<words[index + span.count - 1].range.upperBound)
                     index += span.count
                 } else {
                     index += 1
                 }
             }
         }
-        let kept = raw.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
-        return kept.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cut.isEmpty else { return query }
+
+        var output = query
+        for range in cut.sorted(by: { $0.lowerBound > $1.lowerBound }) {
+            output.replaceSubrange(range, with: "")
+        }
+        return output
+            .replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+([,.;:?!])"#, with: "$1", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - Tokenizing
 
-    /// Words as written, so capitalization survives for the ambiguity check.
-    /// A possessive is reduced to the name itself: "Stephen's" tokenizes as
-    /// "Stephen", so it matches the roster and gets stripped along with the
-    /// rest of the reference.
-    private static func rawTokens(_ text: String) -> [String] {
-        var tokens: [String] = []
-        var current = ""
+    private struct WordSpan {
+        let text: String
+        let range: Range<String.Index>
+    }
 
-        func flush() {
-            guard !current.isEmpty else { return }
-            tokens.append(current)
+    /// Words as written, with their ranges, so capitalization survives for the
+    /// ambiguity check and the original string can be spliced.
+    ///
+    /// A trailing possessive ends the word without joining it: "Stephen's"
+    /// yields "Stephen" (spanning the apostrophe-s, so stripping removes the
+    /// whole reference). An internal apostrophe keeps a token together, which
+    /// is what "O'Brien" and "couldn't" both need.
+    private static func wordSpans(_ text: String) -> [WordSpan] {
+        var spans: [WordSpan] = []
+        var current = ""
+        var start: String.Index?
+        var index = text.startIndex
+
+        func flush(end: String.Index) {
+            guard !current.isEmpty, let begin = start else { current = ""; start = nil; return }
+            spans.append(WordSpan(text: current, range: begin..<end))
             current = ""
+            start = nil
         }
 
-        var characters = Array(text)
-        var index = 0
-        while index < characters.count {
-            let character = characters[index]
+        while index < text.endIndex {
+            let character = text[index]
+            let next = text.index(after: index)
             if character.isLetter || character.isNumber {
+                if start == nil { start = index }
                 current.append(character)
             } else if character == "'" || character == "\u{2019}" {
-                // Trailing "'s" ends the word without becoming part of it;
-                // an internal apostrophe (O'Brien) keeps the token together.
-                let next = index + 1 < characters.count ? characters[index + 1] : nil
-                let after = index + 2 < characters.count ? characters[index + 2] : nil
-                if let next, next == "s" || next == "S", after == nil || !(after!.isLetter || after!.isNumber) {
-                    flush()
-                    index += 2
+                let following = next < text.endIndex ? text[next] : nil
+                let after = next < text.endIndex ? text.index(after: next) : text.endIndex
+                let afterCharacter = after < text.endIndex ? text[after] : nil
+                let isPossessive = (following == "s" || following == "S")
+                    && !(afterCharacter?.isLetter ?? false)
+                    && !(afterCharacter?.isNumber ?? false)
+                if isPossessive {
+                    flush(end: after)
+                    index = after
                     continue
                 }
+                // Internal apostrophe — part of the word.
+                if start == nil { start = index }
+                current.append(character)
             } else {
-                flush()
+                flush(end: index)
             }
-            index += 1
+            index = next
         }
-        flush()
-        return tokens
+        flush(end: text.endIndex)
+        return spans
     }
 
     static func tokens(_ text: String) -> [String] {
-        rawTokens(text).map { $0.lowercased() }
+        wordSpans(text).map { $0.text.replacingOccurrences(of: "'", with: "").lowercased() }
     }
 
     private static func firstIndex(of needle: [String], in haystack: [String]) -> Int? {

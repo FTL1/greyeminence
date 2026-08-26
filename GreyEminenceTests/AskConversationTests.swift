@@ -303,3 +303,48 @@ final class AskConversationTests: XCTestCase {
         XCTAssertTrue(prompt.contains("what did she say about timelines?"))
     }
 }
+
+/// The person scope must include material where somebody is *named*, not just
+/// meetings they sat in. This is the shape of the regression that lost a real
+/// answer: the snippet was in a meeting Stephen Smith did not attend, and it
+/// was someone else relaying what he had said.
+final class AskPersonScopeTests: XCTestCase {
+    private let attended = UUID()
+    private let notAttended = UUID()
+
+    private func scope() -> SemanticSearchService.PersonScope {
+        .init(meetingIDs: [attended], mentionNames: ["stephen smith", "stephen", "smith"])
+    }
+
+    private func admits(meetingID: UUID, text: String) -> Bool {
+        SemanticSearchService.PersonScope.admitsForTesting(scope(), meetingID: meetingID, text: text)
+    }
+
+    func testMeetingTheyAttendedIsAdmitted() {
+        XCTAssertTrue(admits(meetingID: attended, text: "nothing about anyone in particular"))
+    }
+
+    func testMentionInAMeetingTheyMissedIsAdmitted() {
+        XCTAssertTrue(admits(
+            meetingID: notAttended,
+            text: "Me: And so what Stephen's fear is, well, it's not even a fear. He just said there's no way."
+        ))
+    }
+
+    func testUnrelatedMaterialIsExcluded() {
+        XCTAssertFalse(admits(meetingID: notAttended, text: "Me: the ingestion pipeline throughput looks fine"))
+    }
+
+    func testMentionMatchingRespectsWordBoundaries() {
+        // A short surname must not match inside an ordinary word — this is why
+        // parts shorter than four characters never become mention terms.
+        let narrow = SemanticSearchService.PersonScope(meetingIDs: [], mentionNames: ["gene huh", "gene"])
+        XCTAssertFalse(
+            SemanticSearchService.PersonScope.admitsForTesting(narrow, meetingID: notAttended, text: "we generate the report nightly"),
+            "\"gene\" must not match inside \"generate\""
+        )
+        XCTAssertTrue(
+            SemanticSearchService.PersonScope.admitsForTesting(narrow, meetingID: notAttended, text: "Gene walked through the intake flow")
+        )
+    }
+}

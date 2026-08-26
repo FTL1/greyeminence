@@ -195,4 +195,33 @@ extension AskPersonFilterTests {
             XCTAssertEqual(detection?.names, [name], "\(first) should resolve without capitalization")
         }
     }
+
+    // MARK: - Regressions
+
+    /// The query that exposed the hard-filter mistake. Stripping must splice
+    /// the original string, not rebuild it from tokens: rebuilding produced
+    /// "we couldnt process", and "couldnt" matches nothing in the index.
+    func testStrippingPreservesContractionsAndPunctuation() throws {
+        let detection = try XCTUnwrap(
+            AskPersonFilter.detect(in: "What did Stephen Smith say we couldn't process due to costs?", roster: roster)
+        )
+        XCTAssertEqual(detection.names, ["Stephen Smith"])
+        XCTAssertTrue(detection.strippedQuery.contains("couldn't"), "got: \(detection.strippedQuery)")
+        XCTAssertTrue(detection.strippedQuery.hasSuffix("costs?"), "got: \(detection.strippedQuery)")
+        XCTAssertFalse(detection.strippedQuery.contains("  "), "got: \(detection.strippedQuery)")
+    }
+
+    func testPossessiveStrippingRemovesTheWholeReference() throws {
+        let detection = try XCTUnwrap(
+            AskPersonFilter.detect(in: "What was Stephen Smith's concern about the pipeline?", roster: roster)
+        )
+        XCTAssertEqual(detection.strippedQuery, "What was concern about the pipeline?")
+    }
+
+    func testApostropheSurnameIsNotBrokenByPossessiveHandling() {
+        // "O'Brien" must stay one token; only a trailing "'s" ends a word.
+        XCTAssertEqual(AskPersonFilter.tokens("Erin O'Brien"), ["erin", "obrien"])
+        XCTAssertEqual(AskPersonFilter.tokens("Erin's"), ["erin"])
+        XCTAssertEqual(AskPersonFilter.tokens("we couldn't"), ["we", "couldnt"])
+    }
 }

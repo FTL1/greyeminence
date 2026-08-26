@@ -173,14 +173,14 @@ struct AskChatView: View {
                     // question about a widely-discussed topic can come back
                     // with only a handful of snippets.
                     Label(
-                        "Only meetings with \(turn.personFilterNames.formatted(.list(type: .and))) · \(turn.personFilterMeetingCount)",
+                        "Scoped to \(turn.personFilterNames.formatted(.list(type: .and))) · \(turn.personFilterMeetingCount) meetings + mentions",
                         systemImage: "person.crop.circle.badge.checkmark"
                     )
                     .font(.caption2)
                     .foregroundStyle(Color.accentColor)
                     .lineLimit(2)
                     .multilineTextAlignment(.trailing)
-                    .help("Their name was used to narrow which meetings were searched, not as a search term")
+                    .help("Searched the meetings they attended plus anywhere they're named, and ranked on the rest of your question")
                 }
             }
             .frame(maxWidth: 520, alignment: .trailing)

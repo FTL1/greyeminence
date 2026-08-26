@@ -235,7 +235,7 @@ final class AskViewModel {
         if let people {
             updateTurn(turnID, in: conversationID) {
                 $0.personFilterNames = people.names
-                $0.personFilterMeetingCount = people.meetingIDs.count
+                $0.personFilterMeetingCount = people.meetingCount
             }
         }
 
@@ -251,7 +251,7 @@ final class AskViewModel {
             topK: 40,
             dateRange: conversation(conversationID)?.dateFilter.range(),
             kinds: [.transcriptSegment, .screenObservation, .sessionNarrative],
-            meetingIDs: people?.meetingIDs
+            personScope: people?.scope
         )
         guard !Task.isCancelled else { return }
 
@@ -330,19 +330,21 @@ final class AskViewModel {
         }
     }
 
-    /// A person named in the question, resolved to the meetings they attended.
+    /// A person named in the question, resolved against the roster.
     struct PersonScope {
         let names: [String]
-        let meetingIDs: Set<UUID>
+        let scope: SemanticSearchService.PersonScope
         let strippedQuery: String
+
+        var meetingCount: Int { scope.meetingIDs.count }
     }
 
-    /// Resolve any contact named in `query` and collect their meetings.
+    /// Resolve any contact named in `query`, and build the scope that narrows
+    /// the search to material connected to them.
     ///
     /// Returns nil — meaning "search the question exactly as asked" — when
-    /// nobody resolves, or when the people who did resolve have no meetings
-    /// between them. That second case matters: silently filtering to an empty
-    /// set would turn a good question into "no matches".
+    /// nobody resolves. Anyone who does resolve contributes both their
+    /// meetings and their name, because either one can carry the answer.
     private func resolvePeople(in query: String, mainContext: ModelContext) -> PersonScope? {
         let contacts = (try? mainContext.fetch(FetchDescriptor<Contact>())) ?? []
         guard !contacts.isEmpty else { return nil }
@@ -358,24 +360,44 @@ final class AskViewModel {
 
         let matched = contacts.filter { detection.names.contains($0.name) }
         let meetingIDs = Set(matched.flatMap { $0.meetings.map(\.id) })
-        guard !meetingIDs.isEmpty else {
+
+        // Names to look for in the text. The full name always; the parts only
+        // when they're distinctive enough to survive word-boundary matching
+        // without swamping the candidate set — "Huh" is a real surname here
+        // and also the most common noise token in a transcript.
+        var mentionNames = Set<String>()
+        for contact in matched {
+            mentionNames.insert(contact.name.lowercased())
+            for alias in contact.speakerAliases + [contact.nickname].compactMap({ $0 }) where alias.count >= 4 {
+                mentionNames.insert(alias.lowercased())
+            }
+            for part in AskPersonFilter.tokens(contact.name) where part.count >= 4 {
+                mentionNames.insert(part)
+            }
+        }
+
+        guard !meetingIDs.isEmpty || !mentionNames.isEmpty else {
             LogManager.send(
-                "Ask: \(detection.names.joined(separator: ", ")) named but attended no meetings — searching without a person filter",
+                "Ask: \(detection.names.joined(separator: ", ")) named but nothing to scope to — searching without a person filter",
                 category: .general
             )
             return nil
         }
+
         // A stripped query with nothing left ("what did Stephen say?") has no
-        // concept to search for. Keep the filter, but let the original wording
+        // concept to search for. Keep the scope, but let the original wording
         // drive ranking within it rather than embedding an empty string.
         let stripped = detection.strippedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         LogManager.send(
-            "Ask: filtering to \(meetingIDs.count) meeting(s) with \(detection.names.joined(separator: ", ")); searching \"\(stripped.isEmpty ? query : stripped)\"",
+            "Ask: scoping to \(detection.names.joined(separator: ", ")) — \(meetingIDs.count) meeting(s) attended plus mentions of \(mentionNames.sorted().joined(separator: "/")); searching \"\(stripped.isEmpty ? query : stripped)\"",
             category: .general
         )
         return PersonScope(
             names: detection.names,
-            meetingIDs: meetingIDs,
+            scope: SemanticSearchService.PersonScope(
+                meetingIDs: meetingIDs,
+                mentionNames: Array(mentionNames)
+            ),
             strippedQuery: stripped.isEmpty ? query : stripped
         )
     }

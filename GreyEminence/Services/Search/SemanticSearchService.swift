@@ -28,24 +28,62 @@ final class SemanticSearchService {
         self.service = service
     }
 
-    /// `meetingIDs` restricts the candidate set before any scoring — used to
-    /// turn a person named in the question into a where-clause over the
-    /// meetings they attended, rather than a search term that just matches
-    /// wherever their name was spoken.
+    /// Narrows the candidate set to material connected to a particular person,
+    /// before any scoring happens.
+    ///
+    /// Connected means one of two things, and both are needed. They were in
+    /// the meeting — or they are *named in the text*. Attendance alone is not
+    /// enough, because people are quoted in rooms they were never in: the
+    /// snippet that answers "what did Stephen say we couldn't process" is
+    /// someone else relaying it in a meeting Stephen did not attend.
+    struct PersonScope: Sendable {
+        /// Meetings the person attended.
+        let meetingIDs: Set<UUID>
+        /// Lowercased names to look for in the record text — full name plus
+        /// the parts, matched on word boundaries so "Gene" doesn't match
+        /// "generate" and "Huh" doesn't match every hesitation in a transcript.
+        let mentionNames: [String]
+
+        /// Whether a record belongs to this scope. Exposed so the union rule —
+        /// the part that a hard attendance filter got wrong — is testable
+        /// without a store.
+        nonisolated static func admitsForTesting(_ scope: PersonScope, meetingID: UUID, text: String) -> Bool {
+            scope.meetingIDs.contains(meetingID)
+                || SemanticSearchService.mentions(text, regex: scope.mentionRegex)
+        }
+
+        fileprivate var mentionRegex: NSRegularExpression? {
+            let alternatives = mentionNames
+                .filter { !$0.isEmpty }
+                .map { NSRegularExpression.escapedPattern(for: $0) }
+                .joined(separator: "|")
+            guard !alternatives.isEmpty else { return nil }
+            return try? NSRegularExpression(
+                pattern: "\\b(?:\(alternatives))\\b",
+                options: [.caseInsensitive]
+            )
+        }
+    }
+
     func search(
         _ query: String,
         topK: Int = 25,
         dateRange: ClosedRange<Date>? = nil,
         kinds: Set<EmbeddingRecord.SourceKind>? = nil,
-        meetingIDs: Set<UUID>? = nil
+        personScope: PersonScope? = nil
     ) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         guard let queryVec = await service.embed(trimmed) else { return [] }
 
+        let mentionRegex = personScope?.mentionRegex
         let records = store.allRecords(for: service.modelIdentifier).filter { rec in
             if let kinds, !kinds.contains(rec.sourceKind) { return false }
-            if let meetingIDs, !meetingIDs.contains(rec.meetingID) { return false }
+            if let personScope {
+                let attended = personScope.meetingIDs.contains(rec.meetingID)
+                let mentioned = attended ? false : Self.mentions(rec.text, regex: mentionRegex)
+                if !attended && !mentioned { return false }
+            }
             guard let range = dateRange else { return true }
             return range.contains(rec.meetingDate)
         }
@@ -88,6 +126,11 @@ final class SemanticSearchService {
         }
 
         return Array(scored.sorted { $0.score > $1.score }.prefix(topK))
+    }
+
+    nonisolated fileprivate static func mentions(_ text: String, regex: NSRegularExpression?) -> Bool {
+        guard let regex else { return false }
+        return regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
     // MARK: - Cosine
