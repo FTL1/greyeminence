@@ -42,22 +42,50 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
     /// refresh rather than failing the rest of a long reindex.
     private let credentialBox = CredentialBox()
 
+    /// Defaults keys for the embedding account. Separate from the analysis
+    /// account's `awsProfile` / `awsRegion` because the two need not be the
+    /// same: an org can grant a role the Anthropic models and withhold
+    /// everything else, leaving Titan reachable only from a different account.
+    /// Empty means "use whatever the analysis account uses", so a single-
+    /// account setup needs no configuration at all.
+    static let profileKey = "embeddingAWSProfile"
+    static let regionKey = "embeddingAWSRegion"
+
     init(region: String? = nil, profile: String? = nil) {
+        let defaults = UserDefaults.standard
         self.region = region
-            ?? UserDefaults.standard.string(forKey: "awsRegion")
+            ?? Self.nonEmpty(defaults.string(forKey: Self.regionKey))
+            ?? Self.nonEmpty(defaults.string(forKey: "awsRegion"))
             ?? "us-east-1"
         self.profile = profile
-            ?? UserDefaults.standard.string(forKey: "awsProfile")
+            ?? Self.nonEmpty(defaults.string(forKey: Self.profileKey))
+            ?? Self.nonEmpty(defaults.string(forKey: "awsProfile"))
             ?? "default"
     }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return value
+    }
+
+    /// Which account and region this instance will actually use — surfaced in
+    /// Settings so a failure names the credentials it was tried with rather
+    /// than leaving the user to guess which of two accounts was in play.
+    var resolvedProfile: String { profile }
+    var resolvedRegion: String { region }
 
     /// Configured, not proven — verifying would mean a network round trip on
     /// a synchronous property. A wrong guess surfaces as a logged failure on
     /// the first embed rather than a silent empty index, because
     /// `EmbeddingIndexer` skips work when this is false.
+    ///
+    /// Deliberately not tied to the app's AI provider. Embeddings can run on a
+    /// different AWS account than the analysis does — which is the whole point
+    /// of the separate profile setting — and may even pair a Bedrock index
+    /// with analysis on the Anthropic API. All that's required is an AWS
+    /// profile to authenticate as.
     var isAvailable: Bool {
-        UserDefaults.standard.string(forKey: "aiProvider") == "bedrock"
-            && (AWSCredentialLoader.hasBookmark || !FileManager.default.homeDirectoryForCurrentUser.path.isEmpty)
+        !AWSCredentialLoader.availableProfiles().isEmpty
     }
 
     func embed(_ text: String) async -> [Float]? {
@@ -70,8 +98,11 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
         do {
             return try await invoke(clamped, allowingRefresh: true)
         } catch {
+            // Name the credentials, not just the error: with two accounts in
+            // play, "not authorized" is meaningless without knowing which one
+            // was used.
             LogManager.send(
-                "Titan embedding failed: \(error.localizedDescription)",
+                "Titan embedding failed (profile \(profile), \(region)): \(error.localizedDescription)",
                 category: .ai,
                 level: .warning
             )

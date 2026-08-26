@@ -26,10 +26,11 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
     var isAvailable: Bool {
         switch self {
         case .nlEmbedding: true
-        // Needs the AWS credentials the Bedrock AI provider already uses;
-        // offering it while the app is pointed at the Anthropic API would
-        // just fail on the first embed.
-        case .titan: UserDefaults.standard.string(forKey: "aiProvider") == "bedrock"
+        // Needs an AWS profile to authenticate as — but not the same one the
+        // analysis uses. Embeddings can run on a second account, which is
+        // often the only way to reach Titan when the primary role is scoped
+        // to the Anthropic models.
+        case .titan: !AWSCredentialLoader.availableProfiles().isEmpty
         case .voyage: false
         }
     }
@@ -41,7 +42,7 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
         case .nlEmbedding:
             "Apple's on-device sentence embedding. Nothing leaves the Mac and it's free, but it averages word vectors — it struggles when a question paraphrases what was said rather than reusing its words."
         case .titan:
-            "Amazon Titan Text Embeddings V2, over Bedrock on the AWS credentials this app already uses. A real sentence encoder, so paraphrased questions match; transcripts stay inside the same AWS account that already runs the analysis. Billed per token — a full index of this size is a few cents."
+            "Amazon Titan Text Embeddings V2, over Bedrock. A real sentence encoder, so paraphrased questions match instead of needing the same words. Runs on an AWS account you control — its own profile, so it can differ from the one used for analysis — and meeting text never leaves AWS. Billed per token; a full index of this size is a few cents."
         case .voyage:
             "Higher-scoring, but it would send transcripts to a third-party vendor outside your existing AWS agreement. Not enabled."
         }
@@ -54,7 +55,7 @@ enum EmbeddingProvider: String, CaseIterable, Identifiable {
         case .nlEmbedding:
             ""
         case .titan:
-            "Needs the Bedrock AI provider. Switch AI → Provider to Bedrock first, then come back."
+            "No AWS profiles found. Point Settings → AI at your ~/.aws directory first."
         case .voyage:
             "Not implemented — Bedrock keeps meeting text inside your own AWS account, which Voyage would not."
         }

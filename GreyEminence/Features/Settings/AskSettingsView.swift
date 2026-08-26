@@ -16,6 +16,17 @@ struct AskSettingsView: View {
     @State private var showReindexPrompt = false
     @State private var previousProviderRaw: String?
     @State private var reindexError: String?
+    @State private var awsProfiles: [String] = []
+    @State private var isTestingTitan = false
+    @State private var titanTest: TestResult?
+
+    @AppStorage(TitanEmbeddingService.profileKey) private var embeddingProfile: String = ""
+    @AppStorage(TitanEmbeddingService.regionKey) private var embeddingRegion: String = ""
+
+    enum TestResult {
+        case success(String)
+        case failure(String)
+    }
 
     private var provider: EmbeddingProvider {
         EmbeddingProvider(rawValue: embeddingProviderRaw) ?? .nlEmbedding
@@ -61,6 +72,10 @@ struct AskSettingsView: View {
                     Label(provider.unavailableReason, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+
+                if provider == .titan {
+                    titanAccountControls
                 }
 
                 LabeledContent("Indexed items") {
@@ -178,6 +193,8 @@ struct AskSettingsView: View {
         .onAppear {
             embeddingCount = EmbeddingStore.shared?.count() ?? 0
             coverage = currentModelCoverage()
+            AWSCredentialLoader.restoreAccess()
+            awsProfiles = AWSCredentialLoader.availableProfiles()
         }
         .alert("Rebuild the search index?", isPresented: $showReindexPrompt) {
             Button("Rebuild now") {
@@ -200,7 +217,7 @@ struct AskSettingsView: View {
         case .nlEmbedding:
             "Runs on-device: no network, no cost, a few minutes."
         case .titan:
-            "Runs through Bedrock on your existing AWS credentials. Roughly 5.4M tokens for a full index — cents at Titan's rate — and a handful of minutes."
+            "Runs through Bedrock on the AWS profile selected above. Roughly 5.4M tokens for a full index — cents at Titan's rate — and a handful of minutes. Test the connection first."
         case .voyage:
             "Not available."
         }
@@ -223,6 +240,96 @@ struct AskSettingsView: View {
         } catch {
             // resetOnDisk surfaced the error; user can retry from the
             // banner that's still visible.
+        }
+    }
+
+    /// Which AWS account the embedding model runs on.
+    ///
+    /// Its own profile because it need not be the analysis account: a role
+    /// scoped to the Anthropic models can't invoke Titan at all, and the
+    /// answer is usually a second account rather than a policy change. Left
+    /// blank it follows Settings → AI, so a single-account setup shows one
+    /// line and needs no decision.
+    @ViewBuilder
+    private var titanAccountControls: some View {
+        Picker("AWS profile", selection: $embeddingProfile) {
+            Text("Same as AI settings (\(fallbackProfile))").tag("")
+            ForEach(awsProfiles, id: \.self) { profile in
+                Text(profile).tag(profile)
+            }
+        }
+        .onChange(of: embeddingProfile) { _, profile in
+            titanTest = nil
+            // A profile usually declares its own region; adopting it saves
+            // the most common misconfiguration, which is a valid account
+            // pointed at a region the model isn't enabled in.
+            if !profile.isEmpty, let detected = AWSCredentialLoader.loadRegion(profile: profile) {
+                embeddingRegion = detected
+            }
+        }
+
+        Picker("Region", selection: $embeddingRegion) {
+            Text("Same as AI settings (\(fallbackRegion))").tag("")
+            Text("US East (N. Virginia)").tag("us-east-1")
+            Text("US East (Ohio)").tag("us-east-2")
+            Text("US West (Oregon)").tag("us-west-2")
+            Text("EU (Ireland)").tag("eu-west-1")
+            Text("EU (Frankfurt)").tag("eu-central-1")
+            Text("EU (Paris)").tag("eu-west-3")
+            Text("Asia Pacific (Tokyo)").tag("ap-northeast-1")
+            Text("Asia Pacific (Sydney)").tag("ap-southeast-2")
+        }
+        .onChange(of: embeddingRegion) { titanTest = nil }
+
+        HStack(spacing: 8) {
+            Button(isTestingTitan ? "Testing…" : "Test connection") {
+                Task { await testTitan() }
+            }
+            .disabled(isTestingTitan)
+
+            switch titanTest {
+            case .success(let detail):
+                Label(detail, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            case .failure(let detail):
+                Label(detail, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            case nil:
+                Text("Embeds one short string. Confirms the account can invoke Titan before you commit to a full rebuild.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var fallbackProfile: String {
+        UserDefaults.standard.string(forKey: "awsProfile") ?? "default"
+    }
+
+    private var fallbackRegion: String {
+        UserDefaults.standard.string(forKey: "awsRegion") ?? "us-east-1"
+    }
+
+    @MainActor
+    private func testTitan() async {
+        isTestingTitan = true
+        defer { isTestingTitan = false }
+
+        let service = TitanEmbeddingService()
+        let where_ = "\(service.resolvedProfile) · \(service.resolvedRegion)"
+        guard service.isAvailable else {
+            titanTest = .failure("No AWS profiles found.")
+            return
+        }
+        if let vector = await service.embed("Grey Eminence search index probe") {
+            titanTest = .success("\(vector.count)-dim vector from \(where_)")
+        } else {
+            // The provider's own message is already in the log with the
+            // profile and region attached; point at it rather than paraphrase.
+            titanTest = .failure("Couldn't embed with \(where_) — see the Activity Log for the exact error.")
         }
     }
 

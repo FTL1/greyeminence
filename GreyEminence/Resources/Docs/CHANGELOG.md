@@ -41,6 +41,13 @@ full detail; older ones are summarized. The version number tracks
   its free tier would have covered this index outright, but it would have
   meant sending transcripts to a third party, so it is deliberately not
   offered.
+- The embedding account is chosen separately from the analysis account.
+  A role scoped to the Anthropic models can't invoke Titan at all, and
+  the practical answer is usually a second AWS account rather than a
+  policy change — so Titan gets its own profile and region, defaulting
+  to whatever Settings → AI uses. A "Test connection" button embeds one
+  short string and names the account it used, so a permissions problem
+  turns up before a full rebuild rather than during one.
 - Switching methods empties the search until the index is rebuilt —
   vectors from different models can't be compared. The picker now says so
   at the moment you switch, shows how much of the index the selected
