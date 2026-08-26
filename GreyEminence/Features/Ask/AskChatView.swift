@@ -168,6 +168,20 @@ struct AskChatView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.trailing)
                 }
+                if !turn.personFilterNames.isEmpty {
+                    // A restriction this strong has to be visible: it is why a
+                    // question about a widely-discussed topic can come back
+                    // with only a handful of snippets.
+                    Label(
+                        "Only meetings with \(turn.personFilterNames.formatted(.list(type: .and))) · \(turn.personFilterMeetingCount)",
+                        systemImage: "person.crop.circle.badge.checkmark"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(Color.accentColor)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .help("Their name was used to narrow which meetings were searched, not as a search term")
+                }
             }
             .frame(maxWidth: 520, alignment: .trailing)
         }

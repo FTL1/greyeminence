@@ -28,11 +28,16 @@ final class SemanticSearchService {
         self.service = service
     }
 
+    /// `meetingIDs` restricts the candidate set before any scoring — used to
+    /// turn a person named in the question into a where-clause over the
+    /// meetings they attended, rather than a search term that just matches
+    /// wherever their name was spoken.
     func search(
         _ query: String,
         topK: Int = 25,
         dateRange: ClosedRange<Date>? = nil,
-        kinds: Set<EmbeddingRecord.SourceKind>? = nil
+        kinds: Set<EmbeddingRecord.SourceKind>? = nil,
+        meetingIDs: Set<UUID>? = nil
     ) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -40,6 +45,7 @@ final class SemanticSearchService {
 
         let records = store.allRecords(for: service.modelIdentifier).filter { rec in
             if let kinds, !kinds.contains(rec.sourceKind) { return false }
+            if let meetingIDs, !meetingIDs.contains(rec.meetingID) { return false }
             guard let range = dateRange else { return true }
             return range.contains(rec.meetingDate)
         }

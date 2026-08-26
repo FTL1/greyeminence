@@ -76,6 +76,13 @@ struct AskTurn: Codable, Identifiable {
     var promptedNumbers: [Int] = []
     /// Source numbers the answer cites, parsed out of the response text.
     var citedNumbers: [Int] = []
+    /// People the question named, resolved against the contact roster. When
+    /// non-empty the search was restricted to meetings they attended and their
+    /// names were removed from the query text.
+    var personFilterNames: [String] = []
+    /// How many meetings that restriction left. Shown alongside the names so a
+    /// narrow search is visible rather than mysterious.
+    var personFilterMeetingCount: Int = 0
     var createdAt: Date = .now
 }
 

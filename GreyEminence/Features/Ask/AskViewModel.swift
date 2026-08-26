@@ -229,7 +229,17 @@ final class AskViewModel {
             updateTurn(turnID, in: conversationID) { $0.searchQuery = searchQuery }
         }
 
-        // 2. Retrieve.
+        // 2. Turn any person named in the question into a filter over the
+        //    meetings they attended, and drop their name from the query text.
+        let people = resolvePeople(in: searchQuery, mainContext: mainContext)
+        if let people {
+            updateTurn(turnID, in: conversationID) {
+                $0.personFilterNames = people.names
+                $0.personFilterMeetingCount = people.meetingIDs.count
+            }
+        }
+
+        // 3. Retrieve.
         phase = .searching
         let search = SemanticSearchService(store: store, service: embedding)
         // Raw transcript snippets plus screen-share observations and recaps.
@@ -237,10 +247,11 @@ final class AskViewModel {
         // generic AI-generated text crowded out the actual conversation. Screen
         // observations are different: they're the ONLY record of what was shown.
         let found = await search.search(
-            searchQuery,
+            people?.strippedQuery ?? searchQuery,
             topK: 40,
             dateRange: conversation(conversationID)?.dateFilter.range(),
-            kinds: [.transcriptSegment, .screenObservation, .sessionNarrative]
+            kinds: [.transcriptSegment, .screenObservation, .sessionNarrative],
+            meetingIDs: people?.meetingIDs
         )
         guard !Task.isCancelled else { return }
 
@@ -268,7 +279,7 @@ final class AskViewModel {
             return
         }
 
-        // 3. Answer.
+        // 4. Answer.
         let sources = prompted.compactMap { conversations[conversationIndex].source(number: $0) }
         let leadIns = leadIns(for: sources, window: contextWindow, mainContext: mainContext)
         let block = AskPromptBuilder.sourcesBlock(sources, leadIns: leadIns)
@@ -317,6 +328,56 @@ final class AskViewModel {
             LogManager.send("Ask: query rewrite failed, searching verbatim: \(error.localizedDescription)", category: .ai, level: .warning)
             return question
         }
+    }
+
+    /// A person named in the question, resolved to the meetings they attended.
+    struct PersonScope {
+        let names: [String]
+        let meetingIDs: Set<UUID>
+        let strippedQuery: String
+    }
+
+    /// Resolve any contact named in `query` and collect their meetings.
+    ///
+    /// Returns nil — meaning "search the question exactly as asked" — when
+    /// nobody resolves, or when the people who did resolve have no meetings
+    /// between them. That second case matters: silently filtering to an empty
+    /// set would turn a good question into "no matches".
+    private func resolvePeople(in query: String, mainContext: ModelContext) -> PersonScope? {
+        let contacts = (try? mainContext.fetch(FetchDescriptor<Contact>())) ?? []
+        guard !contacts.isEmpty else { return nil }
+
+        let roster = contacts.map { contact in
+            AskPersonFilter.Candidate(
+                canonicalName: contact.name,
+                aliases: ([contact.nickname].compactMap { $0 } + contact.speakerAliases)
+                    .filter { !$0.isEmpty }
+            )
+        }
+        guard let detection = AskPersonFilter.detect(in: query, roster: roster) else { return nil }
+
+        let matched = contacts.filter { detection.names.contains($0.name) }
+        let meetingIDs = Set(matched.flatMap { $0.meetings.map(\.id) })
+        guard !meetingIDs.isEmpty else {
+            LogManager.send(
+                "Ask: \(detection.names.joined(separator: ", ")) named but attended no meetings — searching without a person filter",
+                category: .general
+            )
+            return nil
+        }
+        // A stripped query with nothing left ("what did Stephen say?") has no
+        // concept to search for. Keep the filter, but let the original wording
+        // drive ranking within it rather than embedding an empty string.
+        let stripped = detection.strippedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        LogManager.send(
+            "Ask: filtering to \(meetingIDs.count) meeting(s) with \(detection.names.joined(separator: ", ")); searching \"\(stripped.isEmpty ? query : stripped)\"",
+            category: .general
+        )
+        return PersonScope(
+            names: detection.names,
+            meetingIDs: meetingIDs,
+            strippedQuery: stripped.isEmpty ? query : stripped
+        )
     }
 
     /// A few segments of run-up for transcript hits, so a snippet that starts

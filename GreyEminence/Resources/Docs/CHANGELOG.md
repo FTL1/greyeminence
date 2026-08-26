@@ -28,6 +28,23 @@ full detail; older ones are summarized. The version number tracks
 - Your previous Ask history is converted into single-question
   conversations, so nothing is lost.
 
+**A person's name now filters the search instead of skewing it**
+- Asking "what did Stephen Smith say about X" used to return the
+  passages where somebody *said* Stephen's name, not the ones where he
+  discussed X — his name is a rare word, so it dominated the match, and
+  speakers are labelled "Speaker 3" rather than by name, so it carried no
+  attribution signal at all.
+- A name recognised from your contacts now narrows the search to the
+  meetings that person attended, and is removed from the query text so
+  the rest of the question does the matching. The narrowing is shown
+  under your question, along with how many meetings it left.
+- Full names always count. A bare first or last name counts only
+  alongside an attribution cue ("what did Erin *say*", "Erin's
+  *concerns*"), so "can you mark that as done" doesn't quietly restrict
+  the search to a colleague named Mark. If the name matches nobody, or
+  matches somebody with no meetings, the question is searched exactly as
+  asked.
+
 ## 0.30.1 — 2026-08-20
 
 **Open questions lead the report, and look like a callout**
