@@ -74,8 +74,137 @@ enum AWSCredentialLoader {
             return try await loadSSOCredentials(config: ssoConfig)
         }
 
+        // credential_process: an external helper prints credentials as JSON.
+        // Whether a sandboxed app may spawn one is decided by the sandbox at
+        // run time, so this attempts it and reports what actually happened
+        // rather than refusing on principle.
+        if let command = credentialProcessCommand(profile: profile) {
+            return try await loadProcessCredentials(command: command, profile: profile)
+        }
+
         // Fall back to static credentials from ~/.aws/credentials
         return try loadStaticCredentials(profile: profile)
+    }
+
+    // MARK: - credential_process
+
+    static func credentialProcessCommand(profile: String) -> String? {
+        guard let configURL = try? resolveConfigFile(),
+              let content = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
+        let sectionName = profile == "default" ? "default" : "profile \(profile)"
+        let value = parseINI(content)[sectionName]?["credential_process"]
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// Split a credential_process command the way a shell would, so a quoted
+    /// path containing spaces stays one argument.
+    static func tokenizeCommand(_ command: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var quote: Character?
+
+        for character in command {
+            if let active = quote {
+                if character == active { quote = nil } else { current.append(character) }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if character.isWhitespace {
+                if !current.isEmpty { tokens.append(current); current = "" }
+            } else {
+                current.append(character)
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens
+    }
+
+    /// Response shape defined by the credential_process contract.
+    private struct ProcessCredentials: Decodable {
+        let Version: Int?
+        let AccessKeyId: String
+        let SecretAccessKey: String
+        let SessionToken: String?
+    }
+
+    private static func loadProcessCredentials(command: String, profile: String) async throws -> AWSCredentials {
+        let tokens = tokenizeCommand(command)
+        guard let executable = tokens.first else {
+            throw AWSCredentialError.credentialProcessFailed(profile, "empty credential_process command")
+        }
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            throw AWSCredentialError.credentialProcessFailed(
+                profile,
+                "helper not found or not executable at \(executable)"
+            )
+        }
+
+        let output: Data
+        do {
+            output = try await runProcess(executable: executable, arguments: Array(tokens.dropFirst()))
+        } catch let error as AWSCredentialError {
+            throw error
+        } catch {
+            let nsError = error as NSError
+            // The sandbox denies exec with EPERM. Say that plainly — it is a
+            // property of the app, not of the user's AWS setup, and no amount
+            // of reconfiguring the profile will change it.
+            if nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(EPERM) {
+                throw AWSCredentialError.credentialProcessBlocked(profile)
+            }
+            throw AWSCredentialError.credentialProcessFailed(profile, error.localizedDescription)
+        }
+
+        guard let decoded = try? JSONDecoder().decode(ProcessCredentials.self, from: output) else {
+            let text = String(data: output, encoding: .utf8) ?? ""
+            throw AWSCredentialError.credentialProcessFailed(
+                profile,
+                text.isEmpty ? "helper produced no output" : "unexpected output: \(text.prefix(200))"
+            )
+        }
+        return AWSCredentials(
+            accessKeyId: decoded.AccessKeyId,
+            secretAccessKey: decoded.SecretAccessKey,
+            sessionToken: decoded.SessionToken
+        )
+    }
+
+    /// A helper may need to refresh an SSO session, so allow it real time —
+    /// but never hang the caller forever.
+    private static let credentialProcessTimeout: TimeInterval = 60
+
+    private static func runProcess(executable: String, arguments: [String]) async throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+
+        let deadline = Date().addingTimeInterval(credentialProcessTimeout)
+        while process.isRunning && Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if process.isRunning {
+            process.terminate()
+            throw AWSCredentialError.credentialProcessFailed(
+                executable,
+                "timed out after \(Int(credentialProcessTimeout))s"
+            )
+        }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard process.terminationStatus == 0 else {
+            let message = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw AWSCredentialError.credentialProcessFailed(
+                executable,
+                message.isEmpty ? "exited with status \(process.terminationStatus)" : String(message.prefix(200))
+            )
+        }
+        return data
     }
 
     static func loadRegion(profile: String) -> String? {
@@ -123,8 +252,11 @@ enum AWSCredentialLoader {
 
         var isSupported: Bool {
             switch self {
-            case .sso, .staticCredentials: true
-            case .assumeRole, .credentialProcess, .noCredentials: false
+            // credential_process is attempted rather than assumed: whether the
+            // sandbox permits launching the helper is decided at run time, and
+            // the Test connection button reports what actually happened.
+            case .sso, .staticCredentials, .credentialProcess: true
+            case .assumeRole, .noCredentials: false
             }
         }
 
@@ -135,7 +267,7 @@ enum AWSCredentialLoader {
             case .assumeRole(let source):
                 "assumes a role via \(source ?? "another profile") — not supported yet"
             case .credentialProcess:
-                "uses credential_process, which a sandboxed app can't run"
+                "external credential helper"
             case .noCredentials:
                 "no credentials configured"
             }
@@ -438,9 +570,17 @@ enum AWSCredentialError: LocalizedError {
     case ssoTokenNotFound
     case ssoTokenExpired
     case ssoFetchFailed(String)
+    case credentialProcessFailed(String, String)
+    /// The sandbox refused to launch the helper. A property of this app, not
+    /// of the user's AWS configuration.
+    case credentialProcessBlocked(String)
 
     var errorDescription: String? {
         switch self {
+        case .credentialProcessFailed(let profile, let detail):
+            "Profile '\(profile)' credential helper failed: \(detail)"
+        case .credentialProcessBlocked(let profile):
+            "Profile '\(profile)' runs an external credential helper, which macOS blocks this app from launching (it is sandboxed). Use an SSO or access-key profile instead."
         case .profileNotFound(let profile):
             "AWS profile '\(profile)' not found"
         case .missingCredentials(let profile):

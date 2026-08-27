@@ -297,6 +297,18 @@ struct AskSettingsView: View {
             }
             .disabled(isTestingTitan)
 
+            Button {
+                // ~/.aws is edited outside this app — by the AWS CLI, by a
+                // credential manager, by hand — so the list has to be
+                // re-readable without relaunching.
+                AWSCredentialLoader.restoreAccess()
+                describedProfiles = AWSCredentialLoader.describedProfiles()
+                titanTest = nil
+            } label: {
+                Label("Refresh profiles", systemImage: "arrow.clockwise")
+            }
+            .help("Re-read ~/.aws/config and ~/.aws/credentials")
+
             switch titanTest {
             case .success(let detail):
                 Label(detail, systemImage: "checkmark.circle.fill")
