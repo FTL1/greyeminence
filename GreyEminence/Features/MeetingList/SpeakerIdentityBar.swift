@@ -17,7 +17,11 @@ struct SpeakerIdentityBar: View {
     @State private var speakers: [SpeakerIdentityService.Unidentified] = []
 
     var body: some View {
-        Group {
+        // A container that always exists. Wrapping this in a `Group` whose
+        // only child is a condition means SwiftUI elides the whole view when
+        // the condition is false — taking `.task` with it, so the list never
+        // loads and the bar never appears.
+        VStack(alignment: .leading, spacing: 0) {
             if !speakers.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
@@ -40,9 +44,12 @@ struct SpeakerIdentityBar: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(.background)
+                Divider()
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: "\(meeting.id)-\(refreshToken)") { reload() }
+        .onChange(of: meeting.segments.count) { _, _ in reload() }
         .popover(item: $picking) { speaker in
             ContactPicker(
                 excludedContacts: [],

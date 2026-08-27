@@ -47,7 +47,6 @@ struct TranscriptPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             SpeakerIdentityBar(meeting: meeting, refreshToken: speakerIdentityRefresh)
-            Divider()
             if meeting.status == .completed && !sortedSegments.isEmpty {
                 transcriptToolbar
                 Divider()
