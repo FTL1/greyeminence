@@ -295,6 +295,7 @@
 		F0C354CA30884FC2707533FC /* LogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE48D54E7D30160DB6840EBE /* LogView.swift */; };
 		F15D9A6FD119A8B208111A26 /* TranscriptSegmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F93F2580A0F2585FD914629 /* TranscriptSegmentRow.swift */; };
 		F1C63EC5E3E3C89899D43533 /* TranscriptTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9777ACE77F882D5DF615E010 /* TranscriptTestView.swift */; };
+		F5EF48C4C347D7B9AE4BFCA0 /* DiarizationSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DE27452691D3E5FB6AD198 /* DiarizationSmokeTests.swift */; };
 		F76FDB7943E189691D6C9A89 /* ChangelogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B0C7503AAA0290976EF631 /* ChangelogView.swift */; };
 		F9A80A4871C0F7EFA7A4D3A6 /* Interview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64E9FE67D22C9B5648478322 /* Interview.swift */; };
 		F9BD84EAC4D7AC2D9AC56BD3 /* AskPersonFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51FAD8E2FF327750227EC55C /* AskPersonFilter.swift */; };
@@ -406,6 +407,7 @@
 		467A2217512A73AC48F65308 /* InterviewSectionScoreCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewSectionScoreCard.swift; sourceTree = "<group>"; };
 		46EEFDE3216D4CCF1E1923A8 /* TimelineScrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineScrubber.swift; sourceTree = "<group>"; };
 		4763E15F118E2C39BBE17F27 /* RubricCriterion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RubricCriterion.swift; sourceTree = "<group>"; };
+		47DE27452691D3E5FB6AD198 /* DiarizationSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiarizationSmokeTests.swift; sourceTree = "<group>"; };
 		4827BB932B5FF822DACE3261 /* ReProcessingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReProcessingState.swift; sourceTree = "<group>"; };
 		4B2BC4E0580FB4427713570F /* AskConversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskConversation.swift; sourceTree = "<group>"; };
 		4B86DBE859B4EF56428216AA /* MeetingRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRowView.swift; sourceTree = "<group>"; };
@@ -844,6 +846,7 @@
 				265632C61AD672F762A1D379 /* BedrockModelResolutionTests.swift */,
 				7C90E4A998AC4D102675200A /* CalendarAttendeeTests.swift */,
 				1C76563AE23561093FFB6667 /* CohereEmbeddingTests.swift */,
+				47DE27452691D3E5FB6AD198 /* DiarizationSmokeTests.swift */,
 				CD7BC2C7230991ECDBD5ABA8 /* EmbeddingProviderTests.swift */,
 				C8D7127B99A5B16285D765CB /* FeatureHighlightTests.swift */,
 				6F5FF391189154844DFFC005 /* FrameFileCleanupTests.swift */,
@@ -1667,6 +1670,7 @@
 				99F940DE564E5B39CB28B4B5 /* BedrockModelResolutionTests.swift in Sources */,
 				B7EC2976E54189E66D97AF29 /* CalendarAttendeeTests.swift in Sources */,
 				A0CD2404971CF4C952823FA2 /* CohereEmbeddingTests.swift in Sources */,
+				F5EF48C4C347D7B9AE4BFCA0 /* DiarizationSmokeTests.swift in Sources */,
 				D55920045CF124217ECEC2D0 /* EmbeddingProviderTests.swift in Sources */,
 				10E90242297FD7807B427E03 /* FeatureHighlightTests.swift in Sources */,
 				DFCB314C2574E8ECA06D019E /* FrameFileCleanupTests.swift in Sources */,
