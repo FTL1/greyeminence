@@ -4,6 +4,35 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.32.0 — 2026-08-27
+
+**Transcripts tell speakers apart again**
+- Every meeting is re-transcribed after recording for accuracy, and that
+  step was labelling lines by which microphone they came from — yours, or
+  everyone else's. So no matter how many people were in the call, all of
+  them appeared as a single "Speaker". It affected 359 of 429 meetings,
+  175 of which had three or more attendees.
+- Re-transcription now listens for who is speaking as well as what is
+  said, and attributes each line to the voice that holds most of it. A
+  stretch that can't be told apart still reads "Speaker" — an
+  unattributed line is honest, a wrongly attributed one isn't.
+- Very brief fragments — a cough, a crossfade — no longer become
+  speakers of their own, which used to make a two-person call look like
+  a panel.
+
+**Repairing older transcripts**
+- Settings → Audio → "Identify speakers in older meetings" listens to the
+  audio again and separates the voices in transcripts recorded before
+  this worked. The words and timings don't change, only who each line is
+  attributed to — and because it doesn't re-transcribe, it's far quicker
+  than re-processing.
+- It leaves alone any meeting where you've already named a speaker, so it
+  can't overwrite your own work. Meetings whose audio has passed the
+  retention window can't be repaired.
+- Speakers are numbered per meeting: "Speaker 1" in one meeting isn't the
+  same person as in another. Recognising a voice across meetings comes
+  next.
+
 ## 0.31.0 — 2026-08-26
 
 **Ask holds a conversation**

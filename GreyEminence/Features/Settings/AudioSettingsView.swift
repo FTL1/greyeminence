@@ -1,11 +1,37 @@
 import SwiftUI
 
 struct AudioSettingsView: View {
+    @Environment(\.modelContext) private var modelContext
+
     @State private var audioManager = AudioSessionManager()
     @State private var monitor = MicLevelMonitor()
     @AppStorage("inputGain") private var inputGain: Double = 1.0
     @AppStorage("autoReprocessMeetings") private var autoReprocessMeetings: Bool = true
     @State private var captureSystemAudio = true
+
+    @State private var isRepairing = false
+    @State private var repairDone = 0
+    @State private var repairTotal = 0
+    @State private var repairCandidates = 0
+    @State private var repairSummary: String?
+
+    @MainActor
+    private func repairSpeakers() async {
+        isRepairing = true
+        repairSummary = nil
+        defer {
+            isRepairing = false
+            repairCandidates = SpeakerRepairService.candidates(in: modelContext).count
+        }
+        let result = await SpeakerRepairService.repairAll(in: modelContext) { done, total in
+            repairDone = done
+            repairTotal = total
+        }
+        repairSummary = result.repaired == 0
+            ? "Nothing to change — the voices in those meetings couldn't be told apart."
+            : "Separated speakers in \(result.repaired) meeting\(result.repaired == 1 ? "" : "s")."
+            + (result.skipped > 0 ? " \(result.skipped) skipped — see the Activity Log." : "")
+    }
 
     var body: some View {
         Form {
@@ -76,6 +102,40 @@ struct AudioSettingsView: View {
             }
 
             Section {
+                HStack {
+                    Button(isRepairing ? "Identifying…" : "Identify speakers in older meetings") {
+                        Task { await repairSpeakers() }
+                    }
+                    .disabled(isRepairing || repairCandidates == 0)
+                    if isRepairing, repairTotal > 0 {
+                        ProgressView(value: Double(repairDone), total: Double(repairTotal))
+                            .frame(width: 120)
+                        Text("\(repairDone)/\(repairTotal)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let repairSummary {
+                    Text(repairSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text(repairCandidates == 0
+                     ? "Every meeting with audio still on disk has its speakers separated."
+                     : "\(repairCandidates) meeting\(repairCandidates == 1 ? "" : "s") were transcribed before speakers were told apart, so everyone but you shows as \"Speaker\". This listens to the audio again and separates the voices — the words and timings don't change, only who each line is attributed to. It doesn't re-transcribe, so it's far quicker than re-processing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Meetings whose audio has already been cleared by the retention setting can't be repaired. Voices are numbered per meeting — \"Speaker 1\" in one isn't the same person as in another.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } header: {
+                Label("Speaker separation", systemImage: "person.2.wave.2")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+            }
+
+            Section {
                 LabeledContent("Audio Format") {
                     Text("AAC (.m4a)")
                 }
@@ -95,6 +155,7 @@ struct AudioSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { repairCandidates = SpeakerRepairService.candidates(in: modelContext).count }
         .task {
             await audioManager.checkMicPermission()
             audioManager.enumerateInputDevices()
