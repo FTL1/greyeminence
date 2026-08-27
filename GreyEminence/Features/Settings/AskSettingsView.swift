@@ -361,6 +361,17 @@ struct AskSettingsView: View {
             titanTest = .failure("Profile \(info.name) \(info.kind.reason).")
             return
         }
+        // Go through the credential loader directly first: it names the cause
+        // (expired token, blocked helper) where the embed call can only say it
+        // failed.
+        do {
+            AWSCredentialLoader.restoreAccess()
+            _ = try await AWSCredentialLoader.loadCredentials(profile: service.resolvedProfile)
+        } catch {
+            titanTest = .failure(error.localizedDescription)
+            return
+        }
+
         if let vector = await service.embed("Grey Eminence search index probe") {
             titanTest = .success("\(vector.count)-dim vector from \(where_)")
         } else {

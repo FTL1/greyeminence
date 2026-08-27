@@ -13,6 +13,10 @@ import SwiftData
 /// already fully covered.
 @MainActor
 enum EmbeddingBackfillService {
+    /// Consecutive meetings that may produce nothing before the sweep gives
+    /// up. Mirrors the full reindex's threshold, for the same reason.
+    private static let failureAbortThreshold = 3
+
     /// Schedule the backfill to run after the UI has settled. Non-blocking;
     /// call from `onAppear`. The delay keeps it out of the way of the
     /// initial render and any reprocess queue ticks that fire at launch.
@@ -64,10 +68,12 @@ enum EmbeddingBackfillService {
         // the work. A backfill of several hundred meetings runs for minutes —
         // long enough that a bare spinner reads as a hang.
         let label = "Indexing meetings for search…"
+        var aborted = false
         await TransientActivityCoordinator.shared.runAsync(label) {
             let indexer = EmbeddingIndexer(store: store, service: service)
             let coordinator = TransientActivityCoordinator.shared
             coordinator.setProgress(completed: 0, total: missing.count)
+            var consecutiveFailures = 0
             for (index, meeting) in missing.enumerated() {
                 // Re-check mid-loop: a reprocess might have started, or the
                 // meeting might have been deleted by the user. Indexing a
@@ -75,10 +81,32 @@ enum EmbeddingBackfillService {
                 // that will trap.
                 defer { coordinator.setProgress(completed: index + 1, total: missing.count) }
                 guard meeting.reProcessingState == nil else { continue }
-                await indexer.indexMeeting(meeting)
+                let written = await indexer.indexMeeting(meeting)
+                guard written == 0 else {
+                    consecutiveFailures = 0
+                    continue
+                }
+                consecutiveFailures += 1
+                // An expired token or a revoked permission fails identically
+                // on every record. Grinding through hundreds of meetings to
+                // prove it burns requests and buries the one useful line in
+                // the log under hundreds of copies of itself.
+                if consecutiveFailures >= Self.failureAbortThreshold {
+                    aborted = true
+                    return
+                }
             }
         }
-        LogManager.send("EmbeddingBackfill: complete", category: .general)
+        if aborted {
+            LogManager.send(
+                "EmbeddingBackfill: stopped — \(Self.failureAbortThreshold) meetings in a row produced nothing. See the errors above.",
+                category: .general,
+                level: .warning
+            )
+            TransientActivityCoordinator.shared.flash("Search indexing stopped — check Settings → Ask")
+        } else {
+            LogManager.send("EmbeddingBackfill: complete", category: .general)
+        }
     }
 
     /// Index a single meeting on demand, used by the per-meeting "Index"

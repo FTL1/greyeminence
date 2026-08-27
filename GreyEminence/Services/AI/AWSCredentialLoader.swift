@@ -132,12 +132,11 @@ enum AWSCredentialLoader {
         guard let executable = tokens.first else {
             throw AWSCredentialError.credentialProcessFailed(profile, "empty credential_process command")
         }
-        guard FileManager.default.isExecutableFile(atPath: executable) else {
-            throw AWSCredentialError.credentialProcessFailed(
-                profile,
-                "helper not found or not executable at \(executable)"
-            )
-        }
+        // No reachability pre-check. Inside the sandbox a helper that exists
+        // and is executable still reports as neither, because the stat itself
+        // is denied — so the check produced "not found" for a file that is
+        // plainly there, sending the user to fix a path that was correct.
+        // Let the launch itself decide, and report the real errno.
 
         let output: Data
         do {
@@ -149,7 +148,12 @@ enum AWSCredentialLoader {
             // The sandbox denies exec with EPERM. Say that plainly — it is a
             // property of the app, not of the user's AWS setup, and no amount
             // of reconfiguring the profile will change it.
-            if nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(EPERM) {
+            // The sandbox surfaces as either a denied exec (EPERM) or a file
+            // it won't admit exists (ENOENT / NSFileNoSuchFile) — both mean
+            // "this app may not launch that", not "your config is wrong".
+            let blocked = (nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(EPERM) || nsError.code == Int(ENOENT)))
+                || (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError)
+            if blocked {
                 throw AWSCredentialError.credentialProcessBlocked(profile)
             }
             throw AWSCredentialError.credentialProcessFailed(profile, error.localizedDescription)
@@ -580,7 +584,7 @@ enum AWSCredentialError: LocalizedError {
         case .credentialProcessFailed(let profile, let detail):
             "Profile '\(profile)' credential helper failed: \(detail)"
         case .credentialProcessBlocked(let profile):
-            "Profile '\(profile)' runs an external credential helper, which macOS blocks this app from launching (it is sandboxed). Use an SSO or access-key profile instead."
+            "Profile '\(profile)' gets its credentials from an external helper, and macOS won't let this app launch it — the app is sandboxed, so programs outside it are off-limits regardless of whether the path is correct. Use an SSO or access-key profile instead."
         case .profileNotFound(let profile):
             "AWS profile '\(profile)' not found"
         case .missingCredentials(let profile):
