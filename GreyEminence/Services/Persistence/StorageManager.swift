@@ -61,6 +61,27 @@ final class StorageManager: Sendable {
         try? FileManager.default.removeItem(at: reProcessCheckpointURL(for: meetingID))
     }
 
+    /// Voice signatures for a meeting's diarization clusters.
+    ///
+    /// A sidecar beside the recording: derived from audio, recomputable, and
+    /// kept out of the store so changing how signatures are built doesn't mean
+    /// a schema migration.
+    func voiceClustersURL(for meetingID: UUID) -> URL {
+        recordingDirectory(for: meetingID).appendingPathComponent("voice-clusters.json")
+    }
+
+    func loadVoiceClusters(for meetingID: UUID) -> MeetingVoiceClusters? {
+        guard let data = try? Data(contentsOf: voiceClustersURL(for: meetingID)),
+              let stored = try? JSONDecoder().decode(MeetingVoiceClusters.self, from: data),
+              stored.isCurrent else { return nil }
+        return stored
+    }
+
+    func saveVoiceClusters(_ clusters: MeetingVoiceClusters, for meetingID: UUID) {
+        guard let data = try? JSONEncoder().encode(clusters) else { return }
+        try? data.write(to: voiceClustersURL(for: meetingID), options: .atomic)
+    }
+
     /// Cached report figure-anchoring plan. A sidecar file rather than a
     /// SwiftData field: it is derived data that can always be recomputed, so
     /// storing it here buys the cache without a schema version bump.

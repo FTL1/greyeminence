@@ -1,0 +1,115 @@
+import SwiftData
+import SwiftUI
+
+/// Prompts to put names to the voices a meeting couldn't identify.
+///
+/// Sits above the transcript because that's where you're reading when you
+/// realise Speaker 2 is Gene. Naming one here does two things: relabels this
+/// meeting, and teaches the voice, so the next meeting recognises them without
+/// being asked.
+struct SpeakerIdentityBar: View {
+    let meeting: Meeting
+    /// Bumped by the parent after an edit so the list recomputes.
+    var refreshToken: Int = 0
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var picking: SpeakerIdentityService.Unidentified?
+    @State private var speakers: [SpeakerIdentityService.Unidentified] = []
+
+    var body: some View {
+        Group {
+            if !speakers.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2.wave.2")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(speakers.count == 1 ? "One voice isn't identified" : "\(speakers.count) voices aren't identified")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(speakers) { speaker in
+                                chip(speaker)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(.background)
+            }
+        }
+        .task(id: "\(meeting.id)-\(refreshToken)") { reload() }
+        .popover(item: $picking) { speaker in
+            ContactPicker(
+                excludedContacts: [],
+                prioritizedContacts: meeting.attendees
+            ) { contact in
+                SpeakerIdentityService.identify(
+                    label: speaker.label,
+                    as: contact,
+                    in: meeting,
+                    context: modelContext
+                )
+                picking = nil
+                reload()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func chip(_ speaker: SpeakerIdentityService.Unidentified) -> some View {
+        Button {
+            picking = speaker
+        } label: {
+            HStack(spacing: 5) {
+                Text(speaker.label)
+                    .font(.caption.weight(.semibold))
+                Text(duration(speaker.seconds))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                if let suggestion = speaker.suggestion {
+                    Divider().frame(height: 10)
+                    // A suggestion, never an assertion — the name is only
+                    // applied when you choose it.
+                    Text(suggestion.profile.contactName)
+                        .font(.caption)
+                        .foregroundStyle(Color.accentColor)
+                    Text("\(Int(suggestion.similarity * 100))%")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                } else if !speaker.hasSignature {
+                    // Worth saying: naming this one fixes the transcript but
+                    // teaches nothing, because there's no voice to learn from.
+                    Image(systemName: "waveform.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("Recorded before voices were captured — naming this won't help recognise them elsewhere")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                speaker.suggestion == nil
+                    ? AnyShapeStyle(Color.secondary.opacity(0.1))
+                    : AnyShapeStyle(Color.accentColor.opacity(0.12)),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .help(speaker.suggestion.map { "Might be \($0.profile.contactName) — \(Int($0.similarity * 100))% similar. Click to choose." }
+              ?? "Click to say who this is")
+    }
+
+    private func duration(_ seconds: TimeInterval) -> String {
+        seconds < 60 ? "\(Int(seconds))s" : "\(Int(seconds / 60))m"
+    }
+
+    private func reload() {
+        speakers = SpeakerIdentityService.unidentifiedSpeakers(in: meeting)
+    }
+}

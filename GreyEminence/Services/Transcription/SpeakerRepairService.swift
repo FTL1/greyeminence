@@ -151,6 +151,29 @@ enum SpeakerRepairService {
         let usable = spans.filter { significant.contains($0.speakerID) }
         let labels = SpeakerAlignment.labels(forSpansOrderedByTime: usable)
 
+        // Keep the voice signatures so this meeting can have speakers named
+        // later without re-listening to it.
+        let clusters = SpeakerIdentification.clusters(
+            from: diarized,
+            labels: labels,
+            significant: significant
+        )
+        if !clusters.isEmpty {
+            StorageManager.shared.saveVoiceClusters(
+                MeetingVoiceClusters(clusters: clusters.map {
+                    .init(label: $0.label, signature: $0.signature)
+                }),
+                for: meeting.id
+            )
+        }
+
+        let resolutions = SpeakerIdentification.resolve(
+            clusters: clusters,
+            attendeeIDs: Set(meeting.attendees.map(\.id)),
+            profiles: VoiceProfileStore.load()
+        )
+        let names = Dictionary(uniqueKeysWithValues: resolutions.map { ($0.label, $0.displayName) })
+
         var relabelled = 0
         for segment in meeting.segments {
             guard case .other(let name) = segment.speaker, name == collapsedLabel else { continue }
@@ -169,7 +192,7 @@ enum SpeakerRepairService {
             if !segment.isEdited, segment.originalSpeakerData == nil {
                 segment.originalSpeakerData = segment.speakerData
             }
-            segment.speaker = .other(label)
+            segment.speaker = .other(names[label] ?? label)
             relabelled += 1
         }
         guard relabelled > 0 else { return .singleVoice }

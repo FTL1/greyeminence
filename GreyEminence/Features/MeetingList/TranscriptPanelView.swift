@@ -2,6 +2,9 @@ import SwiftUI
 import SwiftData
 
 struct TranscriptPanelView: View {
+    /// Bumped after a manual reassignment so the identity bar recomputes.
+    @State private var speakerIdentityRefresh = 0
+
     @Bindable var meeting: Meeting
     var onSplitMeeting: ((Meeting) -> Void)?
     @Binding var scrollToSegmentID: UUID?
@@ -43,6 +46,8 @@ struct TranscriptPanelView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            SpeakerIdentityBar(meeting: meeting, refreshToken: speakerIdentityRefresh)
+            Divider()
             if meeting.status == .completed && !sortedSegments.isEmpty {
                 transcriptToolbar
                 Divider()
@@ -473,6 +478,7 @@ struct TranscriptPanelView: View {
             segment.speaker = speaker
             segment.isEdited = true
         }
+        speakerIdentityRefresh += 1
         saveEdit(site: "reassignSelectedSegments")
     }
 

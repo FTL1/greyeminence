@@ -448,13 +448,49 @@ final class ReProcessingQueue {
         let usableSpans = spans.filter { significant.contains($0.speakerID) }
         let labels = SpeakerAlignment.labels(forSpansOrderedByTime: usableSpans)
 
+        // Reduce each cluster to a voice signature and keep it beside the
+        // recording. Without this the vectors are computed and thrown away,
+        // and naming a speaker later would mean re-listening to the audio.
+        let clusters = SpeakerIdentification.clusters(
+            from: diarized,
+            labels: labels,
+            significant: significant
+        )
+        if !clusters.isEmpty {
+            StorageManager.shared.saveVoiceClusters(
+                MeetingVoiceClusters(clusters: clusters.map {
+                    .init(label: $0.label, signature: $0.signature)
+                }),
+                for: meeting.id
+            )
+        }
+
+        // Anyone already enrolled and confidently recognised gets their name
+        // instead of a number.
+        let attendeeIDs = Set(meeting.attendees.map(\.id))
+        let resolutions = SpeakerIdentification.resolve(
+            clusters: clusters,
+            attendeeIDs: attendeeIDs,
+            profiles: VoiceProfileStore.load()
+        )
+        let names = Dictionary(
+            uniqueKeysWithValues: resolutions.map { ($0.label, $0.displayName) }
+        )
+        for resolution in resolutions where resolution.applied {
+            LogManager.send(
+                "Recognised \(resolution.displayName) as \(resolution.label) (\(String(format: "%.2f", resolution.match?.similarity ?? 0)))",
+                category: .transcription,
+                meetingID: meeting.id
+            )
+        }
+
         let raw: [TranscriptSegment] = upgraded.map { seg in
             let speaker: Speaker
             if seg.source == .mic {
                 speaker = .me
             } else if let id = SpeakerAlignment.dominantSpeakerID(from: seg.startTime, to: seg.endTime, in: usableSpans),
                       let label = labels[id] {
-                speaker = .other(label)
+                speaker = .other(names[label] ?? label)
             } else {
                 // Diarization unavailable or this stretch didn't cluster.
                 // "Speaker" is the honest label for an unidentified voice —
