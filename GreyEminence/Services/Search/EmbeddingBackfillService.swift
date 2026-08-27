@@ -44,24 +44,33 @@ enum EmbeddingBackfillService {
             return
         }
 
-        let indexedIDs = store.indexedMeetingIDs(for: service.modelIdentifier)
         let meetings = (try? mainContext.fetch(FetchDescriptor<Meeting>())) ?? []
+        let indexer = EmbeddingIndexer(store: store, service: service)
+        // Coverage is counted per record, not per meeting. Meeting-level
+        // coverage treated a meeting with one chunk of fifty as done, so a
+        // throttled run left 9,154 chunks missing that no later sweep would
+        // ever look at — the store reported every meeting indexed while a
+        // third of the content was unsearchable.
         let missing = meetings.filter { meeting in
-            meeting.status == .completed
-                && !meeting.segments.isEmpty
-                && meeting.reProcessingState == nil
-                && !indexedIDs.contains(meeting.id)
+            guard meeting.status == .completed,
+                  !meeting.segments.isEmpty,
+                  meeting.reProcessingState == nil else { return false }
+            let present = store.existingRecordIDs(
+                meetingID: meeting.id,
+                modelIdentifier: service.modelIdentifier
+            ).count
+            return present < indexer.expectedRecordCount(for: meeting)
         }
         guard !missing.isEmpty else {
             LogManager.send(
-                "EmbeddingBackfill: nothing to do — \(indexedIDs.count) meetings already indexed for \(service.modelIdentifier)",
+                "EmbeddingBackfill: nothing to do — every meeting fully indexed for \(service.modelIdentifier)",
                 category: .general
             )
             return
         }
 
         LogManager.send(
-            "EmbeddingBackfill: indexing \(missing.count) un-covered meeting(s)",
+            "EmbeddingBackfill: \(missing.count) meeting(s) missing records for \(service.modelIdentifier)",
             category: .general
         )
         // The count lives in the progress readout now, so the label just names
@@ -70,7 +79,6 @@ enum EmbeddingBackfillService {
         let label = "Indexing meetings for search…"
         var aborted = false
         await TransientActivityCoordinator.shared.runAsync(label) {
-            let indexer = EmbeddingIndexer(store: store, service: service)
             let coordinator = TransientActivityCoordinator.shared
             coordinator.setProgress(completed: 0, total: missing.count)
             var consecutiveFailures = 0
@@ -81,8 +89,8 @@ enum EmbeddingBackfillService {
                 // that will trap.
                 defer { coordinator.setProgress(completed: index + 1, total: missing.count) }
                 guard meeting.reProcessingState == nil else { continue }
-                let written = await indexer.indexMeeting(meeting)
-                guard written == 0 else {
+                let result = await indexer.index(meeting)
+                guard result.isTotalFailure else {
                     consecutiveFailures = 0
                     continue
                 }

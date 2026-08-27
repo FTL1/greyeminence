@@ -30,9 +30,34 @@ final class EmbeddingIndexer {
     /// end. Returns how many records were written, so a caller running a full
     /// reindex can tell "this meeting had nothing to index" from "every call
     /// to the provider failed".
+    /// Outcome of indexing one meeting — enough for a caller to tell "nothing
+    /// to do" from "everything failed", which a bare count cannot.
+    struct IndexResult: Equatable {
+        var written: Int
+        var attempted: Int
+        var alreadyPresent: Int
+
+        /// Every embed call failed. Distinct from a meeting with no content:
+        /// one means the provider is broken, the other means there was nothing
+        /// to index.
+        var isTotalFailure: Bool { attempted > 0 && written == 0 }
+        static let nothingToDo = IndexResult(written: 0, attempted: 0, alreadyPresent: 0)
+    }
+
     @discardableResult
     func indexMeeting(_ meeting: Meeting) async -> Int {
-        guard service.isAvailable else { return 0 }
+        await index(meeting).written
+    }
+
+    /// Index a meeting, embedding only what isn't already stored for the
+    /// current model.
+    ///
+    /// Skipping existing records is what makes a re-run cheap enough to be the
+    /// repair mechanism: a meeting that lost nine chunks to throttling gets
+    /// those nine re-embedded, not all fifty.
+    @discardableResult
+    func index(_ meeting: Meeting) async -> IndexResult {
+        guard service.isAvailable else { return .nothingToDo }
 
         // Snapshot every value we need BEFORE the first await. Indexing kicks
         // off from stopRecording, which means the meeting is on screen — and
@@ -40,10 +65,19 @@ final class EmbeddingIndexer {
         // `service.embed(...)`. After resumption, accessing tombstoned
         // SwiftData properties is at best lossy and at worst a crash.
         let snapshot = MeetingSnapshot(meeting: meeting)
-        let items = Self.workItems(for: snapshot)
+        let allItems = Self.workItems(for: snapshot)
         // No content is a success with nothing to do — distinct from a
         // provider that failed on everything it was given.
-        guard !items.isEmpty else { return 0 }
+        guard !allItems.isEmpty else { return .nothingToDo }
+
+        let existing = store.existingRecordIDs(
+            meetingID: snapshot.id,
+            modelIdentifier: service.modelIdentifier
+        )
+        let items = allItems.filter { !existing.contains($0.id) }
+        guard !items.isEmpty else {
+            return IndexResult(written: 0, attempted: 0, alreadyPresent: allItems.count)
+        }
 
         // One batched call so a network-backed provider can fan out. The
         // on-device provider still runs these strictly serially — its
@@ -73,7 +107,18 @@ final class EmbeddingIndexer {
         }
 
         store.save()
-        return written
+        return IndexResult(
+            written: written,
+            attempted: items.count,
+            alreadyPresent: allItems.count - items.count
+        )
+    }
+
+    /// How many records a meeting *should* have under the current model.
+    /// Pure — no embedding, no network — so the backfill can check coverage
+    /// across the whole library cheaply.
+    func expectedRecordCount(for meeting: Meeting) -> Int {
+        Self.workItems(for: MeetingSnapshot(meeting: meeting)).count
     }
 
     /// Everything in a meeting that gets a vector, in one flat list.
@@ -258,8 +303,8 @@ final class EmbeddingIndexer {
 
         for (i, meeting) in meetings.enumerated() {
             onProgress(i, total)
-            let indexed = await indexMeeting(meeting)
-            if indexed == 0 {
+            let result = await index(meeting)
+            if result.isTotalFailure {
                 consecutiveFailures += 1
                 if consecutiveFailures >= Self.failureAbortThreshold {
                     return .aborted(

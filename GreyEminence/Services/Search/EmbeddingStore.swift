@@ -165,6 +165,20 @@ final class EmbeddingStore {
         return pruned
     }
 
+    /// Composite ids already present for one meeting under one model.
+    ///
+    /// Lets indexing fill holes instead of re-embedding a whole meeting, and
+    /// lets the backfill tell a fully-indexed meeting from one that lost part
+    /// of itself to a throttled request.
+    func existingRecordIDs(meetingID: UUID, modelIdentifier: String) -> Set<String> {
+        let descriptor = FetchDescriptor<EmbeddingRecord>(
+            predicate: #Predicate {
+                $0.meetingID == meetingID && $0.modelIdentifier == modelIdentifier
+            }
+        )
+        return Set(((try? context.fetch(descriptor)) ?? []).map(\.id))
+    }
+
     func allRecords(for modelIdentifier: String) -> [EmbeddingRecord] {
         let descriptor = FetchDescriptor<EmbeddingRecord>(
             predicate: #Predicate { $0.modelIdentifier == modelIdentifier }

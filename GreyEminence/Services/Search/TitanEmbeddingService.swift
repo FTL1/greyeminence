@@ -29,10 +29,24 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
     /// limit rather than let one oversized record fail the whole meeting.
     private static let maxInputCharacters = 24_000
 
-    /// Bedrock throttles per-account; eight in flight keeps a full reindex to
-    /// minutes without tripping it. Raising this trades reindex time for
-    /// throttling retries, which are slower than just waiting.
-    let maxConcurrency = 8
+    /// Upper bound on the fan-out. The limiter below decides how much of it is
+    /// actually used, so this is a ceiling rather than a target — work beyond
+    /// the current limit is suspended, not running.
+    let maxConcurrency = 12
+
+    /// Shared by every worker, so the whole fan-out narrows together when the
+    /// account's quota is hit rather than one request at a time.
+    private static let limiter = AdaptiveConcurrencyLimiter(start: 6, ceiling: 12)
+
+    /// Attempts per record before giving up. Throttling is transient, and a
+    /// dropped record is invisible damage — a meeting stays "indexed" while
+    /// part of it is missing from search.
+    private static let maxAttempts = 6
+
+    /// Shared across every worker so a throttle response pauses the whole
+    /// fan-out, not just the request that hit it. Backing off one worker while
+    /// the other three keep hammering is what turns a throttle into a storm.
+    private static let throttleGate = ThrottleGate()
 
     private let region: String
     private let profile: String
@@ -96,7 +110,7 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
             : trimmed
 
         do {
-            return try await invoke(clamped, allowingRefresh: true)
+            return try await withRetries(clamped)
         } catch {
             // Name the credentials, not just the error: with two accounts in
             // play, "not authorized" is meaningless without knowing which one
@@ -107,6 +121,75 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
                 level: .warning
             )
             return nil
+        }
+    }
+
+    // MARK: - Retry
+
+    /// Retry throttled requests with exponential backoff and jitter.
+    ///
+    /// Jitter matters as much as the backoff: without it four workers throttled
+    /// at the same moment retry at the same moment, and stay in lockstep.
+    private func withRetries(_ text: String) async throws -> [Float]? {
+        var lastError: Error = BedrockAPIError.invalidResponse
+        for attempt in 0..<Self.maxAttempts {
+            try Task.checkCancellation()
+            await Self.throttleGate.waitUntilOpen()
+            await Self.limiter.acquire()
+            do {
+                let vector = try await invoke(text, allowingRefresh: attempt == 0)
+                await Self.limiter.release(throttled: false)
+                return vector
+            } catch let error as BedrockAPIError {
+                guard case .httpError(let status, _) = error, Self.isTransient(status) else {
+                    await Self.limiter.release(throttled: false)
+                    throw error
+                }
+                // Narrow the fan-out AND pause it. Backing off without
+                // narrowing just re-runs the same request rate a moment later.
+                await Self.limiter.release(throttled: true)
+                lastError = error
+                guard attempt < Self.maxAttempts - 1 else { break }
+                let delay = Self.backoffSeconds(attempt: attempt)
+                await Self.throttleGate.close(forSeconds: delay)
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                await Self.limiter.release(throttled: false)
+                throw error
+            }
+        }
+        throw lastError
+    }
+
+    /// 429 is throttling; 500/503 are Bedrock shedding load. Both are worth
+    /// waiting out. Anything else — a bad model id, a denied action — will
+    /// fail identically forever, so retrying only delays the report.
+    static func isTransient(_ status: Int) -> Bool {
+        status == 429 || status == 500 || status == 503
+    }
+
+    /// 0.5s, 1s, 2s, 4s, 8s … each ±25%.
+    static func backoffSeconds(attempt: Int, jitter: Double = Double.random(in: 0.75...1.25)) -> Double {
+        min(30, 0.5 * pow(2, Double(attempt))) * jitter
+    }
+
+    /// Holds every worker back until a shared deadline passes.
+    private actor ThrottleGate {
+        private var openAt = Date.distantPast
+
+        func waitUntilOpen() async {
+            while true {
+                let remaining = openAt.timeIntervalSinceNow
+                guard remaining > 0 else { return }
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            }
+        }
+
+        /// Never shortens an existing pause — a worker still on its first
+        /// retry must not release one that has backed off much further.
+        func close(forSeconds seconds: Double) {
+            let candidate = Date().addingTimeInterval(seconds)
+            if candidate > openAt { openAt = candidate }
         }
     }
 
