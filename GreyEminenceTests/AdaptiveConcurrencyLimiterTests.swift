@@ -129,36 +129,36 @@ final class AdaptiveConcurrencyLimiterTests: XCTestCase {
 }
 
 /// Backoff shape for throttled Bedrock requests.
-final class TitanBackoffTests: XCTestCase {
+final class BedrockBackoffTests: XCTestCase {
 
     func testThrottlingAndOverloadAreRetried() {
-        XCTAssertTrue(TitanEmbeddingService.isTransient(429))
-        XCTAssertTrue(TitanEmbeddingService.isTransient(503))
-        XCTAssertTrue(TitanEmbeddingService.isTransient(500))
+        XCTAssertTrue(BedrockEmbeddingTransport.isTransient(429))
+        XCTAssertTrue(BedrockEmbeddingTransport.isTransient(503))
+        XCTAssertTrue(BedrockEmbeddingTransport.isTransient(500))
     }
 
     func testPermissionAndRequestErrorsAreNotRetried() {
         // These fail identically forever; retrying only delays the report.
-        XCTAssertFalse(TitanEmbeddingService.isTransient(403))
-        XCTAssertFalse(TitanEmbeddingService.isTransient(400))
-        XCTAssertFalse(TitanEmbeddingService.isTransient(404))
+        XCTAssertFalse(BedrockEmbeddingTransport.isTransient(403))
+        XCTAssertFalse(BedrockEmbeddingTransport.isTransient(400))
+        XCTAssertFalse(BedrockEmbeddingTransport.isTransient(404))
     }
 
     func testBackoffGrowsExponentially() {
         let flat = 1.0
-        XCTAssertEqual(TitanEmbeddingService.backoffSeconds(attempt: 0, jitter: flat), 0.5, accuracy: 0.001)
-        XCTAssertEqual(TitanEmbeddingService.backoffSeconds(attempt: 1, jitter: flat), 1.0, accuracy: 0.001)
-        XCTAssertEqual(TitanEmbeddingService.backoffSeconds(attempt: 3, jitter: flat), 4.0, accuracy: 0.001)
+        XCTAssertEqual(BedrockEmbeddingTransport.backoffSeconds(attempt: 0, jitter: flat), 0.5, accuracy: 0.001)
+        XCTAssertEqual(BedrockEmbeddingTransport.backoffSeconds(attempt: 1, jitter: flat), 1.0, accuracy: 0.001)
+        XCTAssertEqual(BedrockEmbeddingTransport.backoffSeconds(attempt: 3, jitter: flat), 4.0, accuracy: 0.001)
     }
 
     func testBackoffIsCapped() {
-        XCTAssertLessThanOrEqual(TitanEmbeddingService.backoffSeconds(attempt: 20, jitter: 1.25), 37.5)
+        XCTAssertLessThanOrEqual(BedrockEmbeddingTransport.backoffSeconds(attempt: 20, jitter: 1.25), 37.5)
     }
 
     func testJitterSpreadsRetries() {
         // Without jitter, workers throttled together retry together and stay
         // in lockstep forever.
-        let values = Set((0..<40).map { _ in TitanEmbeddingService.backoffSeconds(attempt: 2) })
+        let values = Set((0..<40).map { _ in BedrockEmbeddingTransport.backoffSeconds(attempt: 2) })
         XCTAssertGreaterThan(values.count, 1, "retries would fire in lockstep")
     }
 }

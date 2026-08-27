@@ -59,7 +59,7 @@ final class EmbeddingProviderTests: XCTestCase {
 
         init(maxConcurrency: Int) { self.maxConcurrency = maxConcurrency }
 
-        func embed(_ text: String) async -> [Float]? {
+        func embed(_ text: String, as purpose: EmbeddingPurpose) async -> [Float]? {
             enter()
             await Task.yield()
             try? await Task.sleep(nanoseconds: 2_000_000)
@@ -86,7 +86,7 @@ final class EmbeddingProviderTests: XCTestCase {
 
     func testBatchResultsStayPositional() async {
         let spy = SpyService(maxConcurrency: 4)
-        let results = await spy.embedAll(["1", "2", "3", "4", "5", "6", "7"])
+        let results = await spy.embedAll(["1", "2", "3", "4", "5", "6", "7"], as: .document)
         XCTAssertEqual(results.map { $0?.first }, [1, 2, 3, 4, 5, 6, 7])
     }
 
@@ -94,7 +94,7 @@ final class EmbeddingProviderTests: XCTestCase {
         // A nil must stay at its own index — collapsing it would silently
         // attach every later vector to the wrong record.
         let spy = SpyService(maxConcurrency: 4)
-        let results = await spy.embedAll(["1", "nope", "3"])
+        let results = await spy.embedAll(["1", "nope", "3"], as: .document)
         XCTAssertEqual(results.count, 3)
         XCTAssertEqual(results[0]?.first, 1)
         XCTAssertNil(results[1])
@@ -103,19 +103,19 @@ final class EmbeddingProviderTests: XCTestCase {
 
     func testBatchRespectsTheConcurrencyCeiling() async {
         let spy = SpyService(maxConcurrency: 3)
-        _ = await spy.embedAll((0..<20).map(String.init))
+        _ = await spy.embedAll((0..<20).map(String.init), as: .document)
         XCTAssertLessThanOrEqual(spy.peak, 3, "fan-out exceeded the limit; back-pressure is gone")
     }
 
     func testSerialServiceNeverOverlaps() async {
         let spy = SpyService(maxConcurrency: 1)
-        _ = await spy.embedAll((0..<10).map(String.init))
+        _ = await spy.embedAll((0..<10).map(String.init), as: .document)
         XCTAssertEqual(spy.peak, 1)
     }
 
     func testEmptyBatchIsHandled() async {
         let spy = SpyService(maxConcurrency: 4)
-        let results = await spy.embedAll([])
+        let results = await spy.embedAll([], as: .document)
         XCTAssertTrue(results.isEmpty)
     }
 }
@@ -157,8 +157,8 @@ final class ReindexSafetyTests: XCTestCase {
 /// account is often the answer. These pin the fallback chain, because getting
 /// it wrong silently authenticates against the wrong account.
 final class TitanAccountResolutionTests: XCTestCase {
-    private let profileKey = TitanEmbeddingService.profileKey
-    private let regionKey = TitanEmbeddingService.regionKey
+    private let profileKey = BedrockEmbeddingAccount.profileKey
+    private let regionKey = BedrockEmbeddingAccount.regionKey
     private var saved: [String: Any?] = [:]
 
     override func setUp() {

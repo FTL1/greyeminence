@@ -82,7 +82,7 @@ final class EmbeddingIndexer {
         // One batched call so a network-backed provider can fan out. The
         // on-device provider still runs these strictly serially — its
         // framework aborts the process under concurrent access.
-        let vectors = await service.embedAll(items.map(\.embeddingText))
+        let vectors = await service.embedAll(items.map(\.embeddingText), as: .document)
 
         var indexedFrames = 0
         var written = 0
@@ -291,7 +291,7 @@ final class EmbeddingIndexer {
             return .unavailable("\(service.modelIdentifier) isn't configured.")
         }
         // Canary. One real call, before anything is deleted.
-        guard await service.embed("Grey Eminence search index probe") != nil else {
+        guard await service.embedDocument("Grey Eminence search index probe") != nil else {
             return .unavailable(
                 "Couldn't produce a test vector — the index was left untouched. Check the Activity Log for the provider's error."
             )

@@ -74,7 +74,7 @@ struct AskSettingsView: View {
                         .foregroundStyle(.orange)
                 }
 
-                if provider == .titan {
+                if provider == .titan || provider == .cohere {
                     titanAccountControls
                 }
 
@@ -217,7 +217,9 @@ struct AskSettingsView: View {
         case .nlEmbedding:
             "Runs on-device: no network, no cost, a few minutes."
         case .titan:
-            "Runs through Bedrock on the AWS profile selected above. Roughly 5.4M tokens for a full index — cents at Titan's rate — and a handful of minutes. Test the connection first."
+            "Runs through Bedrock on the AWS profile selected above. Roughly 5.4M tokens for a full index — cents at Titan's rate — but one request per chunk, so tens of thousands of round trips. Test the connection first."
+        case .cohere:
+            "Runs through Bedrock on the AWS profile selected above, 96 chunks per request — a few hundred round trips rather than tens of thousands. Roughly 5.4M tokens for a full index. Test the connection first."
         case .voyage:
             "Not available."
         }
@@ -348,8 +350,10 @@ struct AskSettingsView: View {
         isTestingTitan = true
         defer { isTestingTitan = false }
 
-        let service = TitanEmbeddingService()
-        let where_ = "\(service.resolvedProfile) · \(service.resolvedRegion)"
+        // Test whatever is actually selected, not a hard-coded model.
+        let service = provider.makeService()
+        let account = BedrockEmbeddingAccount.resolved(region: nil, profile: nil)
+        let where_ = "\(account.profile) · \(account.region)"
         guard service.isAvailable else {
             titanTest = .failure("No AWS profiles this app can authenticate as.")
             return
@@ -357,7 +361,7 @@ struct AskSettingsView: View {
         // Catch an unusable profile before spending a request on it — most
         // often the inherited one, when Settings → AI points at something the
         // loader can't follow either.
-        if let info = describedProfiles.first(where: { $0.name == service.resolvedProfile }), !info.isSupported {
+        if let info = describedProfiles.first(where: { $0.name == account.profile }), !info.isSupported {
             titanTest = .failure("Profile \(info.name) \(info.kind.reason).")
             return
         }
@@ -366,13 +370,13 @@ struct AskSettingsView: View {
         // failed.
         do {
             AWSCredentialLoader.restoreAccess()
-            _ = try await AWSCredentialLoader.loadCredentials(profile: service.resolvedProfile)
+            _ = try await AWSCredentialLoader.loadCredentials(profile: account.profile)
         } catch {
             titanTest = .failure(error.localizedDescription)
             return
         }
 
-        if let vector = await service.embed("Grey Eminence search index probe") {
+        if let vector = await service.embedDocument("Grey Eminence search index probe") {
             titanTest = .success("\(vector.count)-dim vector from \(where_)")
         } else {
             // The provider's own message is already in the log with the

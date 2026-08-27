@@ -41,6 +41,21 @@ full detail; older ones are summarized. The version number tracks
   its free tier would have covered this index outright, but it would have
   meant sending transcripts to a third party, so it is deliberately not
   offered.
+- Added Cohere Embed English v3 as a second Bedrock option, and it is the
+  one to pick for a large library. Titan takes a single text per request —
+  the API rejects an array outright — so indexing this many chunks means
+  tens of thousands of round trips, which is what drew thousands of
+  throttle responses on the first attempt. Cohere takes 96 per request:
+  the same work in a few hundred calls. It also distinguishes stored text
+  from search queries, which Titan does not.
+- Throttled requests are retried with backoff instead of being dropped,
+  and the number of parallel requests now adapts — halving when the
+  account throttles, widening again after a clean run — rather than being
+  a fixed guess.
+- Search-index coverage is counted per record rather than per meeting. A
+  meeting that lost part of itself to a throttled request used to count
+  as fully indexed, so nothing ever repaired it; re-indexing now embeds
+  only what's missing.
 - The AWS profile list now only offers profiles the app can actually
   authenticate as — SSO and access-key ones. Profiles that assume a role
   or shell out to `credential_process` were listed and then failed with

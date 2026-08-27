@@ -4,7 +4,7 @@ import Foundation
 protocol EmbeddingService: Sendable {
     var modelIdentifier: String { get }
     var isAvailable: Bool { get }
-    func embed(_ text: String) async -> [Float]?
+    func embed(_ text: String, as purpose: EmbeddingPurpose) async -> [Float]?
 
     /// How many `embed` calls may be in flight at once. On-device embedding
     /// is CPU-bound and must be serialized; a network provider is latency-
@@ -14,18 +14,22 @@ protocol EmbeddingService: Sendable {
 
     /// Embed many texts, honouring `maxConcurrency`. Results are positional:
     /// index i is the vector for texts[i], or nil if that one failed.
-    func embedAll(_ texts: [String]) async -> [[Float]?]
+    func embedAll(_ texts: [String], as purpose: EmbeddingPurpose) async -> [[Float]?]
 }
 
 extension EmbeddingService {
     var maxConcurrency: Int { 1 }
 
-    func embedAll(_ texts: [String]) async -> [[Float]?] {
+    /// Convenience for the common cases, so call sites read as what they are.
+    func embedDocument(_ text: String) async -> [Float]? { await embed(text, as: .document) }
+    func embedQuery(_ text: String) async -> [Float]? { await embed(text, as: .query) }
+
+    func embedAll(_ texts: [String], as purpose: EmbeddingPurpose) async -> [[Float]?] {
         guard maxConcurrency > 1 else {
             var results: [[Float]?] = []
             results.reserveCapacity(texts.count)
             for text in texts {
-                results.append(await embed(text))
+                results.append(await embed(text, as: purpose))
             }
             return results
         }
@@ -39,14 +43,14 @@ extension EmbeddingService {
             let limit = min(maxConcurrency, texts.count)
             while next < limit {
                 let index = next
-                group.addTask { (index, await self.embed(texts[index])) }
+                group.addTask { (index, await self.embed(texts[index], as: purpose)) }
                 next += 1
             }
             while let (index, vector) = await group.next() {
                 results[index] = vector
                 if next < texts.count {
                     let index = next
-                    group.addTask { (index, await self.embed(texts[index])) }
+                    group.addTask { (index, await self.embed(texts[index], as: purpose)) }
                     next += 1
                 }
             }
@@ -79,7 +83,9 @@ final class NLEmbeddingService: EmbeddingService, @unchecked Sendable {
 
     var isAvailable: Bool { embedding != nil }
 
-    func embed(_ text: String) async -> [Float]? {
+    /// Symmetric model: a document and a query embed identically, so the
+    /// purpose is accepted and ignored rather than pretended to matter.
+    func embed(_ text: String, as purpose: EmbeddingPurpose) async -> [Float]? {
         guard let embedding else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }

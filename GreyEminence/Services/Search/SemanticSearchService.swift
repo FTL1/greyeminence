@@ -84,7 +84,7 @@ final class SemanticSearchService {
     ) async -> [SearchResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
-        guard let queryVec = await service.embed(trimmed) else { return [] }
+        guard let queryVec = await service.embedQuery(trimmed) else { return [] }
 
         let mentionRegex = personScope?.mentionRegex
         var candidates: [(record: EmbeddingRecord, namesPerson: Bool)] = []
