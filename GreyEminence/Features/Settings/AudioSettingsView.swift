@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 struct AudioSettingsView: View {
@@ -14,6 +15,27 @@ struct AudioSettingsView: View {
     @State private var repairTotal = 0
     @State private var repairCandidates = 0
     @State private var repairSummary: String?
+    @State private var repairResettable = 0
+
+    @MainActor
+    private func resetSpeakers() {
+        let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
+        var reverted = 0
+        for meeting in meetings where SpeakerRepairService.canResetLabels(meeting) {
+            if SpeakerRepairService.resetLabels(for: meeting, in: modelContext) > 0 { reverted += 1 }
+        }
+        repairSummary = reverted == 0
+            ? "Nothing to undo."
+            : "Restored the previous labels in \(reverted) meeting\(reverted == 1 ? "" : "s")."
+        refreshRepairCounts()
+    }
+
+    @MainActor
+    private func refreshRepairCounts() {
+        repairCandidates = SpeakerRepairService.candidates(in: modelContext).count
+        let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
+        repairResettable = meetings.count { SpeakerRepairService.canResetLabels($0) }
+    }
 
     @MainActor
     private func repairSpeakers() async {
@@ -21,7 +43,7 @@ struct AudioSettingsView: View {
         repairSummary = nil
         defer {
             isRepairing = false
-            repairCandidates = SpeakerRepairService.candidates(in: modelContext).count
+            refreshRepairCounts()
         }
         let result = await SpeakerRepairService.repairAll(in: modelContext) { done, total in
             repairDone = done
@@ -115,6 +137,17 @@ struct AudioSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if repairResettable > 0 {
+                    HStack {
+                        Button("Undo speaker separation") {
+                            resetSpeakers()
+                        }
+                        .disabled(isRepairing)
+                        Text("Restores the labels \(repairResettable) meeting\(repairResettable == 1 ? "" : "s") had before. Lines you renamed yourself are left as they are.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if let repairSummary {
                     Text(repairSummary)
                         .font(.caption)
@@ -155,7 +188,7 @@ struct AudioSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { repairCandidates = SpeakerRepairService.candidates(in: modelContext).count }
+        .onAppear { refreshRepairCounts() }
         .task {
             await audioManager.checkMicPermission()
             audioManager.enumerateInputDevices()

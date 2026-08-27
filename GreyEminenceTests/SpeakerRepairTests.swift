@@ -76,4 +76,50 @@ final class SpeakerRepairTests: XCTestCase {
             .repaired(voices: 3, segments: 10)
         )
     }
+
+    // MARK: - Reversibility
+
+    private func segment(_ speaker: Speaker, edited: Bool = false, original: Speaker? = nil) -> TranscriptSegment {
+        let s = TranscriptSegment(speaker: speaker, text: "x", startTime: 0, endTime: 1, isFinal: true)
+        s.isEdited = edited
+        if let original {
+            s.originalSpeakerData = try? JSONEncoder().encode(original)
+        }
+        return s
+    }
+
+    func testRepairedSegmentIsResettable() {
+        let m = Meeting(title: "t")
+        m.segments = [segment(.other("Speaker 2"), original: .other("Speaker"))]
+        XCTAssertTrue(SpeakerRepairService.canResetLabels(m))
+    }
+
+    func testUntouchedTranscriptHasNothingToReset() {
+        let m = Meeting(title: "t")
+        m.segments = [segment(.other("Speaker")), segment(.me)]
+        XCTAssertFalse(SpeakerRepairService.canResetLabels(m))
+    }
+
+    func testUserEditedSegmentIsNeverConsideredResettable() {
+        // Their label is not ours to roll back, even though a stash exists —
+        // the edit flow writes one too.
+        let m = Meeting(title: "t")
+        m.segments = [segment(.other("Erin"), edited: true, original: .other("Speaker 2"))]
+        XCTAssertFalse(SpeakerRepairService.canResetLabels(m))
+    }
+
+    func testResetRestoresTheCollapsedLabelSoRepairCanRunAgain() {
+        // The point of reset: a repaired transcript no longer looks collapsed,
+        // so without this neither this service nor a better future diarizer
+        // would ever revisit it.
+        let m = Meeting(title: "t")
+        m.segments = [segment(.other("Speaker 2"), original: .other("Speaker")), segment(.me)]
+        XCTAssertFalse(SpeakerRepairService.isCollapsed(m), "repaired transcripts are not candidates")
+
+        for s in m.segments where !s.isEdited && s.originalSpeakerData != nil {
+            s.speakerData = s.originalSpeakerData!
+            s.originalSpeakerData = nil
+        }
+        XCTAssertTrue(SpeakerRepairService.isCollapsed(m), "after reset it should be repairable again")
+    }
 }

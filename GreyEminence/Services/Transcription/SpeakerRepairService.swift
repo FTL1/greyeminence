@@ -104,6 +104,16 @@ enum SpeakerRepairService {
                 to: segment.endTime,
                 in: usable
             ), let label = labels[id] else { continue }
+
+            // Stash the pre-repair label so this is reversible. Deliberately
+            // without setting `isEdited`: that flag means "the user changed
+            // this" and drives a badge, and a machine relabel shouldn't claim
+            // to be their work. If they later edit the segment themselves, the
+            // stash is replaced with the repaired value — which is the right
+            // revert target for them anyway.
+            if !segment.isEdited, segment.originalSpeakerData == nil {
+                segment.originalSpeakerData = segment.speakerData
+            }
             segment.speaker = .other(label)
             relabelled += 1
         }
@@ -115,7 +125,57 @@ enum SpeakerRepairService {
             critical: false,
             meetingID: meeting.id
         )
+        // Indexed snippets embed the speaker name — "Speaker: we can't turn
+        // that on" — so leaving them alone would have Ask quoting the old
+        // attribution back at the user. Dropping the records lets the launch
+        // backfill re-index the meeting with the names it now has.
+        invalidateSearchIndex(for: meeting)
         return .repaired(voices: significant.count, segments: relabelled)
+    }
+
+    /// Undo a repair, restoring the labels the transcript had before it.
+    ///
+    /// Exists because a repair is otherwise one-way: once segments read
+    /// "Speaker 2" they no longer look collapsed, so neither this service nor
+    /// a future improved diarizer would ever revisit them. Resetting makes the
+    /// meeting a candidate again.
+    @discardableResult
+    static func resetLabels(for meeting: Meeting, in context: ModelContext) -> Int {
+        var reverted = 0
+        for segment in meeting.segments {
+            // Never touch a segment the user edited — their label is not ours
+            // to roll back.
+            guard !segment.isEdited, let original = segment.originalSpeakerData else { continue }
+            segment.speakerData = original
+            segment.originalSpeakerData = nil
+            reverted += 1
+        }
+        guard reverted > 0 else { return 0 }
+        PersistenceGate.save(
+            context,
+            site: "SpeakerRepair.reset",
+            critical: false,
+            meetingID: meeting.id
+        )
+        invalidateSearchIndex(for: meeting)
+        return reverted
+    }
+
+    /// True when a repair left something to undo.
+    static func canResetLabels(_ meeting: Meeting) -> Bool {
+        meeting.segments.contains { !$0.isEdited && $0.originalSpeakerData != nil }
+    }
+
+    private static func invalidateSearchIndex(for meeting: Meeting) {
+        guard let store = EmbeddingStore.shared else { return }
+        let removed = store.deleteRecords(forMeetingID: meeting.id)
+        if removed > 0 {
+            LogManager.send(
+                "Speaker repair: dropped \(removed) search record(s) for \"\(meeting.title)\" so they re-index with the new speakers",
+                category: .transcription,
+                meetingID: meeting.id
+            )
+        }
     }
 
     /// Repair every candidate, oldest first so a long run makes visible

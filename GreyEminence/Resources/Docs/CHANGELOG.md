@@ -29,6 +29,12 @@ full detail; older ones are summarized. The version number tracks
 - It leaves alone any meeting where you've already named a speaker, so it
   can't overwrite your own work. Meetings whose audio has passed the
   retention window can't be repaired.
+- It's reversible. The previous label is kept, so "Undo speaker
+  separation" puts every transcript back exactly as it was — and because
+  a repaired transcript no longer looks unattributed, undoing is also
+  what makes it eligible to be repaired again later.
+- Search snippets are re-indexed automatically afterwards, so Ask quotes
+  the new attribution rather than the old one.
 - Speakers are numbered per meeting: "Speaker 1" in one meeting isn't the
   same person as in another. Recognising a voice across meetings comes
   next.
