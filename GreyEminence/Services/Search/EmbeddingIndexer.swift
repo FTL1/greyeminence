@@ -107,6 +107,13 @@ final class EmbeddingIndexer {
         }
 
         store.save()
+        // Record what a complete index looks like, so the launch sweep can
+        // detect a shortfall by comparing two counts instead of rebuilding
+        // this list for every meeting in the library.
+        StorageManager.shared.saveSearchCoverage(
+            .init(modelIdentifier: service.modelIdentifier, expectedRecords: allItems.count),
+            for: snapshot.id
+        )
         return IndexResult(
             written: written,
             attempted: items.count,

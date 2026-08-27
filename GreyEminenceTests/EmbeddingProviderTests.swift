@@ -279,3 +279,37 @@ final class SearchHelpDocTests: XCTestCase {
         XCTAssertTrue(text.contains("inference profile"), "profile-routed orgs can't invoke a bare model id")
     }
 }
+
+/// Deciding which meetings need indexing has to be cheap. Rebuilding each
+/// meeting's work list to find out chunks and sorts every transcript in the
+/// library on the main actor — several hundred thousand segments faulted at
+/// launch, which froze the app.
+final class SearchCoverageTests: XCTestCase {
+
+    func testCoverageNoteRoundTrips() throws {
+        let note = StorageManager.SearchCoverage(modelIdentifier: "m", expectedRecords: 42)
+        let decoded = try JSONDecoder().decode(
+            StorageManager.SearchCoverage.self,
+            from: JSONEncoder().encode(note)
+        )
+        XCTAssertEqual(decoded.expectedRecords, 42)
+        XCTAssertEqual(decoded.modelIdentifier, "m")
+    }
+
+    func testShortfallIsDetectedOnlyForTheCurrentModel() {
+        // A note left by a previous embedding model says nothing about how
+        // many records the current one should produce.
+        let note = StorageManager.SearchCoverage(modelIdentifier: "old-model", expectedRecords: 100)
+        let isShortfall = { (present: Int, current: String) -> Bool in
+            note.modelIdentifier == current && present < note.expectedRecords
+        }
+        XCTAssertTrue(isShortfall(40, "old-model"))
+        XCTAssertFalse(isShortfall(40, "new-model"), "a stale note must not trigger endless re-indexing")
+    }
+
+    func testFullCoverageIsNotFlagged() {
+        let note = StorageManager.SearchCoverage(modelIdentifier: "m", expectedRecords: 100)
+        XCTAssertFalse(100 < note.expectedRecords)
+        XCTAssertFalse(101 < note.expectedRecords, "extra records aren't a shortfall")
+    }
+}

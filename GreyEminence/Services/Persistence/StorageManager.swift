@@ -61,6 +61,32 @@ final class StorageManager: Sendable {
         try? FileManager.default.removeItem(at: reProcessCheckpointURL(for: meetingID))
     }
 
+    /// How many search records a meeting *should* have, recorded when it was
+    /// last indexed.
+    ///
+    /// Exists so the launch sweep can spot partial coverage without rebuilding
+    /// each meeting's work list — which meant chunking and sorting every
+    /// transcript in the library on the main actor, and froze the app for as
+    /// long as that took.
+    struct SearchCoverage: Codable, Sendable {
+        let modelIdentifier: String
+        let expectedRecords: Int
+    }
+
+    func searchCoverageURL(for meetingID: UUID) -> URL {
+        recordingDirectory(for: meetingID).appendingPathComponent("search-coverage.json")
+    }
+
+    func loadSearchCoverage(for meetingID: UUID) -> SearchCoverage? {
+        guard let data = try? Data(contentsOf: searchCoverageURL(for: meetingID)) else { return nil }
+        return try? JSONDecoder().decode(SearchCoverage.self, from: data)
+    }
+
+    func saveSearchCoverage(_ coverage: SearchCoverage, for meetingID: UUID) {
+        guard let data = try? JSONEncoder().encode(coverage) else { return }
+        try? data.write(to: searchCoverageURL(for: meetingID), options: .atomic)
+    }
+
     /// Voice signatures for a meeting's diarization clusters.
     ///
     /// A sidecar beside the recording: derived from audio, recomputable, and

@@ -46,20 +46,39 @@ enum EmbeddingBackfillService {
 
         let meetings = (try? mainContext.fetch(FetchDescriptor<Meeting>())) ?? []
         let indexer = EmbeddingIndexer(store: store, service: service)
-        // Coverage is counted per record, not per meeting. Meeting-level
-        // coverage treated a meeting with one chunk of fifty as done, so a
-        // throttled run left 9,154 chunks missing that no later sweep would
-        // ever look at — the store reported every meeting indexed while a
-        // third of the content was unsearchable.
-        let missing = meetings.filter { meeting in
-            guard meeting.status == .completed,
-                  !meeting.segments.isEmpty,
-                  meeting.reProcessingState == nil else { return false }
-            let present = store.existingRecordIDs(
-                meetingID: meeting.id,
-                modelIdentifier: service.modelIdentifier
-            ).count
-            return present < indexer.expectedRecordCount(for: meeting)
+
+        // Coverage is still counted per record — meeting-level coverage once
+        // let a throttled run leave 9,154 chunks missing while every meeting
+        // reported as indexed. But it has to be decided from counts, not by
+        // rebuilding each meeting's work list: that chunks and sorts every
+        // transcript in the library, faults several hundred thousand segments
+        // on the main actor, and froze the app on launch for as long as it
+        // took.
+        // One query for the whole library rather than one per meeting.
+        let counts = store.recordCountsByMeeting(forModel: service.modelIdentifier)
+
+        var missing: [Meeting] = []
+        for (index, meeting) in meetings.enumerated() {
+            if index % 10 == 0 { await Task.yield() }
+            guard meeting.status == .completed, meeting.reProcessingState == nil else { continue }
+
+            let present = counts[meeting.id] ?? 0
+            if present == 0 {
+                // Only now is it worth touching the relationship, and only for
+                // the handful of meetings that got this far.
+                if !meeting.segments.isEmpty { missing.append(meeting) }
+                continue
+            }
+            // A meeting indexed by the current model recorded what a complete
+            // pass looks like; a shortfall against that means records were
+            // lost. Without the note — anything indexed before this existed —
+            // having records at all is taken as covered, and the next index
+            // writes the note.
+            if let coverage = StorageManager.shared.loadSearchCoverage(for: meeting.id),
+               coverage.modelIdentifier == service.modelIdentifier,
+               present < coverage.expectedRecords {
+                missing.append(meeting)
+            }
         }
         guard !missing.isEmpty else {
             LogManager.send(

@@ -190,6 +190,34 @@ final class EmbeddingStore {
         (try? context.fetchCount(FetchDescriptor<EmbeddingRecord>())) ?? 0
     }
 
+    /// Record counts for every meeting under one model, in a single query.
+    ///
+    /// The launch sweep needs this for the whole library, and asking per
+    /// meeting meant several hundred separate round trips. Only the meeting id
+    /// is fetched, so nothing else is materialised.
+    func recordCountsByMeeting(forModel modelIdentifier: String) -> [UUID: Int] {
+        var descriptor = FetchDescriptor<EmbeddingRecord>(
+            predicate: #Predicate { $0.modelIdentifier == modelIdentifier }
+        )
+        descriptor.propertiesToFetch = [\.meetingID]
+        guard let records = try? context.fetch(descriptor) else { return [:] }
+        return records.reduce(into: [UUID: Int]()) { counts, record in
+            counts[record.meetingID, default: 0] += 1
+        }
+    }
+
+    /// How many records a meeting has under one model. A count query — it
+    /// never faults the meeting's segments, which is what makes it usable
+    /// across the whole library.
+    func recordCount(forMeetingID meetingID: UUID, modelIdentifier: String) -> Int {
+        let descriptor = FetchDescriptor<EmbeddingRecord>(
+            predicate: #Predicate {
+                $0.meetingID == meetingID && $0.modelIdentifier == modelIdentifier
+            }
+        )
+        return (try? context.fetchCount(descriptor)) ?? 0
+    }
+
     /// Records produced by one embedding model. The total on its own hides a
     /// half-migrated index: after switching methods the store can be full and
     /// the search still find nothing.
