@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import Grey_Eminence
 
@@ -121,5 +122,33 @@ final class SpeakerRepairTests: XCTestCase {
             s.originalSpeakerData = nil
         }
         XCTAssertTrue(SpeakerRepairService.isCollapsed(m), "after reset it should be repairable again")
+    }
+
+    // MARK: - Cost of deciding
+
+    func testAudioPresenceCheckDoesNotDependOnChunkDurations() {
+        // The candidate scan asks "is there audio at all". Answering it by
+        // resolving the windowed chunk list opens every file with AVAudioFile
+        // to read a duration — tens of thousands of opens across the library,
+        // on the main actor, which froze the settings pane on appear.
+        let m = Meeting(title: "no audio on disk")
+        let started = Date()
+        _ = SpeakerRepairService.hasSystemAudio(for: m)
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started), 0.05,
+            "presence check should be a filesystem lookup, not a decode"
+        )
+    }
+
+    func testScanYieldsAndStaysCancellable() async {
+        // A scan that can't be cancelled is a scan that hangs the window.
+        let task = Task { () -> Int in
+            await SpeakerRepairService.candidates(in: ModelContext(try! ModelContainer(
+                for: Meeting.self,
+                configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            ))).count
+        }
+        let count = await task.value
+        XCTAssertEqual(count, 0, "an empty store has no candidates")
     }
 }

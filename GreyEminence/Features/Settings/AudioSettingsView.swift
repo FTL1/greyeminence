@@ -16,6 +16,7 @@ struct AudioSettingsView: View {
     @State private var repairCandidates = 0
     @State private var repairSummary: String?
     @State private var repairResettable = 0
+    @State private var isScanning = false
 
     @MainActor
     private func resetSpeakers() {
@@ -27,14 +28,25 @@ struct AudioSettingsView: View {
         repairSummary = reverted == 0
             ? "Nothing to undo."
             : "Restored the previous labels in \(reverted) meeting\(reverted == 1 ? "" : "s")."
-        refreshRepairCounts()
+        Task { await refreshRepairCounts() }
     }
 
+    /// Counting means walking every meeting's segments, so it runs as a task
+    /// with a visible "checking" state rather than freezing the pane on
+    /// appear — which is exactly what it did.
     @MainActor
-    private func refreshRepairCounts() {
-        repairCandidates = SpeakerRepairService.candidates(in: modelContext).count
+    private func refreshRepairCounts() async {
+        isScanning = true
+        defer { isScanning = false }
+        repairCandidates = await SpeakerRepairService.candidates(in: modelContext).count
+
         let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
-        repairResettable = meetings.count { SpeakerRepairService.canResetLabels($0) }
+        var resettable = 0
+        for (index, meeting) in meetings.enumerated() {
+            if index % 25 == 0 { await Task.yield() }
+            if SpeakerRepairService.canResetLabels(meeting) { resettable += 1 }
+        }
+        repairResettable = resettable
     }
 
     @MainActor
@@ -43,7 +55,7 @@ struct AudioSettingsView: View {
         repairSummary = nil
         defer {
             isRepairing = false
-            refreshRepairCounts()
+            Task { await refreshRepairCounts() }
         }
         let result = await SpeakerRepairService.repairAll(in: modelContext) { done, total in
             repairDone = done
@@ -128,7 +140,13 @@ struct AudioSettingsView: View {
                     Button(isRepairing ? "Identifying…" : "Identify speakers in older meetings") {
                         Task { await repairSpeakers() }
                     }
-                    .disabled(isRepairing || repairCandidates == 0)
+                    .disabled(isRepairing || isScanning || repairCandidates == 0)
+                    if isScanning {
+                        ProgressView().controlSize(.small)
+                        Text("Checking which meetings need it…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if isRepairing, repairTotal > 0 {
                         ProgressView(value: Double(repairDone), total: Double(repairTotal))
                             .frame(width: 120)
@@ -154,7 +172,7 @@ struct AudioSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Text(repairCandidates == 0
-                     ? "Every meeting with audio still on disk has its speakers separated."
+                     ? (isScanning ? "" : "Every meeting with audio still on disk has its speakers separated.")
                      : "\(repairCandidates) meeting\(repairCandidates == 1 ? "" : "s") were transcribed before speakers were told apart, so everyone but you shows as \"Speaker\". This listens to the audio again and separates the voices — the words and timings don't change, only who each line is attributed to. It doesn't re-transcribe, so it's far quicker than re-processing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -188,7 +206,7 @@ struct AudioSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { refreshRepairCounts() }
+        .task { await refreshRepairCounts() }
         .task {
             await audioManager.checkMicPermission()
             audioManager.enumerateInputDevices()

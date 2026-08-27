@@ -31,9 +31,37 @@ enum SpeakerRepairService {
 
     /// Meetings that would benefit: collapsed attribution, and audio still on
     /// disk to attribute from.
-    static func candidates(in context: ModelContext) -> [Meeting] {
+    ///
+    /// Yields between meetings. Scanning the library means faulting in every
+    /// transcript segment and touching the recordings directory, and the main
+    /// actor owns the store — without yielding, the window simply stops
+    /// redrawing until the whole scan finishes.
+    static func candidates(in context: ModelContext, onProgress: (@MainActor (Int, Int) -> Void)? = nil) async -> [Meeting] {
         let meetings = (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
-        return meetings.filter { isCollapsed($0) && !systemChunks(for: $0).isEmpty }
+        var result: [Meeting] = []
+        for (index, meeting) in meetings.enumerated() {
+            if index % 10 == 0 {
+                onProgress?(index, meetings.count)
+                await Task.yield()
+            }
+            if Task.isCancelled { break }
+            guard isCollapsed(meeting), hasSystemAudio(for: meeting) else { continue }
+            result.append(meeting)
+        }
+        onProgress?(meetings.count, meetings.count)
+        return result
+    }
+
+    /// Whether any system audio survives for a meeting.
+    ///
+    /// Deliberately not `systemChunks(for:)`: that opens every chunk with
+    /// `AVAudioFile` to read its duration so it can resolve a split meeting's
+    /// window. Across the library that is tens of thousands of file opens, and
+    /// answering "is there audio at all" needs none of them.
+    static func hasSystemAudio(for meeting: Meeting) -> Bool {
+        let sourceID = meeting.audioSourceMeetingID ?? meeting.id
+        let base = StorageManager.shared.systemAudioURL(for: sourceID)
+        return !AudioFileWriter.existingChunkURLs(base: base).isEmpty
     }
 
     /// True when the transcript has remote speech and none of it is attributed.
@@ -184,7 +212,7 @@ enum SpeakerRepairService {
         in context: ModelContext,
         onProgress: @MainActor (Int, Int) -> Void
     ) async -> (repaired: Int, skipped: Int) {
-        let meetings = candidates(in: context).sorted { $0.date < $1.date }
+        let meetings = await candidates(in: context).sorted { $0.date < $1.date }
         var repaired = 0
         var skipped = 0
 
