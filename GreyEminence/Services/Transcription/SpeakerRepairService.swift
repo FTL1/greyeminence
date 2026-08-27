@@ -36,20 +36,29 @@ enum SpeakerRepairService {
     /// transcript segment and touching the recordings directory, and the main
     /// actor owns the store — without yielding, the window simply stops
     /// redrawing until the whole scan finishes.
-    static func candidates(in context: ModelContext, onProgress: (@MainActor (Int, Int) -> Void)? = nil) async -> [Meeting] {
+    /// Both counts the settings pane needs, from one walk of the library.
+    struct Survey {
+        var repairable: [Meeting] = []
+        var resettableCount = 0
+    }
+
+    static func survey(in context: ModelContext) async -> Survey {
         let meetings = (try? context.fetch(FetchDescriptor<Meeting>())) ?? []
-        var result: [Meeting] = []
+        var survey = Survey()
         for (index, meeting) in meetings.enumerated() {
-            if index % 10 == 0 {
-                onProgress?(index, meetings.count)
-                await Task.yield()
-            }
+            if index % 10 == 0 { await Task.yield() }
             if Task.isCancelled { break }
-            guard isCollapsed(meeting), hasSystemAudio(for: meeting) else { continue }
-            result.append(meeting)
+            let classification = classify(meeting)
+            if classification.isResettable { survey.resettableCount += 1 }
+            if classification.isCollapsed, hasSystemAudio(for: meeting) {
+                survey.repairable.append(meeting)
+            }
         }
-        onProgress?(meetings.count, meetings.count)
-        return result
+        return survey
+    }
+
+    static func candidates(in context: ModelContext) async -> [Meeting] {
+        await survey(in: context).repairable
     }
 
     /// Whether any system audio survives for a meeting.
@@ -64,24 +73,42 @@ enum SpeakerRepairService {
         return !AudioFileWriter.existingChunkURLs(base: base).isEmpty
     }
 
-    /// True when the transcript has remote speech and none of it is attributed.
+    /// What one meeting's transcript needs, decided in a single pass.
     ///
-    /// Checked rather than assumed, because a meeting may have been partly
-    /// relabelled by hand and re-running should not disturb that.
-    static func isCollapsed(_ meeting: Meeting) -> Bool {
+    /// Both questions require faulting in every segment, and asking them
+    /// separately meant walking several hundred thousand objects twice — long
+    /// enough that the settings pane sat on a spinner well after the numbers
+    /// had appeared.
+    struct Classification: Equatable {
+        /// Remote speech exists and none of it is attributed.
+        var isCollapsed: Bool
+        /// A previous repair left labels that can be rolled back.
+        var isResettable: Bool
+    }
+
+    static func classify(_ meeting: Meeting) -> Classification {
         var sawCollapsed = false
+        var sawNamed = false
+        var resettable = false
+
         for segment in meeting.segments {
-            switch segment.speaker {
-            case .me:
-                continue
-            case .other(let name) where name == collapsedLabel:
-                sawCollapsed = true
-            case .other:
-                // Already attributed to someone — leave the meeting alone.
-                return false
+            // A segment the user edited is theirs; its stash is not ours to
+            // roll back.
+            if !segment.isEdited, segment.originalSpeakerData != nil {
+                resettable = true
+            }
+            if case .other(let name) = segment.speaker {
+                if name == collapsedLabel { sawCollapsed = true } else { sawNamed = true }
             }
         }
-        return sawCollapsed
+        // A meeting that has been partly relabelled by hand is left alone
+        // entirely — re-running would overwrite that work with numbers.
+        return Classification(isCollapsed: sawCollapsed && !sawNamed, isResettable: resettable)
+    }
+
+    /// True when the transcript has remote speech and none of it is attributed.
+    static func isCollapsed(_ meeting: Meeting) -> Bool {
+        classify(meeting).isCollapsed
     }
 
     /// System-audio chunks for a meeting, resolved exactly as re-processing
@@ -191,7 +218,7 @@ enum SpeakerRepairService {
 
     /// True when a repair left something to undo.
     static func canResetLabels(_ meeting: Meeting) -> Bool {
-        meeting.segments.contains { !$0.isEdited && $0.originalSpeakerData != nil }
+        classify(meeting).isResettable
     }
 
     private static func invalidateSearchIndex(for meeting: Meeting) {

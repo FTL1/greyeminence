@@ -151,4 +151,45 @@ final class SpeakerRepairTests: XCTestCase {
         let count = await task.value
         XCTAssertEqual(count, 0, "an empty store has no candidates")
     }
+
+    // MARK: - One pass, two answers
+
+    func testClassifyAnswersBothQuestionsConsistently() {
+        // The pane needs "can this be repaired" and "can this be undone".
+        // Asking separately walked every segment in the library twice.
+        let m = Meeting(title: "t")
+        m.segments = [segment(.me), segment(.other("Speaker"))]
+        let c = SpeakerRepairService.classify(m)
+        XCTAssertEqual(c.isCollapsed, SpeakerRepairService.isCollapsed(m))
+        XCTAssertEqual(c.isResettable, SpeakerRepairService.canResetLabels(m))
+    }
+
+    func testRepairedMeetingIsResettableButNotRepairable() {
+        let m = Meeting(title: "t")
+        m.segments = [segment(.me), segment(.other("Speaker 2"), original: .other("Speaker"))]
+        let c = SpeakerRepairService.classify(m)
+        XCTAssertFalse(c.isCollapsed)
+        XCTAssertTrue(c.isResettable)
+    }
+
+    func testCollapsedMeetingIsRepairableButNotResettable() {
+        let m = Meeting(title: "t")
+        m.segments = [segment(.me), segment(.other("Speaker"))]
+        let c = SpeakerRepairService.classify(m)
+        XCTAssertTrue(c.isCollapsed)
+        XCTAssertFalse(c.isResettable)
+    }
+
+    func testPartlyNamedMeetingIsNeitherRepairableNorRolledBack() {
+        // Hand-named speakers make the whole meeting off-limits, but a stash
+        // from an earlier repair still counts as undoable.
+        let m = Meeting(title: "t")
+        m.segments = [
+            segment(.other("Erin O\u{2019}Brien")),
+            segment(.other("Speaker"), original: .other("Speaker")),
+        ]
+        let c = SpeakerRepairService.classify(m)
+        XCTAssertFalse(c.isCollapsed, "a hand-named meeting must never be re-attributed")
+        XCTAssertTrue(c.isResettable)
+    }
 }

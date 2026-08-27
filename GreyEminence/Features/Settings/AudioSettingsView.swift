@@ -38,15 +38,9 @@ struct AudioSettingsView: View {
     private func refreshRepairCounts() async {
         isScanning = true
         defer { isScanning = false }
-        repairCandidates = await SpeakerRepairService.candidates(in: modelContext).count
-
-        let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
-        var resettable = 0
-        for (index, meeting) in meetings.enumerated() {
-            if index % 25 == 0 { await Task.yield() }
-            if SpeakerRepairService.canResetLabels(meeting) { resettable += 1 }
-        }
-        repairResettable = resettable
+        let survey = await SpeakerRepairService.survey(in: modelContext)
+        repairCandidates = survey.repairable.count
+        repairResettable = survey.resettableCount
     }
 
     @MainActor
