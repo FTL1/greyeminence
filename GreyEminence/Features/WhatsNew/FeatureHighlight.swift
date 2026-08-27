@@ -24,6 +24,15 @@ enum FeatureHighlightCatalog {
     /// set its `version` to that release's MARKETING_VERSION.
     static let all: [FeatureHighlight] = [
         FeatureHighlight(
+            id: "ask-better-search",
+            version: "0.31.0",
+            title: "Ask can find what you meant",
+            summary: "Search can now run on a real embedding model through your own AWS account, so a question phrased nothing like the conversation still finds it — \"what couldn\u{2019}t we process because of cost\" matches \"there\u{2019}s no way we can turn this on\". Name someone and it narrows to meetings they were in or were mentioned in, instead of hunting for their name. Settings \u{2192} Ask, and Help \u{2192} Setting Up Ask walks through it.",
+            systemImage: "sparkle.magnifyingglass",
+            tint: .teal,
+            destination: .settings
+        ),
+        FeatureHighlight(
             id: "ask-conversations",
             version: "0.31.0",
             title: "Ask is a conversation now",

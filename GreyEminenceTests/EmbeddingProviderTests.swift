@@ -220,3 +220,62 @@ final class TitanAccountResolutionTests: XCTestCase {
         XCTAssertEqual(service.resolvedRegion, "eu-west-1")
     }
 }
+
+/// The setup guide has to ship in the bundle and stay in step with the code.
+/// A help doc that documents an option that no longer exists, or omits one
+/// that does, is worse than no help.
+final class SearchHelpDocTests: XCTestCase {
+
+    private func guideText() throws -> String {
+        let url = try XCTUnwrap(
+            Bundle.main.url(forResource: "SEARCH", withExtension: "md", subdirectory: "Docs")
+                ?? Bundle.main.url(forResource: "SEARCH", withExtension: "md"),
+            "SEARCH.md is not in the bundle — the Help menu item would open an error"
+        )
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    func testGuideIsBundled() throws {
+        XCTAssertGreaterThan(try guideText().count, 2_000, "the guide should be substantive")
+    }
+
+    func testGuideIsReachableFromTheHelpMenu() {
+        XCTAssertTrue(HelpDoc.allCases.contains(.search))
+        XCTAssertFalse(HelpDoc.search.menuTitle.isEmpty)
+        XCTAssertEqual(HelpDoc.search.resourceName, "SEARCH")
+    }
+
+    func testGuideCoversEverySelectableMethod() throws {
+        let text = try guideText()
+        for provider in EmbeddingProvider.allCases {
+            // Match on the human name a user sees in the picker, not the enum.
+            let needle = provider.shortLabel
+            XCTAssertTrue(
+                text.localizedCaseInsensitiveContains(needle),
+                "\(needle) is offered in Settings but unexplained in the guide"
+            )
+        }
+    }
+
+    func testGuideExplainsWhichAWSProfilesWork() throws {
+        let text = try guideText()
+        for topic in ["SSO", "credential_process", "role_arn", "Refresh profiles"] {
+            XCTAssertTrue(text.contains(topic), "the guide should cover \(topic)")
+        }
+    }
+
+    func testGuideCoversTheErrorsUsersActuallyHit() throws {
+        // Each of these was a real dead end during setup; the guide should
+        // name the message, not just describe the situation abstractly.
+        let text = try guideText()
+        for message in ["SSO token expired", "bedrock:InvokeModel", "Too many requests"] {
+            XCTAssertTrue(text.contains(message), "the guide should name the \"\(message)\" failure")
+        }
+    }
+
+    func testGuideExplainsThatSwitchingMethodsRequiresARebuild() throws {
+        let text = try guideText().lowercased()
+        XCTAssertTrue(text.contains("rebuild"))
+        XCTAssertTrue(text.contains("inference profile"), "profile-routed orgs can't invoke a bare model id")
+    }
+}

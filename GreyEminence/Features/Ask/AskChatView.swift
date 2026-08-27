@@ -12,6 +12,7 @@ struct AskChatView: View {
 
     @Bindable var viewModel: AskViewModel
 
+    @Environment(\.openWindow) private var openWindow
     @FocusState private var composerFocused: Bool
 
     private static let starters = [
@@ -103,6 +104,11 @@ struct AskChatView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
+                Button("How search works, and how to improve it") {
+                    openWindow(id: "help-doc", value: HelpDoc.search)
+                }
+                .buttonStyle(.link)
+                .font(.caption)
             }
             VStack(spacing: 8) {
                 ForEach(Self.starters, id: \.self) { starter in

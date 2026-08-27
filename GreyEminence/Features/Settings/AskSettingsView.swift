@@ -4,6 +4,7 @@ import SwiftData
 
 struct AskSettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("embeddingProvider") private var embeddingProviderRaw = EmbeddingProvider.nlEmbedding.rawValue
     @AppStorage("askSnippetCount") private var askSnippetCount: Int = 15
     @AppStorage("askContextWindow") private var askContextWindow: Int = 2
@@ -100,10 +101,17 @@ struct AskSettingsView: View {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
-                        Text(reindexError)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(reindexError)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .textSelection(.enabled)
+                            Button("Troubleshooting") {
+                                openWindow(id: "help-doc", value: HelpDoc.search)
+                            }
+                            .buttonStyle(.link)
                             .font(.caption)
-                            .foregroundStyle(.orange)
-                            .textSelection(.enabled)
+                        }
                     }
                 }
                 HStack {
@@ -137,6 +145,15 @@ struct AskSettingsView: View {
                         }
                     }
                 }
+                // Help sits where the setup happens, not only under the Help
+                // menu — this pane is where someone is when they get stuck.
+                Button {
+                    openWindow(id: "help-doc", value: HelpDoc.search)
+                } label: {
+                    Label("How to set this up", systemImage: "questionmark.circle")
+                        .font(.caption)
+                }
+                .buttonStyle(.link)
             } header: {
                 Label("Index", systemImage: "rectangle.stack")
                     .font(.subheadline.weight(.semibold))
@@ -340,10 +357,17 @@ struct AskSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.green)
             case .failure(let detail):
-                Label(detail, systemImage: "xmark.circle.fill")
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(detail, systemImage: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                    Button("What this means") {
+                        openWindow(id: "help-doc", value: HelpDoc.search)
+                    }
+                    .buttonStyle(.link)
                     .font(.caption)
-                    .foregroundStyle(.orange)
-                    .textSelection(.enabled)
+                }
             case nil:
                 Text("Embeds one short string. Confirms the account can invoke Titan before you commit to a full rebuild.")
                     .font(.caption)

@@ -33,6 +33,7 @@ struct HelpMenuCommands: View {
 /// One of the bundled in-app docs surfaced from the Help menu.
 enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
     case readme = "README"
+    case search = "SEARCH"
     case contributing = "CONTRIBUTING"
     case changelog = "CHANGELOG"
     case license = "LICENSE"
@@ -41,6 +42,7 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
     var menuTitle: String {
         switch self {
         case .readme: "Read Me"
+        case .search: "Setting Up Ask"
         case .contributing: "Contributing"
         case .changelog: "Changelog"
         case .license: "License"
@@ -50,6 +52,7 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
     var iconName: String {
         switch self {
         case .readme: "book"
+        case .search: "magnifyingglass.circle"
         case .contributing: "hammer"
         case .changelog: "clock.arrow.circlepath"
         case .license: "scroll"

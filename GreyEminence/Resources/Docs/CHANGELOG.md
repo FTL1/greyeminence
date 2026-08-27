@@ -28,6 +28,14 @@ full detail; older ones are summarized. The version number tracks
 - Your previous Ask history is converted into single-question
   conversations, so nothing is lost.
 
+**A setup guide for search**
+- Help → Setting Up Ask explains the methods and the trade-off between
+  them, what AWS profiles work and which don't, inference profiles, what
+  rebuilding costs, and every error message you can actually hit — each
+  one named, with what causes it and what to do. It's linked from the Ask
+  settings pane, from Ask's empty state, and from any failure message,
+  because those are the moments you'd want it.
+
 **Search can now use a real embedding model**
 - Settings → Ask has a Method picker. On-device stays the default; the new
   option is Amazon Titan Text Embeddings V2, running over Bedrock on the
