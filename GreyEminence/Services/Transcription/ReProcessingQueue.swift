@@ -318,7 +318,19 @@ final class ReProcessingQueue {
         // redo if interrupted, so no further checkpointing is needed.
         StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
 
-        let (segmentSnapshots, audioRanges) = swapSegments(meeting: meeting, upgraded: upgraded, in: context)
+        // Diarize the system track before swapping, so the new transcript can
+        // be attributed as it is written rather than relabelled afterwards.
+        let diarized = await diarizeSystemTrack(chunks: sysChunks, title: title)
+        let (segmentSnapshots, audioRanges) = swapSegments(
+            meeting: meeting,
+            upgraded: upgraded,
+            diarized: diarized,
+            in: context
+        )
+        let voices = Set(diarized.map(\.speakerID)).count
+        if voices > 0 {
+            LogManager.send("Diarization found \(voices) distinct voice(s) in \"\(title)\"", category: .transcription)
+        }
 
         setPhase(.analyzing, for: meeting, in: context)
         phaseStart = Date()
@@ -351,6 +363,27 @@ final class ReProcessingQueue {
             """,
             category: .transcription
         )
+    }
+
+    /// Best-effort: a failure here costs attribution, not the transcript. The
+    /// upgraded text is the point of re-processing and must survive a
+    /// diarizer that won't load.
+    private func diarizeSystemTrack(chunks: [URL], title: String) async -> [DiarizedSegment] {
+        guard !chunks.isEmpty else { return [] }
+        let service = SpeakerDiarizationService()
+        do {
+            try await service.prepare()
+            return try await service.diarizeTrack(chunkURLs: chunks)
+        } catch is CancellationError {
+            return []
+        } catch {
+            LogManager.send(
+                "Diarization unavailable for \"\(title)\" — transcript keeps text but not speakers: \(error.localizedDescription)",
+                category: .transcription,
+                level: .warning
+            )
+            return []
+        }
     }
 
     private static func fmt(_ seconds: TimeInterval) -> String {
@@ -394,6 +427,7 @@ final class ReProcessingQueue {
     private func swapSegments(
         meeting: Meeting,
         upgraded: [HighQualityTranscriber.Segment],
+        diarized: [DiarizedSegment],
         in context: ModelContext
     ) -> ([SegmentSnapshot], TimeInterval) {
         for old in meeting.segments { context.delete(old) }
@@ -403,8 +437,30 @@ final class ReProcessingQueue {
         // mic/system dedup before persisting — otherwise echoed speech (the
         // same phrase captured by both the mic and the system audio tap)
         // shows up twice in the final transcript.
+        // Attribution for the system side comes from the diarization pass over
+        // the same audio. Without it every remote voice collapsed into one
+        // anonymous "Speaker" — which is what made a four-person meeting read
+        // as a conversation between the user and a single monolith.
+        let spans = diarized.map {
+            SpeakerAlignment.Span(speakerID: $0.speakerID, start: $0.startTime, end: $0.endTime)
+        }
+        let significant = SpeakerAlignment.significantSpeakerIDs(in: spans)
+        let usableSpans = spans.filter { significant.contains($0.speakerID) }
+        let labels = SpeakerAlignment.labels(forSpansOrderedByTime: usableSpans)
+
         let raw: [TranscriptSegment] = upgraded.map { seg in
-            let speaker: Speaker = seg.source == .mic ? .me : .other("Speaker")
+            let speaker: Speaker
+            if seg.source == .mic {
+                speaker = .me
+            } else if let id = SpeakerAlignment.dominantSpeakerID(from: seg.startTime, to: seg.endTime, in: usableSpans),
+                      let label = labels[id] {
+                speaker = .other(label)
+            } else {
+                // Diarization unavailable or this stretch didn't cluster.
+                // "Speaker" is the honest label for an unidentified voice —
+                // better than attributing it to whoever spoke nearby.
+                speaker = .other("Speaker")
+            }
             return TranscriptSegment(
                 speaker: speaker,
                 text: seg.text,

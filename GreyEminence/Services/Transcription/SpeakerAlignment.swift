@@ -1,0 +1,81 @@
+import Foundation
+
+/// Joins "who spoke when" onto "what was said".
+///
+/// The two come from different models and neither can do the other's job:
+/// WhisperKit produces accurate text with timings but no notion of speakers,
+/// FluidAudio produces speaker turns but no words. Re-processing used to
+/// discard the diarization entirely and label every non-microphone segment
+/// `"Speaker"`, which collapsed 359 of 429 meetings into a single anonymous
+/// voice — 175 of them with three or more attendees.
+///
+/// Pure and time-based so the join can be tested without audio or models.
+enum SpeakerAlignment {
+    /// One diarized turn: a time range attributed to an opaque cluster id.
+    struct Span: Equatable {
+        let speakerID: String
+        let start: TimeInterval
+        let end: TimeInterval
+
+        var duration: TimeInterval { max(0, end - start) }
+    }
+
+    /// The cluster that overlaps `start..<end` most.
+    ///
+    /// Most, not first: a segment routinely straddles a turn boundary, and
+    /// whoever holds the majority of it is the speaker. Returns nil when
+    /// nothing overlaps — silence, or audio the diarizer couldn't cluster —
+    /// so the caller can fall back rather than attribute to a guess.
+    static func dominantSpeakerID(from start: TimeInterval, to end: TimeInterval, in spans: [Span]) -> String? {
+        guard end > start, !spans.isEmpty else { return nil }
+
+        var totals: [String: TimeInterval] = [:]
+        for span in spans {
+            let overlap = min(end, span.end) - max(start, span.start)
+            guard overlap > 0 else { continue }
+            totals[span.speakerID, default: 0] += overlap
+        }
+        guard !totals.isEmpty else { return nil }
+
+        // Ties broken by the earliest span for that speaker, so the result
+        // doesn't depend on dictionary ordering.
+        let firstAppearance = spans.reduce(into: [String: TimeInterval]()) { result, span in
+            result[span.speakerID] = min(result[span.speakerID] ?? .greatestFiniteMagnitude, span.start)
+        }
+        return totals.max { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value < rhs.value }
+            return (firstAppearance[lhs.key] ?? 0) > (firstAppearance[rhs.key] ?? 0)
+        }?.key
+    }
+
+    /// Stable display labels for cluster ids, numbered by when each voice is
+    /// first heard rather than by whatever order the diarizer emitted them —
+    /// so "Speaker 1" is the first person to talk, which is what a reader
+    /// expects.
+    ///
+    /// These numbers are only meaningful within one meeting. The same person
+    /// is not "Speaker 2" in the next one, which is precisely why naming has
+    /// to come from a voice profile rather than from the label.
+    static func labels(forSpansOrderedByTime spans: [Span]) -> [String: String] {
+        var labels: [String: String] = [:]
+        var next = 1
+        for span in spans.sorted(by: { $0.start < $1.start }) where labels[span.speakerID] == nil {
+            labels[span.speakerID] = "Speaker \(next)"
+            next += 1
+        }
+        return labels
+    }
+
+    /// Clusters too small to be a real participant.
+    ///
+    /// Diarizers emit slivers — a cough, a crossfade, half a word of overlap —
+    /// and each one otherwise becomes a numbered "speaker" that never says
+    /// anything, which makes a two-person call look like a panel.
+    static func significantSpeakerIDs(in spans: [Span], minimumTotalSeconds: TimeInterval = 3.0) -> Set<String> {
+        var totals: [String: TimeInterval] = [:]
+        for span in spans {
+            totals[span.speakerID, default: 0] += span.duration
+        }
+        return Set(totals.filter { $0.value >= minimumTotalSeconds }.keys)
+    }
+}

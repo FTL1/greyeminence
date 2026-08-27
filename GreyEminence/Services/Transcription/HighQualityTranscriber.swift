@@ -331,7 +331,9 @@ actor HighQualityTranscriber {
     /// WhisperKit expects for `transcribe(audioArray:)`. Tries AVAudioFile
     /// first; falls back to AVAssetReader for slightly malformed containers
     /// that AVAudioFile refuses to open.
-    nonisolated private static func decodeTo16kFloatMono(url: URL) throws -> [Float] {
+    /// Shared with the diarization pass, which has to walk the same chunk
+    /// files on the same timeline.
+    nonisolated static func decodeTo16kFloatMono(url: URL) throws -> [Float] {
         do {
             return try decodeViaAVAudioFile(url: url)
         } catch {
