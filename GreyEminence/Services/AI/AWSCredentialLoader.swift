@@ -88,6 +88,49 @@ enum AWSCredentialLoader {
 
     // MARK: - credential_process
 
+    /// Security-scoped bookmarks for credential helpers the user has pointed
+    /// us at, keyed by executable path.
+    ///
+    /// A sandboxed app can't reach a binary outside its container, which is
+    /// why launching one failed with "not found" for a file that plainly
+    /// exists. `com.apple.security.files.user-selected.read-write` grants
+    /// access to what the user explicitly picks, so an open panel is the only
+    /// route to that path — and the bookmark makes the grant survive relaunch.
+    private static let helperBookmarksKey = "awsCredentialHelperBookmarks"
+
+    static func persistHelperAccess(to url: URL) {
+        guard let data = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
+        var all = (UserDefaults.standard.dictionary(forKey: helperBookmarksKey) as? [String: Data]) ?? [:]
+        all[url.path] = data
+        UserDefaults.standard.set(all, forKey: helperBookmarksKey)
+    }
+
+    static func hasHelperAccess(forExecutable path: String) -> Bool {
+        let all = (UserDefaults.standard.dictionary(forKey: helperBookmarksKey) as? [String: Data]) ?? [:]
+        return all[path] != nil
+    }
+
+    /// Begin security-scoped access to a helper. The caller must call
+    /// `stopAccessingSecurityScopedResource()` on the returned URL.
+    private static func startHelperAccess(forExecutable path: String) -> URL? {
+        let all = (UserDefaults.standard.dictionary(forKey: helperBookmarksKey) as? [String: Data]) ?? [:]
+        guard let data = all[path] else { return nil }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        guard url.startAccessingSecurityScopedResource() else { return nil }
+        if isStale { persistHelperAccess(to: url) }
+        return url
+    }
+
     static func credentialProcessCommand(profile: String) -> String? {
         guard let configURL = try? resolveConfigFile(),
               let content = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
@@ -137,6 +180,12 @@ enum AWSCredentialLoader {
         // is denied — so the check produced "not found" for a file that is
         // plainly there, sending the user to fix a path that was correct.
         // Let the launch itself decide, and report the real errno.
+
+        // Hold the user's grant open across the launch. Without it the exec
+        // is denied before it starts; with it, whether the sandbox permits
+        // launching an external binary at all is the question this answers.
+        let scoped = startHelperAccess(forExecutable: executable)
+        defer { scoped?.stopAccessingSecurityScopedResource() }
 
         let output: Data
         do {
@@ -584,7 +633,7 @@ enum AWSCredentialError: LocalizedError {
         case .credentialProcessFailed(let profile, let detail):
             "Profile '\(profile)' credential helper failed: \(detail)"
         case .credentialProcessBlocked(let profile):
-            "Profile '\(profile)' gets its credentials from an external helper, and macOS won't let this app launch it — the app is sandboxed, so programs outside it are off-limits regardless of whether the path is correct. Use an SSO or access-key profile instead."
+            "Profile '\(profile)' gets its credentials from an external helper that this app couldn't launch. If you haven't granted access to the helper yet, use \"Locate credential helper\" and try again; if you have, the sandbox is refusing to run programs outside the app, and an SSO or access-key profile is the way in."
         case .profileNotFound(let profile):
             "AWS profile '\(profile)' not found"
         case .missingCredentials(let profile):

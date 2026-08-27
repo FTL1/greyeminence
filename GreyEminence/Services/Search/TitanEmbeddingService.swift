@@ -69,7 +69,7 @@ final class TitanEmbeddingService: EmbeddingService, @unchecked Sendable {
                 dimensions: Self.dimensions,
                 normalize: true
             ))
-            let data = try await transport.invoke(modelID: Self.modelID, body: body)
+            let data = try await transport.invoke(modelID: BedrockEmbeddingAccount.modelID(for: .titan, foundation: Self.modelID), body: body)
             let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
             guard decoded.embedding.count == Self.dimensions else {
                 throw BedrockAPIError.invalidResponse

@@ -95,7 +95,7 @@ final class CohereEmbeddingService: EmbeddingService, @unchecked Sendable {
                 input_type: purpose == .query ? "search_query" : "search_document",
                 truncate: "END"
             ))
-            let data = try await transport.invoke(modelID: Self.modelID, body: body)
+            let data = try await transport.invoke(modelID: BedrockEmbeddingAccount.modelID(for: .cohere, foundation: Self.modelID), body: body)
             let vectors = try Self.decodeEmbeddings(from: data)
 
             // A short batch would silently pair vectors with the wrong texts.

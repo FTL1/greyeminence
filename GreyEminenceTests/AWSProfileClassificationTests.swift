@@ -15,11 +15,13 @@ final class AWSProfileClassificationTests: XCTestCase {
         XCTAssertTrue(Kind.staticCredentials.isSupported)
     }
 
-    func testBlockedHelperErrorBlamesTheAppNotTheProfile() {
-        // This distinction matters: no amount of reconfiguring the AWS profile
-        // fixes a sandbox refusal, so the message must not send the user there.
+    func testBlockedHelperErrorNamesTheSandboxAndTheWayForward() {
+        // No amount of reconfiguring the AWS profile fixes a sandbox refusal,
+        // so the message must not send the user there — it has to name the
+        // restriction and the one action that can lift it.
         let message = AWSCredentialError.credentialProcessBlocked("gitf").errorDescription ?? ""
-        XCTAssertTrue(message.contains("sandboxed"), "got: \(message)")
+        XCTAssertTrue(message.lowercased().contains("sandbox"), "got: \(message)")
+        XCTAssertTrue(message.contains("Locate credential helper"), "must offer the grant, got: \(message)")
     }
 
     func testAssumeRoleIsNotUsableYet() {

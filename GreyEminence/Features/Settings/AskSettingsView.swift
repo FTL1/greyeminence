@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftData
 
@@ -283,6 +284,17 @@ struct AskSettingsView: View {
         }
         .onChange(of: embeddingRegion) { titanTest = nil }
 
+        if let helper = selectedProfileHelperCommand {
+            HStack(spacing: 8) {
+                Button("Locate credential helper…") { locateHelper(for: helper) }
+                Text(AWSCredentialLoader.hasHelperAccess(forExecutable: helper.executable)
+                     ? "Access granted to \(helper.displayName)."
+                     : "This profile runs \(helper.displayName) to fetch credentials. A sandboxed app can only launch a program you've explicitly pointed it at.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
         if !unusableProfiles.isEmpty {
             // Naming these is the point. They were previously offered in the
             // picker and failed with "profile not found" at the first request,
@@ -292,6 +304,17 @@ struct AskSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+
+        // Blank is the common case; an org that scopes its role to profile
+        // ARNs cannot invoke the bare foundation id at all, and gets a 403
+        // that names the foundation model rather than the missing profile.
+        TextField(
+            "Inference profile ARN",
+            text: bedrockARNBinding,
+            prompt: Text("Optional — leave blank to call the model directly")
+        )
+        .textFieldStyle(.roundedBorder)
+        .font(.caption.monospaced())
 
         HStack(spacing: 8) {
             Button(isTestingTitan ? "Testing…" : "Test connection") {
@@ -337,6 +360,52 @@ struct AskSettingsView: View {
         describedProfiles.filter { !$0.isSupported }
     }
 
+    /// Per-provider, so switching methods doesn't hand one model's ARN to
+    /// another. Reads and writes `UserDefaults` directly because the key
+    /// depends on the current selection, which `@AppStorage` can't express.
+    private var bedrockARNBinding: Binding<String> {
+        Binding(
+            get: { UserDefaults.standard.string(forKey: BedrockEmbeddingAccount.arnKey(for: provider)) ?? "" },
+            set: { newValue in
+                let key = BedrockEmbeddingAccount.arnKey(for: provider)
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    UserDefaults.standard.removeObject(forKey: key)
+                } else {
+                    UserDefaults.standard.set(trimmed, forKey: key)
+                }
+                titanTest = nil
+            }
+        )
+    }
+
+    struct HelperCommand {
+        let executable: String
+        var displayName: String { (executable as NSString).lastPathComponent }
+    }
+
+    /// The external helper the selected profile depends on, if it has one.
+    private var selectedProfileHelperCommand: HelperCommand? {
+        let account = BedrockEmbeddingAccount.resolved(region: nil, profile: nil)
+        guard let command = AWSCredentialLoader.credentialProcessCommand(profile: account.profile),
+              let executable = AWSCredentialLoader.tokenizeCommand(command).first else { return nil }
+        return HelperCommand(executable: executable)
+    }
+
+    private func locateHelper(for helper: HelperCommand) {
+        let panel = NSOpenPanel()
+        panel.message = "Select \(helper.displayName) so Grey Eminence can run it for AWS credentials."
+        panel.directoryURL = URL(fileURLWithPath: helper.executable).deletingLastPathComponent()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.treatsFilePackagesAsDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        AWSCredentialLoader.persistHelperAccess(to: url)
+        describedProfiles = AWSCredentialLoader.describedProfiles()
+        titanTest = nil
+    }
+
     private var fallbackProfile: String {
         UserDefaults.standard.string(forKey: "awsProfile") ?? "default"
     }
@@ -377,7 +446,12 @@ struct AskSettingsView: View {
         }
 
         if let vector = await service.embedDocument("Grey Eminence search index probe") {
-            titanTest = .success("\(vector.count)-dim vector from \(where_)")
+            let invoked = BedrockEmbeddingAccount.modelID(
+                for: provider,
+                foundation: provider.makeService().modelIdentifier
+            )
+            let viaProfile = invoked.hasPrefix("arn:") ? " via inference profile" : ""
+            titanTest = .success("\(vector.count)-dim vector from \(where_)\(viaProfile)")
         } else {
             // The provider's own message is already in the log with the
             // profile and region attached; point at it rather than paraphrase.

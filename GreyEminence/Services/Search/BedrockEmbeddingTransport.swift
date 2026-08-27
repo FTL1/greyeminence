@@ -174,6 +174,34 @@ enum BedrockEmbeddingAccount {
         return (resolvedRegion, resolvedProfile)
     }
 
+    /// Which model id to invoke for `provider`.
+    ///
+    /// An org that routes Bedrock through application inference profiles can't
+    /// invoke a foundation model directly — the role is scoped to the profile
+    /// ARNs, so the bare id 403s. Resolution order mirrors the Claude clients:
+    /// an ARN set in Settings wins, then one published in the shared Claude
+    /// settings file, then the foundation id for accounts with direct access.
+    static func modelID(for provider: EmbeddingProvider, foundation: String) -> String {
+        if let override = nonEmpty(UserDefaults.standard.string(forKey: arnKey(for: provider))) {
+            return override
+        }
+        let settings = TrajectorSettings.load()
+        let published: String?
+        switch provider {
+        case .titan: published = settings?.titanEmbedModel
+        case .cohere: published = settings?.cohereEmbedModel
+        case .nlEmbedding, .voyage: published = nil
+        }
+        return nonEmpty(published) ?? foundation
+    }
+
+    /// Per-provider so switching methods doesn't invoke one model's ARN for
+    /// another's — they are not interchangeable, and the failure would be a
+    /// confusing validation error rather than an obvious misconfiguration.
+    static func arnKey(for provider: EmbeddingProvider) -> String {
+        "embeddingModelARN.\(provider.rawValue)"
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         return value

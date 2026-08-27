@@ -4,6 +4,11 @@ struct TrajectorSettings {
     let sonnetModel: String?
     let opusModel: String?
     let haikuModel: String?
+    /// Inference-profile ARNs for the embedding models, when the org routes
+    /// those through profiles too. Defaulted so adding a slot doesn't ripple
+    /// through every construction site.
+    var titanEmbedModel: String? = nil
+    var cohereEmbedModel: String? = nil
     let awsProfile: String?
     let awsRegion: String?
 
@@ -64,6 +69,8 @@ struct TrajectorSettings {
             sonnetModel: env["ANTHROPIC_DEFAULT_SONNET_MODEL"],
             opusModel: env["ANTHROPIC_DEFAULT_OPUS_MODEL"],
             haikuModel: env["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+            titanEmbedModel: env["BEDROCK_TITAN_EMBED_MODEL"],
+            cohereEmbedModel: env["BEDROCK_COHERE_EMBED_MODEL"],
             awsProfile: env["AWS_PROFILE"],
             awsRegion: env["AWS_REGION"]
         )
