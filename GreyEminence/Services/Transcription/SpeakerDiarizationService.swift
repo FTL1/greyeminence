@@ -154,9 +154,26 @@ actor SpeakerDiarizationService {
             try Task.checkCancellation()
             onProgress?(index, chunkURLs.count)
 
-            // A chunk that won't decode contributes no audio AND no time —
-            // the transcriber drops it the same way, so the two stay in step.
-            guard let samples = try? HighQualityTranscriber.decodeTo16kFloatMono(url: url) else { continue }
+            // A chunk that won't decode contributes no audio, but it still
+            // occupied time — and the transcriber now holds that time open
+            // too. Skipping it outright would slide every later turn earlier
+            // than the words it is meant to attribute.
+            guard let samples = try? HighQualityTranscriber.decodeTo16kFloatMono(url: url) else {
+                let assumed = HighQualityTranscriber.assumedDuration(
+                    of: url,
+                    fallback: index > 0 ? clock / Double(index) : 10
+                )
+                clock += assumed
+                // Close the window here: the gap means the audio either side
+                // of it isn't contiguous, and clustering across it would blend
+                // two different moments.
+                if !window.isEmpty {
+                    results.append(contentsOf: diarizeWindow(window, startingAt: windowStart))
+                    window.removeAll(keepingCapacity: true)
+                }
+                windowStart = clock
+                continue
+            }
 
             window.append(contentsOf: samples)
             clock += TimeInterval(samples.count) / 16_000

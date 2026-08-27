@@ -190,6 +190,17 @@ actor HighQualityTranscriber {
             }
         }
 
+        /// Mean duration of the chunks handled so far on a track, used to
+        /// estimate one that couldn't be read at all.
+        func averageChunkDuration(for source: Source) -> TimeInterval {
+            let (offset, count): (TimeInterval, Int) = switch source {
+            case .mic: (accumulatedMicOffset, completedMicChunkNames.count)
+            case .system: (accumulatedSystemOffset, completedSystemChunkNames.count)
+            }
+            guard count > 0, offset > 0 else { return 10 }
+            return offset / Double(count)
+        }
+
         func makeCheckpoint() -> ReProcessingCheckpoint {
             ReProcessingCheckpoint(
                 completedMicChunkNames: completedMicChunkNames,
@@ -199,6 +210,21 @@ actor HighQualityTranscriber {
                 segments: segments.map(ReProcessingCheckpoint.PersistedSegment.init)
             )
         }
+    }
+
+    /// How long a chunk that wouldn't decode was, so the timeline can skip
+    /// over it correctly.
+    ///
+    /// The container header usually survives whatever broke the audio, so it
+    /// can be read without decoding a sample. When even that fails, the
+    /// average of the chunks already processed is a far better guess than a
+    /// constant — chunk length varies by device and by track.
+    nonisolated static func assumedDuration(of url: URL, fallback: TimeInterval) -> TimeInterval {
+        if let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 {
+            let duration = Double(file.length) / file.processingFormat.sampleRate
+            if duration > 0, duration.isFinite { return duration }
+        }
+        return fallback
     }
 
     /// Persist a checkpoint roughly every N completed chunks. JSON-encoding
@@ -226,8 +252,20 @@ actor HighQualityTranscriber {
             do {
                 samples = try Self.decodeTo16kFloatMono(url: chunk)
             } catch {
-                LogManager.send("Skipping chunk \(chunkIdx) (\(source)) — decode failed: \(error.localizedDescription)", category: .transcription, level: .warning)
-                progress.markComplete(name: chunk.lastPathComponent, addOffset: 0, source: source)
+                // The audio in this chunk is lost, but the clock must not be.
+                // Advancing by zero shifts every later segment on this track
+                // earlier by the chunk's real duration, and the error
+                // accumulates: with 27 failures across a call, the second half
+                // of the far side lands before the first half of it finished,
+                // and the tail of the meeting ends up with no remote speech at
+                // all — every line attributed to the microphone.
+                let assumed = Self.assumedDuration(of: chunk, fallback: progress.averageChunkDuration(for: source))
+                LogManager.send(
+                    "Skipping chunk \(chunkIdx) (\(source)) — decode failed, holding \(String(format: "%.1f", assumed))s of timeline: \(error.localizedDescription)",
+                    category: .transcription,
+                    level: .warning
+                )
+                progress.markComplete(name: chunk.lastPathComponent, addOffset: assumed, source: source)
                 emitProgress(&sinceLastCheckpoint, progress: progress, total: totalChunks, onProgress: onProgress, onCheckpoint: onCheckpoint)
                 continue
             }
