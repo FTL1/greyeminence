@@ -4,6 +4,19 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.32.1 — 2026-08-28
+
+**Housekeeping after the speaker release**
+- Checking whether a meeting still had audio was creating an empty
+  folder for every meeting that didn't. The nightly cleanup then
+  reported clearing hundreds of recordings while freeing nothing at all,
+  because it was only removing folders the check had just made.
+- The transcript log recorded a line every time a chunk of audio took
+  the slower of two decoders — thousands a day, drowning everything
+  else. It's a single total per meeting now. Nothing was being lost:
+  measured against every recording on disk, the fallback recovers the
+  audio in full.
+
 ## 0.32.0 — 2026-08-27
 
 **Transcripts tell speakers apart again**
