@@ -79,6 +79,10 @@ actor HighQualityTranscriber {
     ]
 
     private var whisper: WhisperKit?
+    /// Chunks the primary decoder refused and the fallback rescued, reported
+    /// once per run rather than once per chunk.
+    private static let recoveryLock = NSLock()
+    nonisolated(unsafe) private static var recoveredChunks = 0
 
     private func loadWhisperKit() async throws -> WhisperKit {
         if let whisper { return whisper }
@@ -137,6 +141,14 @@ actor HighQualityTranscriber {
         // Final flush so any chunks accumulated since the last debounced
         // emission are durable in the sidecar.
         onCheckpoint?(progress.makeCheckpoint())
+
+        let recovered = Self.takeRecoveredCount()
+        if recovered > 0 {
+            LogManager.send(
+                "Decoded \(recovered) of \(totalChunks) chunk(s) via the AVAssetReader fallback — audio recovered in full",
+                category: .transcription
+            )
+        }
 
         progress.segments.sort { $0.startTime < $1.startTime }
         return progress.segments
@@ -235,6 +247,12 @@ actor HighQualityTranscriber {
             if duration > 0, duration.isFinite { return duration }
         }
         return fallback
+    }
+
+    nonisolated private static func takeRecoveredCount() -> Int {
+        recoveryLock.lock()
+        defer { recoveredChunks = 0; recoveryLock.unlock() }
+        return recoveredChunks
     }
 
     /// Persist a checkpoint roughly every N completed chunks. JSON-encoding
@@ -386,7 +404,15 @@ actor HighQualityTranscriber {
             return try decodeViaAVAudioFile(url: url)
         } catch {
             if let recovered = try? decodeViaAssetReader(url: url), !recovered.isEmpty {
-                LogManager.send("Recovered chunk via AVAssetReader after AVAudioFile failure: \(url.lastPathComponent)", category: .transcription, level: .info)
+                // Counted, not logged. AVAudioFile refuses a sizeable minority
+                // of chunks — measured at 9 in 60 on a real recording — and
+                // the fallback recovers every one of them in full, so this is
+                // a slower path rather than a fault. Logging each occurrence
+                // wrote 3,874 identical lines in a day and buried everything
+                // else; the per-run total says the same thing.
+                recoveryLock.lock()
+                recoveredChunks += 1
+                recoveryLock.unlock()
                 return recovered
             }
             throw error

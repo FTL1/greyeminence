@@ -252,6 +252,13 @@ actor AudioFileWriter {
 
     private func openChunk(inputFormat: AVAudioFormat) throws {
         let url = Self.chunkURL(base: baseURL, index: chunkIndex)
+        // Creating the folder belongs here, at the moment of writing. Deriving
+        // it from the audio URL instead meant every read that merely asked
+        // "is there audio for this meeting" created an empty directory.
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
         audioFile = try AVAudioFile(
             forWriting: url,
             settings: Self.encoderSettings(for: inputFormat),

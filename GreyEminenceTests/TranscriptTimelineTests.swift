@@ -70,3 +70,59 @@ final class TranscriptTimelineTests: XCTestCase {
         )
     }
 }
+
+/// Read paths must not create the folders they're only asking about.
+///
+/// `recordingDirectory(for:)` creates on access, so probing for audio or a
+/// sidecar left an empty directory behind for every meeting checked — and the
+/// retention sweep then reported "removed audio for 267 meetings" while
+/// freeing 0.0 MB, because all it deleted were folders the probe had made.
+final class RecordingPathTests: XCTestCase {
+
+    private var probeID: UUID!
+
+    override func tearDown() {
+        if let probeID {
+            try? FileManager.default.removeItem(
+                at: StorageManager.shared.recordingDirectoryPath(for: probeID)
+            )
+        }
+        super.tearDown()
+    }
+
+    func testAskingForAudioPathsCreatesNothing() {
+        probeID = UUID()
+        _ = StorageManager.shared.systemAudioURL(for: probeID)
+        _ = StorageManager.shared.micAudioURL(for: probeID)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: StorageManager.shared.recordingDirectoryPath(for: probeID).path
+            ),
+            "probing for audio must not create a recording folder"
+        )
+    }
+
+    func testAskingForSidecarPathsCreatesNothing() {
+        probeID = UUID()
+        _ = StorageManager.shared.reportAnchorPlanURL(for: probeID)
+        _ = StorageManager.shared.reProcessCheckpointURL(for: probeID)
+        _ = StorageManager.shared.loadVoiceClusters(for: probeID)
+        _ = StorageManager.shared.loadSearchCoverage(for: probeID)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: StorageManager.shared.recordingDirectoryPath(for: probeID).path
+            ),
+            "probing for a sidecar must not create a recording folder"
+        )
+    }
+
+    func testDerivedDataOutlivesTheAudio() {
+        // Voice signatures exist so a meeting can be worked with once its
+        // audio is gone; storing them under the recording directory would have
+        // put them in the one place retention deletes.
+        probeID = UUID()
+        let clusters = StorageManager.shared.voiceClustersURL(for: probeID).path
+        let recording = StorageManager.shared.recordingDirectoryPath(for: probeID).path
+        XCTAssertFalse(clusters.hasPrefix(recording), "signatures must not live where retention purges")
+    }
+}

@@ -22,6 +22,16 @@ final class StorageManager: Sendable {
         }
     }
 
+    /// Path only — never creates. Read paths must use this: asking
+    /// `recordingDirectory` for a URL creates the folder as a side effect, so
+    /// merely *probing* for a sidecar left an empty directory behind for every
+    /// meeting checked. The retention sweep then "removed audio" for hundreds
+    /// of meetings a launch while freeing 0.0 MB, because all it was deleting
+    /// was folders the probe had just made.
+    func recordingDirectoryPath(for meetingID: UUID) -> URL {
+        recordingsURL.appendingPathComponent(meetingID.uuidString, isDirectory: true)
+    }
+
     func recordingDirectory(for meetingID: UUID) -> URL {
         let dir = recordingsURL.appendingPathComponent(meetingID.uuidString, isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -29,18 +39,18 @@ final class StorageManager: Sendable {
     }
 
     func micAudioURL(for meetingID: UUID) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent("mic.m4a")
+        recordingDirectoryPath(for: meetingID).appendingPathComponent("mic.m4a")
     }
 
     func systemAudioURL(for meetingID: UUID) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent("system.m4a")
+        recordingDirectoryPath(for: meetingID).appendingPathComponent("system.m4a")
     }
 
     /// Sidecar file used by the re-processing pipeline to checkpoint
     /// progress between chunks so an interrupted job (live-recording
     /// yield, app restart) can resume instead of restarting from chunk 0.
     func reProcessCheckpointURL(for meetingID: UUID) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent("reprocess-checkpoint.json")
+        recordingDirectoryPath(for: meetingID).appendingPathComponent("reprocess-checkpoint.json")
     }
 
     func loadReProcessCheckpoint(for meetingID: UUID) -> ReProcessingCheckpoint? {
@@ -142,7 +152,7 @@ final class StorageManager: Sendable {
     /// SwiftData field: it is derived data that can always be recomputed, so
     /// storing it here buys the cache without a schema version bump.
     func reportAnchorPlanURL(for meetingID: UUID) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent("report-anchors.json")
+        recordingDirectoryPath(for: meetingID).appendingPathComponent("report-anchors.json")
     }
 
     /// Returns the plan only if it was computed against `insightID` — a
@@ -155,8 +165,7 @@ final class StorageManager: Sendable {
     }
 
     func saveReportAnchorPlan(_ plan: ReportAnchorPlan, for meetingID: UUID) {
-        guard let data = try? JSONEncoder().encode(plan) else { return }
-        try? data.write(to: reportAnchorPlanURL(for: meetingID), options: .atomic)
+        saveSidecar(plan, to: reportAnchorPlanURL(for: meetingID))
     }
 
     /// Remove the entire recording directory for a meeting (mic + system
@@ -250,7 +259,7 @@ final class StorageManager: Sendable {
     /// Resolve a `ScreenShareFrame.imagePath` (relative to the recording
     /// directory) to an on-disk URL. Doesn't check existence.
     func frameURL(for meetingID: UUID, relativePath: String) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent(relativePath)
+        recordingDirectoryPath(for: meetingID).appendingPathComponent(relativePath)
     }
 
     /// Write one frame's JPEG data and return the path relative to the
