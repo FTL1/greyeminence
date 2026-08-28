@@ -167,8 +167,15 @@ struct ContentView: View {
                 modelContext
             }
             Task(priority: .background) { @MainActor [modelContext] in
-                let report = TransientActivityCoordinator.shared.run("Running startup maintenance…") {
-                    MaintenanceService.runStartupMaintenance(modelContext: modelContext)
+                let report = await TransientActivityCoordinator.shared.runAsync("Running startup maintenance…") {
+                    await MaintenanceService.runStartupMaintenance(modelContext: modelContext) { done, total, name in
+                        // Name the step and show how far along it is: a bar
+                        // that says only "running" for a minute is
+                        // indistinguishable from one that has hung.
+                        let coordinator = TransientActivityCoordinator.shared
+                        if !name.isEmpty { coordinator.retitle("Startup maintenance — \(name.lowercased())") }
+                        coordinator.setProgress(completed: done, total: total)
+                    }
                 }
                 if !report.skipped {
                     TransientActivityCoordinator.shared.flash("Maintenance complete")

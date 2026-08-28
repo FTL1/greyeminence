@@ -490,7 +490,7 @@ struct AskSettingsView: View {
             isMaintaining = false
             embeddingCount = EmbeddingStore.shared?.count() ?? 0
         }
-        let report = MaintenanceService.runStartupMaintenance(modelContext: modelContext, force: true)
+        let report = await MaintenanceService.runStartupMaintenance(modelContext: modelContext, force: true)
         maintenanceSummary = report.summary
     }
 

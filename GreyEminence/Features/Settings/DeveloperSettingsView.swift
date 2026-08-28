@@ -126,7 +126,11 @@ struct DeveloperSettingsView: View {
                 debugInfo = nil
                 return
             }
-            debugInfo = DebugInfo.gather(context: modelContext)
+            // Counts first so the pane fills in immediately, then the sizes
+            // once the filesystem walk finishes.
+            let base = DebugInfo.gather(context: modelContext)
+            debugInfo = base
+            debugInfo = await base.withMeasuredSizes()
         }
         .sheet(isPresented: $showPromptEditor) {
             NavigationStack {
@@ -149,8 +153,8 @@ struct DeveloperSettingsView: View {
 private struct DebugInfo {
     let databasePath: String
     let databaseSize: Int64
-    let recordingsSize: Int64
-    let backupsSize: Int64
+    var recordingsSize: Int64
+    var backupsSize: Int64
     let meetingCount: Int
     let segmentCount: Int
     let insightCount: Int
@@ -169,6 +173,8 @@ private struct DebugInfo {
     var formattedTotalSize: String { Self.formatBytes(databaseSize + recordingsSize + backupsSize) }
 
     @MainActor
+    /// Counts and paths now; the two directory sizes are measured off the
+    /// main actor and folded in by `withMeasuredSizes`.
     static func gather(context: ModelContext) -> DebugInfo {
         let storage = StorageManager.shared
 
@@ -184,11 +190,9 @@ private struct DebugInfo {
             + Self.fileSize(atPath: actualPath + "-wal")
             + Self.fileSize(atPath: actualPath + "-shm")
 
-        // Recordings size
-        let recordingsSize = Self.directorySize(at: storage.recordingsURL)
-
-        // Backups size
-        let backupsSize = Self.directorySize(at: StoreBackupService.backupDirectory)
+        // Sizes are filled in afterwards, off the main actor — see `gather`.
+        let recordingsSize: Int64 = 0
+        let backupsSize: Int64 = 0
 
         // Model counts
         func count<T: PersistentModel>(_ type: T.Type) -> Int {
@@ -226,7 +230,24 @@ private struct DebugInfo {
         return (attrs?[.size] as? Int64) ?? 0
     }
 
-    private static func directorySize(at url: URL) -> Int64 {
+    /// Walking the recordings tree means enumerating every chunk of every
+    /// meeting — thousands of files and gigabytes — so it never runs on the
+    /// actor that draws the window.
+    /// Measure the two directory sizes away from the main actor and return a
+    /// filled-in copy.
+    nonisolated func withMeasuredSizes() async -> DebugInfo {
+        let recordings = StorageManager.shared.recordingsURL
+        let backups = StoreBackupService.backupDirectory
+        let sizes = await Task.detached(priority: .utility) {
+            (DebugInfo.directorySize(at: recordings), DebugInfo.directorySize(at: backups))
+        }.value
+        var copy = self
+        copy.recordingsSize = sizes.0
+        copy.backupsSize = sizes.1
+        return copy
+    }
+
+    nonisolated static func directorySize(at url: URL) -> Int64 {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles]) else {
             return 0

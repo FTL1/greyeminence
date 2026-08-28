@@ -45,8 +45,33 @@ enum MaintenanceService {
     /// `Task(priority: .background)` — the work itself is MainActor-bound
     /// because it mutates SwiftData, but a low-priority Task ensures it
     /// yields to interactive UI and any in-flight recording work.
+    /// Named steps, so the status bar can say which one is running rather
+    /// than sitting on "Running startup maintenance…" for the duration.
+    private static let stepNames = [
+        "Removing orphaned search entries",
+        "Pruning stale transcript entries",
+        "Clearing stuck analysis flags",
+        "Linking tasks to their quotes",
+        "Updating interview records",
+        "Updating scoring guidance",
+        "Linking roles to rubrics",
+        "Trimming the usage log",
+    ]
+
+    /// Runs on the main actor because it mutates SwiftData, but yields
+    /// between and within steps.
+    ///
+    /// It used to run straight through: faulting every segment of every
+    /// meeting, walking tens of thousands of embedding records, without ever
+    /// handing the run loop back. The status bar said what was happening and
+    /// the window was frozen solid while it said it — which is worse than
+    /// silence, because it looks like the app is working when it is unusable.
     @discardableResult
-    static func runStartupMaintenance(modelContext: ModelContext, force: Bool = false) -> Report {
+    static func runStartupMaintenance(
+        modelContext: ModelContext,
+        force: Bool = false,
+        onStep: (@MainActor (Int, Int, String) -> Void)? = nil
+    ) async -> Report {
         var report = Report()
         if !force, let last = lastRunDate(), Date().timeIntervalSince(last) < throttleInterval {
             report.skipped = true
@@ -55,15 +80,30 @@ enum MaintenanceService {
 
         let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
         let liveMeetingIDs = Set(meetings.map(\.id))
+        let total = stepNames.count
 
+        func step(_ index: Int) async {
+            onStep?(index, total, stepNames[index])
+            await Task.yield()
+        }
+
+        await step(0)
         report.orphanEmbeddingsRemoved = pruneOrphanEmbeddings(liveMeetingIDs: liveMeetingIDs)
-        report.staleSegmentEmbeddingsRemoved = pruneStaleSegmentEmbeddings(meetings: meetings)
-        report.stuckAnalyzingFlagsReset = resetStuckAnalyzingFlags(meetings: meetings, in: modelContext)
-        report.actionItemsBackfilled = backfillActionItemSources(meetings: meetings, in: modelContext)
+        await step(1)
+        report.staleSegmentEmbeddingsRemoved = await pruneStaleSegmentEmbeddings(meetings: meetings)
+        await step(2)
+        report.stuckAnalyzingFlagsReset = await resetStuckAnalyzingFlags(meetings: meetings, in: modelContext)
+        await step(3)
+        report.actionItemsBackfilled = await backfillActionItemSources(meetings: meetings, in: modelContext)
+        await step(4)
         report.interviewsBackfilledToPhases = backfillInterviewPhases(in: modelContext)
+        await step(5)
         report.criterionGuidanceBackfilled = backfillCriterionGuidance(in: modelContext)
+        await step(6)
         report.roleRubricLinksBackfilled = backfillRoleRubricLinks(in: modelContext)
+        await step(7)
         report.usageEventsPruned = pruneOldUsageEvents(in: modelContext)
+        onStep?(total, total, "")
 
         UserDefaults.standard.set(Date(), forKey: lastRunKey)
         LogManager.send(report.summary, category: .general)
@@ -87,21 +127,29 @@ enum MaintenanceService {
     /// of the chunk) no longer matches any segment in the meeting. Happens
     /// when re-processing replaced segments without first dropping the old
     /// chunks (fixed going forward but historical data is poisoned).
-    private static func pruneStaleSegmentEmbeddings(meetings: [Meeting]) -> Int {
+    private static func pruneStaleSegmentEmbeddings(meetings: [Meeting]) async -> Int {
         guard let store = EmbeddingStore.shared else { return 0 }
         let context = store.context
         let descriptor = FetchDescriptor<EmbeddingRecord>(
             predicate: #Predicate { $0.sourceKindRaw == "transcriptSegment" }
         )
         guard let records = try? context.fetch(descriptor) else { return 0 }
-        let segmentIDsByMeeting: [UUID: Set<UUID>] = Dictionary(uniqueKeysWithValues:
-            meetings.map { ($0.id, Set($0.segments.map(\.id))) }
-        )
+
+        // Grouped by meeting so each one's segments are faulted once, checked,
+        // and then the run loop gets a turn. Building the whole map up front
+        // pulled several hundred thousand segments into memory before a single
+        // record was examined.
+        var recordsByMeeting: [UUID: [EmbeddingRecord]] = [:]
+        for record in records {
+            recordsByMeeting[record.meetingID, default: []].append(record)
+        }
+        let meetingsByID = Dictionary(uniqueKeysWithValues: meetings.map { ($0.id, $0) })
 
         var pruned = 0
-        for record in records {
-            let liveSegmentIDs = segmentIDsByMeeting[record.meetingID] ?? []
-            if !liveSegmentIDs.contains(record.sourceID) {
+        for (index, (meetingID, meetingRecords)) in recordsByMeeting.enumerated() {
+            if index % 10 == 0 { await Task.yield() }
+            let liveSegmentIDs = meetingsByID[meetingID].map { Set($0.segments.map(\.id)) } ?? []
+            for record in meetingRecords where !liveSegmentIDs.contains(record.sourceID) {
                 context.delete(record)
                 pruned += 1
             }
@@ -115,11 +163,15 @@ enum MaintenanceService {
     /// (e.g. a thrown `analyzeMeetingAfterSplit`). We also clear it if the
     /// meeting hasn't been touched in over an hour and there's no analysis
     /// in flight that could possibly be tracking it.
-    private static func resetStuckAnalyzingFlags(meetings: [Meeting], in context: ModelContext) -> Int {
+    private static func resetStuckAnalyzingFlags(meetings: [Meeting], in context: ModelContext) async -> Int {
         let staleThreshold: TimeInterval = 60 * 60
         let now = Date()
         var reset = 0
-        for meeting in meetings where meeting.isAnalyzing {
+        // `isAnalyzing` is a stored property so the filter is cheap, but each
+        // survivor faults its insights — yield so a library-wide sweep can't
+        // hold the run loop.
+        for (index, meeting) in meetings.enumerated() where meeting.isAnalyzing {
+            if index % 25 == 0 { await Task.yield() }
             let hasInsight = !meeting.insights.isEmpty
             let isAged = now.timeIntervalSince(meeting.date) > staleThreshold
             if hasInsight || isAged {
@@ -139,9 +191,12 @@ enum MaintenanceService {
     /// a substring match or ≥3 token overlap, so spurious matches are rare —
     /// when no segment is plausibly related, sourceSegmentID stays nil and
     /// the task detail just doesn't show conversation context.
-    private static func backfillActionItemSources(meetings: [Meeting], in context: ModelContext) -> Int {
+    private static func backfillActionItemSources(meetings: [Meeting], in context: ModelContext) async -> Int {
         var backfilled = 0
-        for meeting in meetings {
+        for (index, meeting) in meetings.enumerated() {
+            if index % 10 == 0 { await Task.yield() }
+            // Only meetings with an unlinked item touch their segments at all.
+            guard meeting.actionItems.contains(where: { $0.sourceSegmentID == nil }) else { continue }
             for item in meeting.actionItems where item.sourceSegmentID == nil {
                 if let id = meeting.segments.segmentID(matchingQuote: item.text) {
                     item.sourceSegmentID = id

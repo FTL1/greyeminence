@@ -35,8 +35,8 @@ final class TransientActivityCoordinator {
     }
 
     struct Activity: Identifiable, Equatable {
-        let id = UUID()
-        let label: String
+        var id = UUID()
+        var label: String
         let startedAt: Date
         var progress: Progress?
 
@@ -79,6 +79,21 @@ final class TransientActivityCoordinator {
             guard let self, self.lastCompleted == activity else { return }
             self.lastCompleted = nil
         }
+    }
+
+    /// Change the label of the running activity.
+    ///
+    /// A long job made of distinct steps reads better as the step it is on
+    /// than as one unchanging sentence — and a label that never changes is
+    /// how a working app and a hung one look identical.
+    func retitle(_ label: String) {
+        guard let current else { return }
+        self.current = Activity(
+            id: current.id,
+            label: label,
+            startedAt: current.startedAt,
+            progress: current.progress
+        )
     }
 
     /// Report progress for whatever is currently running.
