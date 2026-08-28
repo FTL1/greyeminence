@@ -28,6 +28,8 @@ actor AudioFileWriter {
     /// Set only when the device's own format was refused by the encoder and
     /// buffers have to be resampled on the way to disk.
     private var converter: AVAudioConverter?
+    /// Reused across writes; see `convertIfNeeded`.
+    private var conversionBuffer: AVAudioPCMBuffer?
     /// Rolling count of write failures. Callers use this to detect a persistent
     /// problem (e.g. full disk, encoder-format mismatch) and stop recording
     /// before filling the log with silent-failure noise.
@@ -153,9 +155,16 @@ actor AudioFileWriter {
         // Round up and add a frame: a short output buffer silently truncates
         // audio, and the slack costs nothing.
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1
-        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else {
+        // Kept between calls. Buffers arrive continuously for the length of
+        // the recording, and allocating one per buffer on the audio path is
+        // avoidable churn; it only grows when a larger input turns up.
+        if conversionBuffer == nil || conversionBuffer!.frameCapacity < capacity {
+            conversionBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity)
+        }
+        guard let output = conversionBuffer else {
             throw AudioFileWriterError.encoderPreflightFailed("conversion buffer alloc failed")
         }
+        output.frameLength = 0
 
         var supplied = false
         var conversionError: NSError?

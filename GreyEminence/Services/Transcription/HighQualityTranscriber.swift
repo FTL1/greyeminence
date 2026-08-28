@@ -197,8 +197,7 @@ actor HighQualityTranscriber {
             case .mic: (accumulatedMicOffset, completedMicChunkNames.count)
             case .system: (accumulatedSystemOffset, completedSystemChunkNames.count)
             }
-            guard count > 0, offset > 0 else { return 10 }
-            return offset / Double(count)
+            return HighQualityTranscriber.averageChunkDuration(elapsed: offset, completed: count)
         }
 
         func makeCheckpoint() -> ReProcessingCheckpoint {
@@ -219,6 +218,17 @@ actor HighQualityTranscriber {
     /// can be read without decoding a sample. When even that fails, the
     /// average of the chunks already processed is a far better guess than a
     /// constant — chunk length varies by device and by track.
+    /// Mean chunk length so far, used to stand in for a chunk that can't be
+    /// measured at all.
+    ///
+    /// Shared with the diarization pass: the two walk the same files and their
+    /// timelines are required to agree, so the estimate they fall back on has
+    /// to be the same formula rather than two that merely resemble each other.
+    nonisolated static func averageChunkDuration(elapsed: TimeInterval, completed: Int) -> TimeInterval {
+        guard completed > 0, elapsed > 0 else { return 10 }
+        return elapsed / Double(completed)
+    }
+
     nonisolated static func assumedDuration(of url: URL, fallback: TimeInterval) -> TimeInterval {
         if let file = try? AVAudioFile(forReading: url), file.processingFormat.sampleRate > 0 {
             let duration = Double(file.length) / file.processingFormat.sampleRate

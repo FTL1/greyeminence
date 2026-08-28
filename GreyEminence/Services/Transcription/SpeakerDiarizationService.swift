@@ -161,7 +161,7 @@ actor SpeakerDiarizationService {
             guard let samples = try? HighQualityTranscriber.decodeTo16kFloatMono(url: url) else {
                 let assumed = HighQualityTranscriber.assumedDuration(
                     of: url,
-                    fallback: index > 0 ? clock / Double(index) : 10
+                    fallback: HighQualityTranscriber.averageChunkDuration(elapsed: clock, completed: index)
                 )
                 clock += assumed
                 // Close the window here: the gap means the audio either side
@@ -229,7 +229,7 @@ actor SpeakerDiarizationService {
         if let existing = speakerMap[fluidSpeakerId] {
             return existing
         }
-        let speaker = Speaker.other("Speaker \(nextSpeakerIndex)")
+        let speaker = Speaker.numbered(nextSpeakerIndex)
         speakerMap[fluidSpeakerId] = speaker
         nextSpeakerIndex += 1
         return speaker

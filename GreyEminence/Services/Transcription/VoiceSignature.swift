@@ -54,20 +54,19 @@ struct VoiceSignature: Codable, Equatable, Sendable {
     /// so both sides are weighted by their seconds of speech.
     func merged(with other: VoiceSignature) -> VoiceSignature {
         guard vector.count == other.vector.count, !vector.isEmpty else { return self }
-        let total = seconds + other.seconds
-        guard total > 0 else { return self }
-
-        var combined = [Float](repeating: 0, count: vector.count)
-        let selfWeight = Float(seconds / total)
-        let otherWeight = Float(other.seconds / total)
-        for i in 0..<vector.count {
-            combined[i] = vector[i] * selfWeight + other.vector[i] * otherWeight
+        // The same duration-weighted average that builds a signature in the
+        // first place — written once, so a change to the weighting can't leave
+        // enrolment and cluster-building disagreeing about what a voice is.
+        guard let combined = Self.from(turns: [(vector, seconds), (other.vector, other.seconds)]) else {
+            return self
         }
-        guard let normalized = Self.normalize(combined) else { return self }
         // Cap the accumulated evidence. Without it a heavily-enrolled profile
         // becomes effectively immovable, and a voice that genuinely drifts —
         // a different mic, a cold — could never correct it.
-        return VoiceSignature(vector: normalized, seconds: min(total, Self.maxEnrolledSeconds))
+        return VoiceSignature(
+            vector: combined.vector,
+            seconds: min(combined.seconds, Self.maxEnrolledSeconds)
+        )
     }
 
     /// About twenty minutes of speech. Past this, more evidence stops moving

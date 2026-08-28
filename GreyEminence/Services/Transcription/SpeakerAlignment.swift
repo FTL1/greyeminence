@@ -29,22 +29,25 @@ enum SpeakerAlignment {
     static func dominantSpeakerID(from start: TimeInterval, to end: TimeInterval, in spans: [Span]) -> String? {
         guard end > start, !spans.isEmpty else { return nil }
 
+        // Overlap and tie-break gathered in one pass. This runs once per
+        // transcript segment — thousands of times per meeting — so a second
+        // pass over every span, to order ties among the two or three speakers
+        // actually in contention, was most of the work done for nothing.
         var totals: [String: TimeInterval] = [:]
+        var firstOverlap: [String: TimeInterval] = [:]
         for span in spans {
             let overlap = min(end, span.end) - max(start, span.start)
             guard overlap > 0 else { continue }
             totals[span.speakerID, default: 0] += overlap
+            firstOverlap[span.speakerID] = min(firstOverlap[span.speakerID] ?? .greatestFiniteMagnitude, span.start)
         }
         guard !totals.isEmpty else { return nil }
 
-        // Ties broken by the earliest span for that speaker, so the result
-        // doesn't depend on dictionary ordering.
-        let firstAppearance = spans.reduce(into: [String: TimeInterval]()) { result, span in
-            result[span.speakerID] = min(result[span.speakerID] ?? .greatestFiniteMagnitude, span.start)
-        }
+        // Ties go to whoever spoke first, so the result never depends on
+        // dictionary ordering.
         return totals.max { lhs, rhs in
             if lhs.value != rhs.value { return lhs.value < rhs.value }
-            return (firstAppearance[lhs.key] ?? 0) > (firstAppearance[rhs.key] ?? 0)
+            return (firstOverlap[lhs.key] ?? 0) > (firstOverlap[rhs.key] ?? 0)
         }?.key
     }
 
@@ -60,7 +63,7 @@ enum SpeakerAlignment {
         var labels: [String: String] = [:]
         var next = 1
         for span in spans.sorted(by: { $0.start < $1.start }) where labels[span.speakerID] == nil {
-            labels[span.speakerID] = "Speaker \(next)"
+            labels[span.speakerID] = Speaker.numbered(next).displayName
             next += 1
         }
         return labels

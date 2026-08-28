@@ -63,7 +63,6 @@ final class SpeakerIdentificationTests: XCTestCase {
             attendeeIDs: [erin.contactID],
             profiles: [erin]
         )
-        XCTAssertTrue(resolved[0].applied)
         XCTAssertEqual(resolved[0].displayName, "Erin")
     }
 
@@ -74,7 +73,7 @@ final class SpeakerIdentificationTests: XCTestCase {
             attendeeIDs: [erin.contactID],
             profiles: [erin]
         )
-        XCTAssertFalse(resolved[0].applied)
+        XCTAssertNil(resolved[0].identified)
         XCTAssertEqual(resolved[0].displayName, "Speaker 1")
     }
 
@@ -88,10 +87,10 @@ final class SpeakerIdentificationTests: XCTestCase {
             attendeeIDs: [erin.contactID],
             profiles: [erin]
         )
-        XCTAssertEqual(resolved.filter(\.applied).count, 1)
-        let named = resolved.first { $0.applied }
+        XCTAssertEqual(resolved.filter { $0.identified != nil }.count, 1)
+        let named = resolved.first { $0.identified != nil }
         XCTAssertEqual(named?.label, "Speaker 1", "the closer cluster should keep the name")
-        XCTAssertEqual(resolved.first { !$0.applied }?.displayName, "Speaker 2")
+        XCTAssertEqual(resolved.first { $0.identified == nil }?.displayName, "Speaker 2")
     }
 
     func testNonAttendeesAreNeverNamed() {
@@ -101,7 +100,8 @@ final class SpeakerIdentificationTests: XCTestCase {
             attendeeIDs: [UUID()],
             profiles: [erin]
         )
-        XCTAssertFalse(resolved[0].applied)
+        XCTAssertNil(resolved[0].identified)
+        XCTAssertEqual(resolved[0].displayName, "Speaker 1")
     }
 
     func testNoProfilesMeansEverythingStaysNumbered() {
@@ -127,5 +127,39 @@ final class SpeakerIdentificationTests: XCTestCase {
         // A person whose name happens to start the same way must not be
         // treated as an anonymous cluster.
         XCTAssertFalse(SpeakerIdentityService.isUnidentified("Speakerman"))
+    }
+}
+
+/// The "unidentified voice" vocabulary, which lived as a string literal in six
+/// places — produced in two, matched in four, and already inconsistent about
+/// case. It belongs to `Speaker`.
+@MainActor
+final class SpeakerVocabularyTests: XCTestCase {
+
+    func testNumberedSpeakersAreUnidentified() {
+        XCTAssertTrue(Speaker.numbered(1).isUnidentified)
+        XCTAssertTrue(Speaker.numbered(12).isUnidentified)
+        XCTAssertTrue(Speaker.unidentified.isUnidentified)
+    }
+
+    func testPeopleAreNot() {
+        XCTAssertFalse(Speaker.other("Erin O'Brien").isUnidentified)
+        XCTAssertFalse(Speaker.me.isUnidentified)
+    }
+
+    func testANameThatMerelyStartsTheSameWayIsNot() {
+        // A prefix check treats these as anonymous clusters and would let a
+        // repair overwrite a real person's name with a number.
+        XCTAssertFalse(Speaker.other("Speakerman").isUnidentified)
+        XCTAssertFalse(Speaker.other("Speaker Smith").isUnidentified)
+        XCTAssertFalse(Speaker.other("Speakers").isUnidentified)
+    }
+
+    func testNumberingMatchesWhatTheRepairLooksFor() {
+        // Producer and consumer agreeing is the whole point of moving this
+        // onto the type.
+        XCTAssertEqual(Speaker.unidentified.displayName, SpeakerRepairService.collapsedLabel)
+        XCTAssertTrue(SpeakerIdentityService.isUnidentified(Speaker.numbered(3).displayName))
+        XCTAssertTrue(SpeakerIdentityService.isUnidentified(Speaker.unidentified.displayName))
     }
 }

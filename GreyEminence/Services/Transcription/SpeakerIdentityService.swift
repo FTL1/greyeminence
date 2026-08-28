@@ -25,7 +25,7 @@ enum SpeakerIdentityService {
     /// Labels that mean "we don't know who this is": the collapsed fallback,
     /// and the per-meeting numbering.
     nonisolated static func isUnidentified(_ name: String) -> Bool {
-        name == "Speaker" || name.hasPrefix("Speaker ")
+        Speaker.other(name).isUnidentified
     }
 
     /// Voices in a meeting still awaiting a name, most talkative first.
@@ -37,6 +37,9 @@ enum SpeakerIdentityService {
             seconds[name, default: 0] += max(0, segment.endTime - segment.startTime)
             counts[name, default: 0] += 1
         }
+        // Most meetings have nothing unidentified. Returning before any disk
+        // access keeps opening one free — this runs on the main actor for
+        // every meeting selected.
         guard !seconds.isEmpty else { return [] }
 
         let stored = StorageManager.shared.loadVoiceClusters(for: meeting.id)
@@ -84,6 +87,16 @@ enum SpeakerIdentityService {
         }
         guard relabelled > 0 else { return 0 }
 
+        // Record the label on the contact as well as the voice. The roster is
+        // what the text side reads — Ask resolves people through
+        // `speakerAliases`, and so does calendar attendee matching — so
+        // teaching only the voice profile would improve recognition while
+        // leaving every other consumer none the wiser.
+        let lowered = label.lowercased()
+        if !contact.speakerAliases.contains(where: { $0.lowercased() == lowered }) {
+            contact.speakerAliases.append(label)
+        }
+
         // Teach the profile, if this meeting captured a signature. Meetings
         // diarized before signatures were stored can still be named — they
         // just contribute nothing to recognising the voice next time.
@@ -106,9 +119,7 @@ enum SpeakerIdentityService {
         )
         // Indexed snippets carry the speaker name, so they'd keep quoting the
         // number back until re-indexed.
-        if let store = EmbeddingStore.shared {
-            _ = store.deleteRecords(forMeetingID: meeting.id)
-        }
+        SpeakerRepairService.invalidateSearchIndex(for: meeting)
         LogManager.send(
             "\(label) is \(contact.name) — \(relabelled) segment(s) in \"\(meeting.title)\"",
             category: .transcription,

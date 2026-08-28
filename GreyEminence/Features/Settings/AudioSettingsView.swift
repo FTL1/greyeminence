@@ -13,16 +13,23 @@ struct AudioSettingsView: View {
     @State private var isRepairing = false
     @State private var repairDone = 0
     @State private var repairTotal = 0
-    @State private var repairCandidates = 0
+    /// Held rather than counted: the run reuses this instead of surveying the
+    /// library again.
+    @State private var repairable: [Meeting] = []
     @State private var repairSummary: String?
     @State private var repairResettable = 0
     @State private var isScanning = false
 
     @MainActor
-    private func resetSpeakers() {
+    private func resetSpeakers() async {
         let meetings = (try? modelContext.fetch(FetchDescriptor<Meeting>())) ?? []
         var reverted = 0
-        for meeting in meetings where SpeakerRepairService.canResetLabels(meeting) {
+        // No `canResetLabels` pre-check: it walks every segment only for
+        // `resetLabels` to walk them again, and `resetLabels` already reports
+        // zero when there is nothing to revert. Yields for the same reason the
+        // survey does — the main actor owns the store.
+        for (index, meeting) in meetings.enumerated() {
+            if index % 10 == 0 { await Task.yield() }
             if SpeakerRepairService.resetLabels(for: meeting, in: modelContext) > 0 { reverted += 1 }
         }
         repairSummary = reverted == 0
@@ -39,7 +46,6 @@ struct AudioSettingsView: View {
         isScanning = true
         defer { isScanning = false }
         let survey = await SpeakerRepairService.survey(in: modelContext)
-        repairCandidates = survey.repairable.count
         repairResettable = survey.resettableCount
     }
 
@@ -51,7 +57,7 @@ struct AudioSettingsView: View {
             isRepairing = false
             Task { await refreshRepairCounts() }
         }
-        let result = await SpeakerRepairService.repairAll(in: modelContext) { done, total in
+        let result = await SpeakerRepairService.repairAll(in: modelContext, meetings: repairable) { done, total in
             repairDone = done
             repairTotal = total
         }
@@ -134,7 +140,7 @@ struct AudioSettingsView: View {
                     Button(isRepairing ? "Identifying…" : "Identify speakers in older meetings") {
                         Task { await repairSpeakers() }
                     }
-                    .disabled(isRepairing || isScanning || repairCandidates == 0)
+                    .disabled(isRepairing || isScanning || repairable.isEmpty)
                     if isScanning {
                         ProgressView().controlSize(.small)
                         Text("Checking which meetings need it…")
@@ -152,7 +158,7 @@ struct AudioSettingsView: View {
                 if repairResettable > 0 {
                     HStack {
                         Button("Undo speaker separation") {
-                            resetSpeakers()
+                            Task { await resetSpeakers() }
                         }
                         .disabled(isRepairing)
                         Text("Restores the labels \(repairResettable) meeting\(repairResettable == 1 ? "" : "s") had before. Lines you renamed yourself are left as they are.")
@@ -165,9 +171,9 @@ struct AudioSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text(repairCandidates == 0
+                Text(repairable.isEmpty
                      ? (isScanning ? "" : "Every meeting with audio still on disk has its speakers separated.")
-                     : "\(repairCandidates) meeting\(repairCandidates == 1 ? "" : "s") were transcribed before speakers were told apart, so everyone but you shows as \"Speaker\". This listens to the audio again and separates the voices — the words and timings don't change, only who each line is attributed to. It doesn't re-transcribe, so it's far quicker than re-processing.")
+                     : "\(repairable.count) meeting\(repairable.count == 1 ? "" : "s") were transcribed before speakers were told apart, so everyone but you shows as \"Speaker\". This listens to the audio again and separates the voices — the words and timings don't change, only who each line is attributed to. It doesn't re-transcribe, so it's far quicker than re-processing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Meetings whose audio has already been cleared by the retention setting can't be repaired. Voices are numbered per meeting — \"Speaker 1\" in one isn't the same person as in another.")

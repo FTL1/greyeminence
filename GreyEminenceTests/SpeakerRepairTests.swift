@@ -140,16 +140,17 @@ final class SpeakerRepairTests: XCTestCase {
         )
     }
 
-    func testScanYieldsAndStaysCancellable() async {
+    func testSurveyYieldsAndStaysCancellable() async {
         // A scan that can't be cancelled is a scan that hangs the window.
-        let task = Task { () -> Int in
-            await SpeakerRepairService.candidates(in: ModelContext(try! ModelContainer(
-                for: Meeting.self,
-                configurations: ModelConfiguration(isStoredInMemoryOnly: true)
-            ))).count
-        }
-        let count = await task.value
-        XCTAssertEqual(count, 0, "an empty store has no candidates")
+        // Survey carries SwiftData models, so it stays on the main actor;
+        // what matters here is that it yields rather than blocking.
+        let container = try! ModelContainer(
+            for: Meeting.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let survey = await SpeakerRepairService.survey(in: ModelContext(container))
+        XCTAssertTrue(survey.repairable.isEmpty, "an empty store has no candidates")
+        XCTAssertEqual(survey.resettableCount, 0)
     }
 
     // MARK: - One pass, two answers

@@ -121,13 +121,6 @@ final class EmbeddingIndexer {
         )
     }
 
-    /// How many records a meeting *should* have under the current model.
-    /// Pure — no embedding, no network — so the backfill can check coverage
-    /// across the whole library cheaply.
-    func expectedRecordCount(for meeting: Meeting) -> Int {
-        Self.workItems(for: MeetingSnapshot(meeting: meeting)).count
-    }
-
     /// Everything in a meeting that gets a vector, in one flat list.
     ///
     /// Pure and snapshot-driven so the whole set can be handed to the provider

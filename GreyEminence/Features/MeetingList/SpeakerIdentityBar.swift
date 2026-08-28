@@ -48,8 +48,10 @@ struct SpeakerIdentityBar: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // `refreshToken` already covers relabels, which don't change the
+        // segment count anyway — and reading `segments.count` on every view
+        // update faults the whole relationship.
         .task(id: "\(meeting.id)-\(refreshToken)") { reload() }
-        .onChange(of: meeting.segments.count) { _, _ in reload() }
         .popover(item: $picking) { speaker in
             ContactPicker(
                 excludedContacts: [],

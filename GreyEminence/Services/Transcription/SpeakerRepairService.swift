@@ -15,7 +15,7 @@ enum SpeakerRepairService {
     /// The label a collapsed transcript uses for every remote voice. Segments
     /// carrying anything else — "Me", "Speaker 2", a person's name — are left
     /// alone, so a repair can't undo a real attribution or a manual edit.
-    static let collapsedLabel = "Speaker"
+    static var collapsedLabel: String { Speaker.unidentifiedLabel }
 
     enum Outcome: Equatable {
         case repaired(voices: Int, segments: Int)
@@ -57,10 +57,6 @@ enum SpeakerRepairService {
         return survey
     }
 
-    static func candidates(in context: ModelContext) async -> [Meeting] {
-        await survey(in: context).repairable
-    }
-
     /// Whether any system audio survives for a meeting.
     ///
     /// Deliberately not `systemChunks(for:)`: that opens every chunk with
@@ -70,7 +66,12 @@ enum SpeakerRepairService {
     static func hasSystemAudio(for meeting: Meeting) -> Bool {
         let sourceID = meeting.audioSourceMeetingID ?? meeting.id
         let base = StorageManager.shared.systemAudioURL(for: sourceID)
-        return !AudioFileWriter.existingChunkURLs(base: base).isEmpty
+        // Enumerating the chunks would stat every file in the track — five
+        // hundred syscalls to answer a yes/no, across every meeting in the
+        // library, on the main actor. The first two answer it.
+        let fm = FileManager.default
+        return fm.fileExists(atPath: base.path)
+            || fm.fileExists(atPath: AudioFileWriter.chunkURL(base: base, index: 1).path)
     }
 
     /// What one meeting's transcript needs, decided in a single pass.
@@ -126,13 +127,20 @@ enum SpeakerRepairService {
     }
 
     /// Repair one meeting. The transcript's text and timings are never touched.
-    static func repair(_ meeting: Meeting, in context: ModelContext) async -> Outcome {
+    static func repair(
+        _ meeting: Meeting,
+        in context: ModelContext,
+        diarizer: SpeakerDiarizationService? = nil
+    ) async -> Outcome {
         guard isCollapsed(meeting) else { return .notCollapsed }
         let chunks = systemChunks(for: meeting)
         guard !chunks.isEmpty else { return .audioUnavailable }
 
         let diarized: [DiarizedSegment]
-        let service = SpeakerDiarizationService()
+        // Reuse the caller's service when there is one: `prepare()` loads
+        // CoreML models onto the Neural Engine, and doing that once per
+        // meeting meant hundreds of redundant loads across a library repair.
+        let service = diarizer ?? SpeakerDiarizationService()
         do {
             try await service.prepare()
             diarized = try await service.diarizeTrack(chunkURLs: chunks)
@@ -142,46 +150,20 @@ enum SpeakerRepairService {
             return .failed(error.localizedDescription)
         }
 
-        let spans = diarized.map {
-            SpeakerAlignment.Span(speakerID: $0.speakerID, start: $0.startTime, end: $0.endTime)
-        }
-        let significant = SpeakerAlignment.significantSpeakerIDs(in: spans)
-        guard significant.count > 1 else { return .singleVoice }
-
-        let usable = spans.filter { significant.contains($0.speakerID) }
-        let labels = SpeakerAlignment.labels(forSpansOrderedByTime: usable)
-
-        // Keep the voice signatures so this meeting can have speakers named
-        // later without re-listening to it.
-        let clusters = SpeakerIdentification.clusters(
-            from: diarized,
-            labels: labels,
-            significant: significant
-        )
-        if !clusters.isEmpty {
-            StorageManager.shared.saveVoiceClusters(
-                MeetingVoiceClusters(clusters: clusters.map {
-                    .init(label: $0.label, signature: $0.signature)
-                }),
-                for: meeting.id
-            )
-        }
-
-        let resolutions = SpeakerIdentification.resolve(
-            clusters: clusters,
-            attendeeIDs: Set(meeting.attendees.map(\.id)),
-            profiles: VoiceProfileStore.load()
-        )
-        let names = Dictionary(uniqueKeysWithValues: resolutions.map { ($0.label, $0.displayName) })
+        // Same pipeline re-processing uses, so a repaired transcript and a
+        // freshly-processed one are attributed identically. `minimumVoices: 2`
+        // is the one difference that belongs here: renaming a single anonymous
+        // voice to "Speaker 1" tells the reader nothing it didn't know.
+        guard let attribution = SpeakerIdentification.attribute(
+            diarized: diarized,
+            meeting: meeting,
+            minimumVoices: 2
+        ) else { return .singleVoice }
 
         var relabelled = 0
         for segment in meeting.segments {
             guard case .other(let name) = segment.speaker, name == collapsedLabel else { continue }
-            guard let id = SpeakerAlignment.dominantSpeakerID(
-                from: segment.startTime,
-                to: segment.endTime,
-                in: usable
-            ), let label = labels[id] else { continue }
+            guard let speaker = attribution.speaker(from: segment.startTime, to: segment.endTime) else { continue }
 
             // Stash the pre-repair label so this is reversible. Deliberately
             // without setting `isEdited`: that flag means "the user changed
@@ -192,7 +174,7 @@ enum SpeakerRepairService {
             if !segment.isEdited, segment.originalSpeakerData == nil {
                 segment.originalSpeakerData = segment.speakerData
             }
-            segment.speaker = .other(names[label] ?? label)
+            segment.speaker = speaker
             relabelled += 1
         }
         guard relabelled > 0 else { return .singleVoice }
@@ -208,7 +190,7 @@ enum SpeakerRepairService {
         // attribution back at the user. Dropping the records lets the launch
         // backfill re-index the meeting with the names it now has.
         invalidateSearchIndex(for: meeting)
-        return .repaired(voices: significant.count, segments: relabelled)
+        return .repaired(voices: attribution.voiceCount, segments: relabelled)
     }
 
     /// Undo a repair, restoring the labels the transcript had before it.
@@ -244,7 +226,9 @@ enum SpeakerRepairService {
         classify(meeting).isResettable
     }
 
-    private static func invalidateSearchIndex(for meeting: Meeting) {
+    /// Shared with speaker identification, which invalidates for the same
+    /// reason: indexed snippets embed the speaker name.
+    static func invalidateSearchIndex(for meeting: Meeting) {
         guard let store = EmbeddingStore.shared else { return }
         let removed = store.deleteRecords(forMeetingID: meeting.id)
         if removed > 0 {
@@ -258,13 +242,25 @@ enum SpeakerRepairService {
 
     /// Repair every candidate, oldest first so a long run makes visible
     /// progress through the backlog rather than picking at random.
+    /// `meetings` lets a caller that has already surveyed the library pass its
+    /// result in. The settings pane has one on screen to show the count, and
+    /// re-deriving it here walked every segment in the library a second time.
     static func repairAll(
         in context: ModelContext,
+        meetings candidates: [Meeting]? = nil,
         onProgress: @MainActor (Int, Int) -> Void
     ) async -> (repaired: Int, skipped: Int) {
-        let meetings = await candidates(in: context).sorted { $0.date < $1.date }
+        let pool: [Meeting]
+        if let candidates {
+            pool = candidates
+        } else {
+            pool = await survey(in: context).repairable
+        }
+        let meetings = pool.sorted { $0.date < $1.date }
         var repaired = 0
         var skipped = 0
+        // One service for the whole run.
+        let diarizer = SpeakerDiarizationService()
 
         LogManager.send("Speaker repair: \(meetings.count) meeting(s) with unattributed voices", category: .transcription)
         for (index, meeting) in meetings.enumerated() {
@@ -276,7 +272,7 @@ enum SpeakerRepairService {
                 LogManager.send("Speaker repair: paused, re-processing is running", category: .transcription)
                 break
             }
-            switch await repair(meeting, in: context) {
+            switch await repair(meeting, in: context, diarizer: diarizer) {
             case .repaired(let voices, let segments):
                 repaired += 1
                 LogManager.send(

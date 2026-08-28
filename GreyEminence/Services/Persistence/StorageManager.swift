@@ -61,6 +61,40 @@ final class StorageManager: Sendable {
         try? FileManager.default.removeItem(at: reProcessCheckpointURL(for: meetingID))
     }
 
+    // MARK: - Sidecars
+
+    /// Read a JSON sidecar, treating any failure as absent.
+    ///
+    /// These files are all derived data — a corrupt or half-written one should
+    /// cost a recomputation, never an error the caller has to handle.
+    func loadSidecar<T: Decodable>(_ type: T.Type, at url: URL) -> T? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    func saveSidecar<T: Encodable>(_ value: T, to url: URL) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? data.write(to: url, options: .atomic)
+    }
+
+    /// Derived per-meeting data that must outlive the audio.
+    ///
+    /// Not in the recording directory: the retention sweep deletes that
+    /// wholesale, and these files are the reason a meeting can still be worked
+    /// with once its audio is gone. Putting a voice signature next to the
+    /// recording would have purged it in the same pass — silently removing the
+    /// ability to identify speakers in exactly the older meetings most likely
+    /// to need it.
+    private var derivedURL: URL {
+        let dir = appSupportURL.appendingPathComponent("Derived", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
     /// How many search records a meeting *should* have, recorded when it was
     /// last indexed.
     ///
@@ -74,17 +108,15 @@ final class StorageManager: Sendable {
     }
 
     func searchCoverageURL(for meetingID: UUID) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent("search-coverage.json")
+        derivedURL.appendingPathComponent("\(meetingID.uuidString)-coverage.json")
     }
 
     func loadSearchCoverage(for meetingID: UUID) -> SearchCoverage? {
-        guard let data = try? Data(contentsOf: searchCoverageURL(for: meetingID)) else { return nil }
-        return try? JSONDecoder().decode(SearchCoverage.self, from: data)
+        loadSidecar(SearchCoverage.self, at: searchCoverageURL(for: meetingID))
     }
 
     func saveSearchCoverage(_ coverage: SearchCoverage, for meetingID: UUID) {
-        guard let data = try? JSONEncoder().encode(coverage) else { return }
-        try? data.write(to: searchCoverageURL(for: meetingID), options: .atomic)
+        saveSidecar(coverage, to: searchCoverageURL(for: meetingID))
     }
 
     /// Voice signatures for a meeting's diarization clusters.
@@ -93,19 +125,17 @@ final class StorageManager: Sendable {
     /// kept out of the store so changing how signatures are built doesn't mean
     /// a schema migration.
     func voiceClustersURL(for meetingID: UUID) -> URL {
-        recordingDirectory(for: meetingID).appendingPathComponent("voice-clusters.json")
+        derivedURL.appendingPathComponent("\(meetingID.uuidString)-voices.json")
     }
 
     func loadVoiceClusters(for meetingID: UUID) -> MeetingVoiceClusters? {
-        guard let data = try? Data(contentsOf: voiceClustersURL(for: meetingID)),
-              let stored = try? JSONDecoder().decode(MeetingVoiceClusters.self, from: data),
+        guard let stored = loadSidecar(MeetingVoiceClusters.self, at: voiceClustersURL(for: meetingID)),
               stored.isCurrent else { return nil }
         return stored
     }
 
     func saveVoiceClusters(_ clusters: MeetingVoiceClusters, for meetingID: UUID) {
-        guard let data = try? JSONEncoder().encode(clusters) else { return }
-        try? data.write(to: voiceClustersURL(for: meetingID), options: .atomic)
+        saveSidecar(clusters, to: voiceClustersURL(for: meetingID))
     }
 
     /// Cached report figure-anchoring plan. A sidecar file rather than a
@@ -119,9 +149,7 @@ final class StorageManager: Sendable {
     /// regenerated analysis produces different sections, so an older plan
     /// would anchor figures to headings that no longer exist.
     func loadReportAnchorPlan(for meetingID: UUID, insightID: UUID) -> ReportAnchorPlan? {
-        let url = reportAnchorPlanURL(for: meetingID)
-        guard let data = try? Data(contentsOf: url),
-              let plan = try? JSONDecoder().decode(ReportAnchorPlan.self, from: data),
+        guard let plan = loadSidecar(ReportAnchorPlan.self, at: reportAnchorPlanURL(for: meetingID)),
               plan.isValid(forInsight: insightID) else { return nil }
         return plan
     }

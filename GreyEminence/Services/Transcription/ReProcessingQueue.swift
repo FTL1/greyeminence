@@ -45,6 +45,9 @@ final class ReProcessingQueue {
     private var modelContainer: ModelContainer?
     private weak var recordingViewModel: RecordingViewModel?
     private let transcriber = HighQualityTranscriber()
+    /// Held for the same reason as the transcriber: `prepare()` loads models
+    /// onto the Neural Engine, and the queue works through a backlog.
+    private let diarizer = SpeakerDiarizationService()
 
     private let persistenceKey = "reProcessingQueue.pending"
 
@@ -321,15 +324,14 @@ final class ReProcessingQueue {
         // Diarize the system track before swapping, so the new transcript can
         // be attributed as it is written rather than relabelled afterwards.
         let diarized = await diarizeSystemTrack(chunks: sysChunks, title: title)
-        let (segmentSnapshots, audioRanges) = swapSegments(
+        let (segmentSnapshots, audioRanges, attributionVoiceCount) = swapSegments(
             meeting: meeting,
             upgraded: upgraded,
             diarized: diarized,
             in: context
         )
-        let voices = Set(diarized.map(\.speakerID)).count
-        if voices > 0 {
-            LogManager.send("Diarization found \(voices) distinct voice(s) in \"\(title)\"", category: .transcription)
+        if let voiceCount = attributionVoiceCount, voiceCount > 0 {
+            LogManager.send("Diarization found \(voiceCount) distinct voice(s) in \"\(title)\"", category: .transcription)
         }
 
         setPhase(.analyzing, for: meeting, in: context)
@@ -370,10 +372,9 @@ final class ReProcessingQueue {
     /// diarizer that won't load.
     private func diarizeSystemTrack(chunks: [URL], title: String) async -> [DiarizedSegment] {
         guard !chunks.isEmpty else { return [] }
-        let service = SpeakerDiarizationService()
         do {
-            try await service.prepare()
-            return try await service.diarizeTrack(chunkURLs: chunks)
+            try await diarizer.prepare()
+            return try await diarizer.diarizeTrack(chunkURLs: chunks)
         } catch is CancellationError {
             return []
         } catch {
@@ -429,7 +430,7 @@ final class ReProcessingQueue {
         upgraded: [HighQualityTranscriber.Segment],
         diarized: [DiarizedSegment],
         in context: ModelContext
-    ) -> ([SegmentSnapshot], TimeInterval) {
+    ) -> ([SegmentSnapshot], TimeInterval, Int?) {
         for old in meeting.segments { context.delete(old) }
         meeting.segments.removeAll()
 
@@ -441,61 +442,16 @@ final class ReProcessingQueue {
         // the same audio. Without it every remote voice collapsed into one
         // anonymous "Speaker" — which is what made a four-person meeting read
         // as a conversation between the user and a single monolith.
-        let spans = diarized.map {
-            SpeakerAlignment.Span(speakerID: $0.speakerID, start: $0.startTime, end: $0.endTime)
-        }
-        let significant = SpeakerAlignment.significantSpeakerIDs(in: spans)
-        let usableSpans = spans.filter { significant.contains($0.speakerID) }
-        let labels = SpeakerAlignment.labels(forSpansOrderedByTime: usableSpans)
-
-        // Reduce each cluster to a voice signature and keep it beside the
-        // recording. Without this the vectors are computed and thrown away,
-        // and naming a speaker later would mean re-listening to the audio.
-        let clusters = SpeakerIdentification.clusters(
-            from: diarized,
-            labels: labels,
-            significant: significant
-        )
-        if !clusters.isEmpty {
-            StorageManager.shared.saveVoiceClusters(
-                MeetingVoiceClusters(clusters: clusters.map {
-                    .init(label: $0.label, signature: $0.signature)
-                }),
-                for: meeting.id
-            )
-        }
-
-        // Anyone already enrolled and confidently recognised gets their name
-        // instead of a number.
-        let attendeeIDs = Set(meeting.attendees.map(\.id))
-        let resolutions = SpeakerIdentification.resolve(
-            clusters: clusters,
-            attendeeIDs: attendeeIDs,
-            profiles: VoiceProfileStore.load()
-        )
-        let names = Dictionary(
-            uniqueKeysWithValues: resolutions.map { ($0.label, $0.displayName) }
-        )
-        for resolution in resolutions where resolution.applied {
-            LogManager.send(
-                "Recognised \(resolution.displayName) as \(resolution.label) (\(String(format: "%.2f", resolution.match?.similarity ?? 0)))",
-                category: .transcription,
-                meetingID: meeting.id
-            )
-        }
+        let attribution = SpeakerIdentification.attribute(diarized: diarized, meeting: meeting)
 
         let raw: [TranscriptSegment] = upgraded.map { seg in
             let speaker: Speaker
             if seg.source == .mic {
                 speaker = .me
-            } else if let id = SpeakerAlignment.dominantSpeakerID(from: seg.startTime, to: seg.endTime, in: usableSpans),
-                      let label = labels[id] {
-                speaker = .other(names[label] ?? label)
             } else {
-                // Diarization unavailable or this stretch didn't cluster.
-                // "Speaker" is the honest label for an unidentified voice —
-                // better than attributing it to whoever spoke nearby.
-                speaker = .other("Speaker")
+                // An unattributed stretch keeps the honest label: better than
+                // assigning it to whoever happened to speak nearby.
+                speaker = attribution?.speaker(from: seg.startTime, to: seg.endTime) ?? .unidentified
             }
             return TranscriptSegment(
                 speaker: speaker,
@@ -527,7 +483,7 @@ final class ReProcessingQueue {
             meeting.duration = totalDuration
         }
         PersistenceGate.save(context, site: "reProcess/swapSegments", critical: true, meetingID: meeting.id)
-        return (snapshots, totalDuration)
+        return (snapshots, totalDuration, attribution?.voiceCount)
     }
 
     private func reRunAIAnalysis(meeting: Meeting, segments: [SegmentSnapshot], context: ModelContext) async {
@@ -606,10 +562,9 @@ final class ReProcessingQueue {
         var result: [URL] = []
         var cumulative: TimeInterval = 0
         for url in urls {
-            let duration = (try? AVAudioFile(forReading: url)).map { file -> TimeInterval in
-                guard file.processingFormat.sampleRate > 0 else { return 10 }
-                return Double(file.length) / file.processingFormat.sampleRate
-            } ?? 10
+            // Same question the transcriber's timeline asks, so it gets the
+            // same answer — including the finite guard this copy lacked.
+            let duration = HighQualityTranscriber.assumedDuration(of: url, fallback: 10)
             let chunkRange = cumulative...(cumulative + duration)
             if chunkRange.upperBound > window.lowerBound && chunkRange.lowerBound < window.upperBound {
                 result.append(url)
