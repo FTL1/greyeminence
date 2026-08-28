@@ -24,6 +24,15 @@ enum FeatureHighlightCatalog {
     /// set its `version` to that release's MARKETING_VERSION.
     static let all: [FeatureHighlight] = [
         FeatureHighlight(
+            id: "speaker-separation",
+            version: "0.32.0",
+            title: "Transcripts tell people apart",
+            summary: "Everyone but you used to show as a single \"Speaker\", however many were on the call — the accuracy pass that rewrites each transcript was labelling lines by which microphone they came from. Voices are now separated, and you can put a name to one from the bar above the transcript. Name someone once and Grey Eminence recognises their voice in later meetings on its own. Settings \u{2192} Audio can go back and separate older recordings too, while their audio is still around.",
+            systemImage: "person.2.wave.2",
+            tint: .orange,
+            destination: .settings
+        ),
+        FeatureHighlight(
             id: "ask-better-search",
             version: "0.31.0",
             title: "Ask can find what you meant",
