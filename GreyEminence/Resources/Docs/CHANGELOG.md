@@ -4,6 +4,22 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+## 0.32.2 — 2026-08-28
+
+**The app no longer freezes while it tidies up**
+- Three jobs ran on the thread that draws the window. The daily backup
+  copied the whole database inline at launch, with nothing on screen to
+  say why — so the first launch of each day simply stopped responding for
+  as long as the copy took. Startup maintenance did the same while
+  displaying a message saying it was running, which is worse: it looked
+  like the app was working when it couldn't be used. And opening
+  Developer settings measured every recording on disk before drawing
+  anything.
+- All three now run out of the way. The status bar names what's happening
+  and how far along it is — "Startup maintenance — trimming the usage
+  log", with a progress bar — instead of one unchanging sentence, so a
+  job that's working looks different from one that's stuck.
+
 ## 0.32.1 — 2026-08-28
 
 **Housekeeping after the speaker release**
