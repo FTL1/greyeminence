@@ -37,8 +37,16 @@ struct ParsedActionItem: Sendable {
 struct MeetingRoster: Sendable {
     let myName: String?
     let otherAttendees: [String]
+    /// Extra names that still mean the local user (session/global display name).
+    let myAliases: [String]
 
     var isOneOnOne: Bool { otherAttendees.count == 1 }
+
+    init(myName: String?, otherAttendees: [String], myAliases: [String] = []) {
+        self.myName = myName
+        self.otherAttendees = otherAttendees
+        self.myAliases = myAliases
+    }
 
     /// Snapshot from a meeting's attendee list, with "me" resolved via the
     /// My Profile contact. Taken fresh at each analysis pass because the
@@ -46,24 +54,34 @@ struct MeetingRoster: Sendable {
     @MainActor
     static func snapshot(for meeting: Meeting) -> MeetingRoster {
         let myID = Meeting.storedMyContactID
+        let contactName = meeting.attendees.first { $0.id == myID }?.name
+        let aliases = [SpeakerNames.effectiveMeName].compactMap { $0 }
         return MeetingRoster(
-            myName: meeting.attendees.first { $0.id == myID }?.name,
-            otherAttendees: meeting.attendees.filter { $0.id != myID }.map(\.name)
+            myName: contactName ?? SpeakerNames.effectiveMeName,
+            otherAttendees: meeting.attendees.filter { $0.id != myID }.map(\.name),
+            myAliases: aliases
         )
     }
 }
 
 // MARK: - Structured Summary Types
 
-struct SummaryPoint: Sendable, Codable {
-    let label: String
-    let detail: String
+struct SummaryPoint: Sendable, Codable, Equatable {
+    var label: String
+    var detail: String
 }
 
-struct SummarySection: Sendable, Codable {
-    let title: String
-    let intro: String?
-    let points: [SummaryPoint]
+struct SummarySection: Sendable, Codable, Equatable {
+    var title: String
+    var intro: String?
+    var points: [SummaryPoint]
+
+    static func encode(_ sections: [SummarySection]) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(sections) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
 }
 
 extension SummarySection {
@@ -158,7 +176,7 @@ actor AIIntelligenceService {
         let systemPrompt = effectiveSystemPrompt(roster: roster)
         let response = try await AIUsageContext.attribute(purpose, meetingID: capturedMeetingID) {
             try await AIRetry.run(label: "analyze", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
-                try await withTimeout(seconds: 90) {
+                try await withTimeout(seconds: AIClientFactory.analysisTimeoutSeconds) {
                     try await client.sendMessage(
                         system: systemPrompt,
                         userContent: userPrompt
@@ -168,7 +186,7 @@ actor AIIntelligenceService {
         }
         LogManager.send("AI raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
 
-        let parsed = enforceActionItemOwnership(on: try parseResponse(response, raw: response), roster: roster, segments: nonEmpty)
+        let parsed = try parseResponse(response, raw: response)
         let result = applyResultPreservingPrevious(parsed)
         previousSummary = result.summary
         previousActionItems = result.actionItems
@@ -197,16 +215,123 @@ actor AIIntelligenceService {
         )
     }
 
-    /// `screenObservations` is the full session-grouped observation block for
-    /// the meeting (see `ScreenObservationFormatter.finalBlock`).
-    func performFinalAnalysis(segments: [SegmentSnapshot], roster: MeetingRoster? = nil, screenObservations: String? = nil) async throws -> AnalysisResult? {
+    /// Full-transcript rewrite used by Reanalyze. Ignores rolling state and
+    /// does not see prior insights — the point is to throw away a first pass
+    /// that latched onto calendar subject / shared-document topic.
+    func reanalyze(
+        segments: [SegmentSnapshot],
+        roster: MeetingRoster? = nil,
+        screenObservations: String? = nil,
+        calendarTitle: String? = nil
+    ) async throws -> AnalysisResult? {
         let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         guard !nonEmpty.isEmpty else { return nil }
 
-        // Single final pass with the full transcript. If we have prior accumulated context,
-        // use the cleanup prompt; otherwise fall back to initial analysis.
+        let transcript = AIPromptTemplates.formatSegments(nonEmpty)
+        var userPrompt = AIPromptTemplates.reanalysisPrompt(
+            transcript: transcript,
+            calendarTitle: calendarTitle ?? "",
+            myName: roster?.myName,
+            suppressedActionItems: suppressedActionItems,
+            suppressedFollowUps: suppressedFollowUps
+        )
+        userPrompt += AIPromptTemplates.screenObservationBlock(screenObservations)
+
+        LogManager.send("AI reanalysis starting (\(nonEmpty.count) segments)", category: .ai, meetingID: meetingID)
+        let capturedMeetingID = meetingID
+        let systemPrompt = effectiveSystemPrompt(roster: roster)
+        let response = try await AIUsageContext.attribute(.reanalysis, meetingID: capturedMeetingID) {
+            try await AIRetry.run(label: "reanalyze", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
+                try await withTimeout(seconds: AIClientFactory.analysisTimeoutSeconds) {
+                    try await client.sendMessage(
+                        system: systemPrompt,
+                        userContent: userPrompt
+                    )
+                }
+            }
+        }
+        LogManager.send("AI reanalysis raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
+
+        let parsed = try parseResponse(response, raw: response)
+        LogManager.send("AI reanalysis complete", category: .ai, meetingID: meetingID)
+        return parsed
+    }
+
+    func analyzeSection(
+        segments: [SegmentSnapshot],
+        roster: MeetingRoster? = nil,
+        screenObservations: String? = nil,
+        calendarTitle: String? = nil,
+        scope: InsightScope,
+        depth: InsightDepth,
+        currentSummary: String,
+        currentActionItems: [ParsedActionItem],
+        currentFollowUps: [String],
+        currentTopics: [String],
+        vocalCues: String = ""
+    ) async throws -> AnalysisResult? {
+        let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !nonEmpty.isEmpty else { return nil }
+
+        let transcript = AIPromptTemplates.formatSegments(nonEmpty)
+        var userPrompt = AIPromptTemplates.sectionAnalysisPrompt(
+            depth: depth,
+            scope: scope,
+            transcript: transcript,
+            calendarTitle: calendarTitle ?? "",
+            myName: roster?.myName,
+            currentSummary: currentSummary,
+            currentActionItems: currentActionItems,
+            currentFollowUps: currentFollowUps,
+            currentTopics: currentTopics,
+            vocalCues: vocalCues,
+            suppressedActionItems: suppressedActionItems,
+            suppressedFollowUps: suppressedFollowUps
+        )
+        userPrompt += AIPromptTemplates.screenObservationBlock(screenObservations)
+
+        LogManager.send(
+            "AI \(depth.rawValue) \(scope.rawValue) starting (\(nonEmpty.count) segments)",
+            category: .ai,
+            meetingID: meetingID
+        )
+        let capturedMeetingID = meetingID
+        let systemPrompt = effectiveSystemPrompt(roster: roster)
+        let response = try await AIUsageContext.attribute(.reanalysis, meetingID: capturedMeetingID) {
+            try await AIRetry.run(label: "section-\(depth.rawValue)", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
+                try await withTimeout(seconds: AIClientFactory.analysisTimeoutSeconds) {
+                    try await client.sendMessage(system: systemPrompt, userContent: userPrompt)
+                }
+            }
+        }
+        LogManager.send(
+            "AI \(depth.rawValue) \(scope.rawValue) raw response (\(response.count) chars)",
+            category: .ai,
+            meetingID: meetingID
+        )
+        return try parseResponse(response, raw: response)
+    }
+
+    /// `screenObservations` is the full session-grouped observation block for
+    /// the meeting (see `ScreenObservationFormatter.finalBlock`).
+    func performFinalAnalysis(
+        segments: [SegmentSnapshot],
+        roster: MeetingRoster? = nil,
+        screenObservations: String? = nil,
+        calendarTitle: String? = nil
+    ) async throws -> AnalysisResult? {
+        let nonEmpty = segments.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !nonEmpty.isEmpty else { return nil }
+
+        // Single final pass with the full transcript. If we have prior accumulated
+        // context, use the cleanup prompt; otherwise a purpose-first rewrite.
         guard !previousSummary.isEmpty else {
-            return try await analyze(segments: segments, roster: roster, screenObservations: screenObservations)
+            return try await reanalyze(
+                segments: segments,
+                roster: roster,
+                screenObservations: screenObservations,
+                calendarTitle: calendarTitle
+            )
         }
 
         // Related discussions from other meetings, retrieved with the topics
@@ -239,7 +364,7 @@ actor AIIntelligenceService {
         let systemPrompt = effectiveSystemPrompt(roster: roster)
         let response = try await AIUsageContext.attribute(.transcriptFinal, meetingID: capturedMeetingID) {
             try await AIRetry.run(label: "finalCleanup", meetingID: capturedMeetingID) { [client, systemPrompt, userPrompt] in
-                try await withTimeout(seconds: 90) {
+                try await withTimeout(seconds: AIClientFactory.analysisTimeoutSeconds) {
                     try await client.sendMessage(
                         system: systemPrompt,
                         userContent: userPrompt
@@ -249,7 +374,7 @@ actor AIIntelligenceService {
         }
         LogManager.send("AI final cleanup raw response (\(response.count) chars): \(response.prefix(500))", category: .ai, meetingID: meetingID)
 
-        let parsed = enforceActionItemOwnership(on: try parseResponse(response, raw: response), roster: roster, segments: nonEmpty)
+        let parsed = try parseResponse(response, raw: response)
         let result = applyResultPreservingPrevious(parsed)
         LogManager.send("AI final cleanup complete", category: .ai, meetingID: meetingID)
         return result
@@ -257,36 +382,22 @@ actor AIIntelligenceService {
 
     // MARK: - Action-item ownership
 
-    /// Belt-and-braces enforcement of the prompt's ownership rules: drop items
-    /// another attendee owns unless the meeting is a 1:1. The prompt is the
-    /// primary mechanism; this catches the model ignoring it.
-    private func enforceActionItemOwnership(
-        on result: AnalysisResult,
-        roster: MeetingRoster?,
-        segments: [SegmentSnapshot]
-    ) -> AnalysisResult {
-        let effective = Self.rosterForFiltering(roster, segments: segments)
-        let kept = result.actionItems.filter { Self.keepsActionItem(assignee: $0.assignee, roster: effective) }
-        let dropped = result.actionItems.count - kept.count
-        guard dropped > 0 else { return result }
-        LogManager.send("Dropped \(dropped) action item(s) owned by other attendees", category: .ai, meetingID: meetingID)
-        return AnalysisResult(
-            title: result.title,
-            summary: result.summary,
-            actionItems: kept,
-            followUps: result.followUps,
-            topics: result.topics,
-            rawResponse: result.rawResponse
-        )
-    }
+    /// Persist every assigned commitment (dossiers export per person). The
+    /// Meeting Intelligence pane still uses `keepsActionItem` so the on-screen
+    /// list stays the user's own work plus unowned items (and the 1:1 exception).
 
     /// The roster used for filtering. When no attendee roster is available
     /// (no calendar link), fall back to the distinct non-"Me" speakers in the
     /// transcript so the 1:1 exception still works from diarization alone.
     nonisolated static func rosterForFiltering(_ roster: MeetingRoster?, segments: [SegmentSnapshot]) -> MeetingRoster {
         if let roster, !roster.otherAttendees.isEmpty { return roster }
-        let others = Set(segments.map(\.speaker.displayName)).subtracting(["Me"])
-        return MeetingRoster(myName: roster?.myName, otherAttendees: Array(others))
+        let others = Set(segments.filter { !$0.speaker.isMe }.map(\.speaker.displayName))
+        let transcriptMeNames = segments
+            .filter { $0.speaker.isMe && $0.speaker.displayName != Speaker.defaultMeLabel }
+            .map(\.speaker.displayName)
+        let myName = roster?.myName ?? transcriptMeNames.first
+        let aliases = Array(Set((roster?.myAliases ?? []) + transcriptMeNames))
+        return MeetingRoster(myName: myName, otherAttendees: Array(others), myAliases: aliases)
     }
 
     /// Whether an action item survives the ownership filter. Unowned items and
@@ -298,8 +409,12 @@ actor AIIntelligenceService {
               !raw.isEmpty else { return true }
         if raw == "me" || raw == "null" || raw == "unknown" { return true }
         if raw.hasPrefix("speaker ") { return true }
-        if let my = roster.myName?.lowercased(), !my.isEmpty,
-           my.contains(raw) || raw.contains(my) { return true }
+        let myLabels = ([roster.myName] + roster.myAliases)
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        if myLabels.contains(where: { $0 == raw || $0.contains(raw) || raw.contains($0) }) {
+            return true
+        }
         return roster.isOneOnOne
     }
 

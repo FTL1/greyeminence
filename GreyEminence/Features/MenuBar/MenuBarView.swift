@@ -84,7 +84,7 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("Open Grey Eminence") {
+            Button("Open \(AppIdentity.displayName)") {
                 NSApplication.shared.activate(ignoringOtherApps: true)
                 if let window = NSApplication.shared.windows.first {
                     window.makeKeyAndOrderFront(nil)

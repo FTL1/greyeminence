@@ -20,7 +20,8 @@ final class AudioFormatConverter: @unchecked Sendable {
         // Already in target format
         if sourceFormat.sampleRate == targetFormat.sampleRate
             && sourceFormat.channelCount == targetFormat.channelCount
-            && sourceFormat.commonFormat == targetFormat.commonFormat {
+            && sourceFormat.commonFormat == targetFormat.commonFormat
+            && sourceFormat.isInterleaved == targetFormat.isInterleaved {
             return buffer
         }
 

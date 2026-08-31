@@ -19,6 +19,15 @@ final class Contact {
     // Speaker label aliases for auto-linking
     var speakerAliases: [String] = []
 
+    /// WeSpeaker embedding (Float32 little-endian). Lets later meetings
+    /// recognize this person instead of minting a new guest-N.
+    var voicePrintData: Data?
+    var voicePrintUpdatedAt: Date?
+
+    /// Index into `SpeakerPalette.swatches`. Nil until assigned.
+    var colorSlot: Int?
+    var isColorLocked: Bool = false
+
     @Relationship(inverse: \Meeting.attendees)
     var meetings: [Meeting] = []
 
@@ -30,6 +39,53 @@ final class Contact {
         self.name = name
         self.email = email
         self.createdAt = .now
+    }
+
+    var hasVoicePrint: Bool {
+        guard let voicePrintData else { return false }
+        return voicePrintData.count >= MemoryLayout<Float>.size * 8
+    }
+
+    func voicePrintEmbedding() -> [Float]? {
+        VoicePrintCodec.decode(voicePrintData)
+    }
+
+    func setVoicePrint(_ embedding: [Float]) {
+        voicePrintData = VoicePrintCodec.encode(embedding)
+        voicePrintUpdatedAt = .now
+    }
+
+    /// Average a new sample into the stored print so later enrollments
+    /// tighten the match instead of replacing it outright.
+    func mergeVoicePrint(_ embedding: [Float]) {
+        if let existing = voicePrintEmbedding(), existing.count == embedding.count, !existing.isEmpty {
+            setVoicePrint(zip(existing, embedding).map { ($0 + $1) / 2 })
+        } else {
+            setVoicePrint(embedding)
+        }
+    }
+
+    func clearVoicePrint() {
+        voicePrintData = nil
+        voicePrintUpdatedAt = nil
+    }
+
+    func asSpeakerLinkPerson() -> SpeakerLinkPerson {
+        SpeakerLinkPerson(
+            contactID: id,
+            name: name,
+            hasVoicePrint: hasVoicePrint,
+            aliases: speakerAliases,
+            meetingCount: meetings.count,
+            isThisVoice: false
+        )
+    }
+
+    func matchesSpeakerName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if self.name.compare(trimmed, options: .caseInsensitive) == .orderedSame { return true }
+        return speakerAliases.contains { $0.compare(trimmed, options: .caseInsensitive) == .orderedSame }
     }
 
     var firstName: String {
@@ -49,19 +105,12 @@ final class Contact {
         return String(name.prefix(2)).uppercased()
     }
 
-    var avatarColor: Color {
-        Self.contactColors[Self.colorIndex(for: name)]
-    }
+    var avatarColor: Color { paletteColor }
 
-    private static let contactColors: [Color] = [
-        .blue, .green, .orange, .purple,
-        .pink, .teal, .indigo, .mint,
-    ]
-
-    private static func colorIndex(for name: String) -> Int {
-        var hasher = Hasher()
-        hasher.combine(name)
-        let hash = abs(hasher.finalize())
-        return hash % contactColors.count
+    var paletteColor: Color {
+        if let colorSlot {
+            return SpeakerPalette.color(slot: colorSlot)
+        }
+        return SpeakerPalette.color(forName: name)
     }
 }

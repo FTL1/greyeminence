@@ -246,6 +246,67 @@ final class ReportRenderingTests: XCTestCase {
         }
     }
 
+    // MARK: - Open questions placement
+
+    /// Given the same heading treatment as the summary, open questions read
+    /// as one more of its sections. They lead the document and use the
+    /// callout styling instead.
+    func testOpenQuestionsLeadTheDocumentAndAreNotStyledAsASection() {
+        let html = ReportHTMLRenderer.render(
+            report(
+                sections: [
+                    .init(id: 0, title: "Messages vs tasks", intro: nil, points: [], figures: []),
+                    .init(id: 1, title: "Document service", intro: nil, points: [], figures: []),
+                ],
+                actionItems: [.init(text: "Ship it", assignee: nil, isCompleted: false)],
+                followUps: ["What are the reporting requirements?"]
+            ),
+            template: ReportTemplateCatalog.plain
+        )
+
+        let questions = try! XCTUnwrap(html.range(of: "id=\"ge-followups\""))
+        let firstSection = try! XCTUnwrap(html.range(of: "id=\"\(ReportHTMLRenderer.sectionAnchor(0))\""))
+        let actions = try! XCTUnwrap(html.range(of: "id=\"ge-actions\""))
+
+        XCTAssertLessThan(questions.lowerBound, firstSection.lowerBound, "open questions should come before the summary")
+        XCTAssertLessThan(firstSection.lowerBound, actions.lowerBound, "action items should still come last")
+
+        XCTAssertTrue(html.contains("<section class=\"ge-callout ge-followups\""))
+        XCTAssertTrue(html.contains("<h2 class=\"ge-callout-title\">Open questions</h2>"))
+        XCTAssertFalse(
+            html.contains("ge-section ge-followups"),
+            "reusing the section class is what made it look like part of the summary"
+        )
+    }
+
+    /// The contents list has to follow document order or it misdirects.
+    func testContentsListsOpenQuestionsFirst() {
+        var template = ReportTemplateCatalog.plain
+        template.includesTableOfContents = true
+        let html = ReportHTMLRenderer.render(
+            report(
+                sections: [.init(id: 0, title: "Messages vs tasks", intro: nil, points: [], figures: [])],
+                followUps: ["A question?"]
+            ),
+            template: template
+        )
+        // Anchor on the markup: the stylesheet also contains "ge-toc-list",
+        // and matching that would start the window inside the CSS.
+        let toc = String(html[html.range(of: "<ol class=\"ge-toc-list\">")!.lowerBound...].prefix(400))
+        let questions = try! XCTUnwrap(toc.range(of: "Open questions"))
+        let section = try! XCTUnwrap(toc.range(of: "Messages vs tasks"))
+        XCTAssertLessThan(questions.lowerBound, section.lowerBound)
+    }
+
+    func testEveryTemplateStylesTheCallout() {
+        for template in ReportTemplateCatalog.all {
+            XCTAssertTrue(
+                template.css.contains(".ge-callout-title"),
+                "\(template.id) leaves open questions unstyled, so they fall back to looking like body text"
+            )
+        }
+    }
+
     // MARK: - Table of contents
 
     func testTableOfContentsListsEverySectionAndBlock() {
@@ -398,6 +459,21 @@ final class ReportRenderingTests: XCTestCase {
         )
     }
 
+    /// The picker and the builder must number sections identically, or a
+    /// legacy flat-string summary is ticked in one place and dropped in
+    /// another.
+    @MainActor
+    func testPickerTitlesMatchTheBuiltReportSections() {
+        let meeting = Meeting(title: "Sync", date: .now, duration: 600, status: .completed)
+        let insight = MeetingInsight(summary: "A legacy flat summary with no JSON structure at all.")
+        meeting.insights = [insight]
+
+        let titles = ReportModelBuilder.sectionTitles(for: meeting)
+        let built = ReportModelBuilder.build(from: meeting)
+        XCTAssertEqual(titles.map(\.id), built.sections.map(\.id))
+        XCTAssertEqual(titles.map(\.title), built.sections.map(\.title))
+    }
+
     // MARK: - Report title
     //
     // The report must be titled whatever the meeting is called when you
@@ -426,7 +502,8 @@ final class ReportRenderingTests: XCTestCase {
             for: report.meta,
             template: ReportTemplateCatalog.plain
         )
-        XCTAssertTrue(name.hasPrefix("Vendor call — Acme"), "got \(name)")
+        XCTAssertTrue(name.hasPrefix("Vendor call — Acme_"), "got \(name)")
+        XCTAssertTrue(name.hasSuffix("-10m-intel.pdf"), "duration 600s should be 10 minutes, got \(name)")
         XCTAssertFalse(name.contains("Some AI Name"))
     }
 
@@ -552,13 +629,15 @@ final class ReportRenderingTests: XCTestCase {
     func testEmptyReportIsRecognized() {
         XCTAssertTrue(report().isEmpty)
         XCTAssertFalse(report(followUps: ["What about latency?"]).isEmpty)
+        XCTAssertFalse(report(transcript: [
+            .init(speaker: "Ada", formattedTimestamp: "0:01", text: "Hello")
+        ]).isEmpty)
     }
 
     // MARK: - Filenames
 
-    /// The tag exists so several templates of one meeting can sit in a folder
-    /// together. A duplicate or empty code silently reintroduces the
-    /// overwriting it was added to prevent, so this is checked mechanically.
+    /// Template codes still have to be unique — they label the picker even
+    /// though they are no longer part of the filename.
     func testTemplateCodesAreUniqueAndTwoLetters() {
         let codes = ReportTemplateCatalog.all.map(\.code)
         XCTAssertEqual(Set(codes).count, codes.count, "duplicate template code in \(codes)")
@@ -572,21 +651,25 @@ final class ReportRenderingTests: XCTestCase {
     }
 
     @MainActor
-    func testFilenameCarriesTheTemplateCodeSoExportsDoNotClobber() {
+    func testSuggestedFilenameUsesMeetingIntelligencePattern() {
+        let date = Calendar.current.date(from: DateComponents(year: 2026, month: 8, day: 18, hour: 12))!
         let meta = ReportModel.Meta(
-            title: "Architecture Braintrust",
-            date: Date(timeIntervalSince1970: 1_777_000_000),
-            duration: "48m", attendees: [], sourceApp: nil, generatedAt: .now
+            title: "North Campus Engineering Scope Review",
+            date: date,
+            duration: "47:00",
+            durationMinutes: 47,
+            attendees: [],
+            sourceApp: nil,
+            generatedAt: .now
         )
-        let names = ReportTemplateCatalog.all.map {
-            ReportExportService.suggestedFilename(for: meta, template: $0)
-        }
-        XCTAssertEqual(Set(names).count, names.count, "two templates suggest the same filename: \(names)")
-        XCTAssertTrue(names.allSatisfy { $0.hasSuffix(".pdf") })
-        XCTAssertTrue(
-            names.contains { $0.contains("(TJ)") },
-            "expected the Trajector tag in \(names)"
+        let pdf = ReportExportService.suggestedFilename(for: meta, template: ReportTemplateCatalog.plain)
+        XCTAssertEqual(pdf, "North Campus Engineering Scope Review_20260818-47m-intel.pdf")
+        let csv = ReportExportService.suggestedFilename(
+            for: meta,
+            template: ReportTemplateCatalog.plain,
+            fileExtension: "csv"
         )
+        XCTAssertEqual(csv, "North Campus Engineering Scope Review_20260818-47m-intel.csv")
     }
 
     @MainActor
@@ -595,6 +678,7 @@ final class ReportRenderingTests: XCTestCase {
             title: "Q3 / Q4 planning: part 2",
             date: Date(timeIntervalSince1970: 1_777_000_000),
             duration: "1h",
+            durationMinutes: 60,
             attendees: [],
             sourceApp: nil,
             generatedAt: .now
@@ -603,5 +687,13 @@ final class ReportRenderingTests: XCTestCase {
         XCTAssertFalse(name.contains("/"))
         XCTAssertFalse(name.contains(":"))
         XCTAssertTrue(name.hasSuffix(".pdf"))
+        XCTAssertTrue(name.contains("-intel.pdf"))
+    }
+
+    func testDurationMinutesRoundsToNearestMinute() {
+        XCTAssertEqual(ReportModelBuilder.durationMinutes(0), 0)
+        XCTAssertEqual(ReportModelBuilder.durationMinutes(47 * 60), 47)
+        XCTAssertEqual(ReportModelBuilder.durationMinutes(47 * 60 + 20), 47)
+        XCTAssertEqual(ReportModelBuilder.durationMinutes(47 * 60 + 40), 48)
     }
 }

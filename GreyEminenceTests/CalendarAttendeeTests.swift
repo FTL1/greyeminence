@@ -131,7 +131,7 @@ final class CalendarAttendeeTests: XCTestCase {
         let service = CalendarService()
         service.linkEvent(
             makeEvent(attendees: [
-                EventAttendee(name: "Matthew Purdon", email: "mdjpurdon@gmail.com", isCurrentUser: true),
+                EventAttendee(name: "Alex Morgan", email: "alex@org.com", isCurrentUser: true),
                 EventAttendee(name: "Sam Lee", email: "sam@org.com"),
             ]),
             to: meeting,
@@ -141,5 +141,23 @@ final class CalendarAttendeeTests: XCTestCase {
 
         let contacts = try context.fetch(FetchDescriptor<Contact>())
         XCTAssertEqual(contacts.map(\.name), ["Sam Lee"])       // no record for me
+    }
+
+    // MARK: - Cancelled events
+
+    func testCancellationIsDetectedFromTheTitlePrefix() {
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("Canceled: Weekly Design Session"))
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("Cancelled: Weekly sync"))
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("CANCELED: Shouty meeting"))
+        XCTAssertTrue(CalendarEvent.titleIndicatesCancellation("  Canceled: leading space"))
+    }
+
+    func testOrdinaryTitlesAreNotTreatedAsCancelled() {
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Weekly check-in"))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Discuss canceled orders"))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Cancellation policy review"))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation("Canceled"), "no colon, no cancellation")
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation(nil))
+        XCTAssertFalse(CalendarEvent.titleIndicatesCancellation(""))
     }
 }

@@ -10,11 +10,8 @@ struct ReportTemplate: Sendable, Equatable, Identifiable {
     /// Stable across renames — persisted settings and revisions key on it.
     let id: String
     var name: String
-    /// Two-letter tag appended to the exported filename, so the same meeting
-    /// exported under several templates lands as several files instead of
-    /// overwriting itself. Must be unique across the catalog — guarded by
-    /// `testTemplateCodesAreUniqueAndTwoLetters`, because a duplicate would
-    /// silently reintroduce exactly the clobbering this exists to prevent.
+    /// Two-letter tag shown in the template picker. Must be unique across
+    /// the catalog — guarded by `testTemplateCodesAreUniqueAndTwoLetters`.
     var code: String
     /// One line shown under the name in the template picker.
     var summary: String
@@ -73,7 +70,8 @@ struct ReportTemplate: Sendable, Equatable, Identifiable {
       section.ge-section.ge-actions
         ul.ge-action-list > li.ge-action.ge-action-open|.ge-action-done
           span.ge-action-text + span.ge-action-assignee
-      section.ge-section.ge-followups
+      section.ge-callout.ge-followups
+        h2.ge-callout-title
         ul.ge-followup-list > li.ge-followup
       section.ge-section.ge-appendix
         div.ge-share-session
@@ -110,7 +108,7 @@ enum ReportTemplateCatalog {
        web page and wrong for a designed report: without this the Trajector
        header prints white text on white paper, and every tinted panel
        vanishes. Measured 2026-08-12 — the navy header was invisible. */
-    html, body.ge-report, .ge-header, .ge-actions, .ge-toc, .ge-figure-image {
+    html, body.ge-report, .ge-header, .ge-actions, .ge-toc, .ge-figure-image, .ge-callout {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
@@ -134,6 +132,9 @@ enum ReportTemplateCatalog {
     .ge-figure-refs { margin: 6pt 0 0; }
     .ge-figure-ref + .ge-figure-ref { margin-left: 6pt; }
     .ge-figure-back { float: right; }
+    /* The open-questions callout leads the document, so it must not be
+       split across a page break if it can be helped. */
+    .ge-callout { break-inside: avoid; page-break-inside: avoid; }
     .ge-toc-list { counter-reset: ge-toc; }
     .ge-toc-item { break-inside: avoid; }
     """
@@ -207,6 +208,8 @@ enum ReportTemplateCatalog {
         .ge-figure-ref, .ge-figure-back { font-weight: 600; color: #0b5cad; }
         .ge-figure-refs::before { content: "See "; color: #555; font-size: 9pt; }
         .ge-utterance-time::after { content: "  "; white-space: pre; }
+        .ge-callout { margin: 0 0 18pt; padding: 8pt 0; border-top: 1pt solid #111; border-bottom: 1pt solid #111; }
+        .ge-callout-title { font-size: 10pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 6pt; }
         """
     )
 
@@ -296,6 +299,12 @@ enum ReportTemplateCatalog {
             content: "See "; font-family: -apple-system, sans-serif;
             font-size: 8.5pt; color: #666;
         }
+        .ge-callout { margin: 0 0 18pt; padding: 10pt 12pt; border: 1pt solid #1a1a1a; }
+        .ge-callout-title {
+            font-family: -apple-system, "Helvetica Neue", sans-serif;
+            font-size: 9pt; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; margin: 0 0 7pt;
+        }
         """,
         includesTableOfContents: true
     )
@@ -383,6 +392,14 @@ enum ReportTemplateCatalog {
         .ge-toc-item::before {
             counter-increment: ge-toc; content: counter(ge-toc) ".  ";
             color: #184997; font-weight: 700; font-variant-numeric: tabular-nums;
+        }
+        .ge-callout {
+            margin: 0 0 18pt; padding: 11pt 13pt;
+            background: #fdf3f4; border-left: 3pt solid #b52d38; border-radius: 3pt;
+        }
+        .ge-callout-title {
+            font-size: 9pt; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; color: #b52d38; margin: 0 0 7pt;
         }
         """ + flushMasthead,
         includesTableOfContents: true
@@ -511,6 +528,15 @@ enum ReportTemplateCatalog {
             font-family: ui-monospace, "SF Mono", Menlo, monospace;
             font-size: 8pt; color: #b7781f;
         }
+        .ge-callout {
+            margin: 0 0 20pt; padding: 11pt 14pt;
+            background: #FFF6E6; border-left: 2pt solid #d52b1e;
+        }
+        .ge-callout-title {
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+            font-size: 9pt; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; color: #d52b1e; margin: 0 0 7pt;
+        }
         """ + flushMasthead,
         includesTableOfContents: true
     )
@@ -609,6 +635,14 @@ enum ReportTemplateCatalog {
         .ge-toc-item::before {
             counter-increment: ge-toc; content: counter(ge-toc) "  ";
             color: #0b7285; font-weight: 600; font-variant-numeric: tabular-nums;
+        }
+        .ge-callout {
+            margin: 0 0 20pt; padding: 10pt 0 10pt 12pt;
+            border-left: 2pt solid #0b7285;
+        }
+        .ge-callout-title {
+            font-size: 8.5pt; font-weight: 600; letter-spacing: 0.1em;
+            text-transform: uppercase; color: #0b7285; margin: 0 0 7pt;
         }
         """,
         includesTableOfContents: true

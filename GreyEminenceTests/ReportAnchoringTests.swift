@@ -398,6 +398,52 @@ final class ReportAnchoringTests: XCTestCase {
         XCTAssertEqual(result.sections[0].figures.first?.caption, "original")
     }
 
+    // MARK: - Section selection
+
+    func testDeselectedSectionsAreDropped() {
+        let result = report(figures: []).keepingSections([1])
+        XCTAssertEqual(result.sections.map(\.id), [1])
+        XCTAssertEqual(result.sections.first?.title, "Q3 risks")
+    }
+
+    func testFiguresLoseTheirTieToADroppedSection() {
+        let kept = UUID(), orphaned = UUID()
+        let anchored = report(figures: [figure(kept, at: 30), figure(orphaned, at: 90)])
+            .applyingAnchors(
+                plan([
+                    .init(sectionIndex: 0, frameID: kept, caption: "schema"),
+                    .init(sectionIndex: 1, frameID: orphaned, caption: "burndown"),
+                ]),
+                figuresAtEnd: true
+            )
+        let result = anchored.keepingSections([0])
+
+        let figures = result.shareSessions[0].figures
+        XCTAssertEqual(figures.count, 2, "the screenshot itself should survive")
+        XCTAssertEqual(figures.first(where: { $0.id == kept })?.sectionIndex, 0)
+        XCTAssertNil(
+            figures.first(where: { $0.id == orphaned })?.sectionIndex,
+            "a figure tied to a dropped section would render a dead link"
+        )
+        XCTAssertNil(figures.first(where: { $0.id == orphaned })?.sectionTitle)
+    }
+
+    func testAnchoringThenFilteringKeepsFiguresOnTheRightSection() {
+        let id = UUID()
+        let result = report(figures: [figure(id, at: 30)])
+            .applyingAnchors(plan([.init(sectionIndex: 1, frameID: id, caption: "burndown")]))
+            .keepingSections([1])
+
+        XCTAssertEqual(result.sections.count, 1)
+        XCTAssertEqual(result.sections[0].figures.map(\.id), [id], "the figure followed the wrong section")
+    }
+
+    func testKeepingNoSectionsLeavesTheOtherBlocksAlone() {
+        let result = report(figures: []).keepingSections([])
+        XCTAssertTrue(result.sections.isEmpty)
+        XCTAssertEqual(result.shareSessions.count, 1, "shared screens are a separate switch")
+    }
+
     // MARK: - Cache validity
 
     /// Regenerating the analysis produces new sections, so an old plan would

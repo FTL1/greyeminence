@@ -23,7 +23,10 @@ struct GreyEminenceApp: App {
         // Register defaults so non-@AppStorage readers (UserDefaults.standard.bool)
         // see the intended default before the user has touched the toggle.
         UserDefaults.standard.register(defaults: [
-            "calendarIntegration": true
+            "calendarIntegration": true,
+            // Native tooltip delay in milliseconds. Icon-only chrome uses
+            // `.help(...)` so a one-second hover shows the control's name.
+            "NSInitialToolTipDelay": 1000
         ])
 
         let delegate = SparkleUpdaterDelegate()
@@ -54,6 +57,7 @@ struct GreyEminenceApp: App {
         controller.updater.automaticallyChecksForUpdates = false
         LogManager.send("Automatic update checks disabled (Debug build)", category: .update)
         #else
+        controller.updater.automaticallyChecksForUpdates = true
         DispatchQueue.main.async {
             controller.updater.checkForUpdatesInBackground()
         }
@@ -73,7 +77,7 @@ struct GreyEminenceApp: App {
         // exactly what V1→V2 is. Migration stages still exist in the plan
         // type for documentation and for future non-additive changes that
         // genuinely need custom handlers.
-        let schema = Schema(versionedSchema: SchemaV19.self)
+        let schema = Schema(versionedSchema: SchemaV24.self)
         let config = ModelConfiguration(
             "GreyEminence",
             schema: schema,
@@ -126,6 +130,9 @@ struct GreyEminenceApp: App {
                         EmbeddingBackfillService.scheduleAtLaunch(
                             mainContext: container.mainContext
                         )
+                        GrokLibrary.scheduleAtLaunch(
+                            mainContext: container.mainContext
+                        )
                         lifecycle.bind(
                             recordingViewModel: recordingViewModel,
                             modelContextProvider: { container.mainContext }
@@ -149,6 +156,12 @@ struct GreyEminenceApp: App {
             CommandGroup(replacing: .help) {
                 HelpMenuCommands()
             }
+            CommandMenu("View") {
+                Button("Export Debug Log…") {
+                    try? DevLogExporter.presentSavePanel()
+                }
+            }
+            MeetingsReanalyzeCommands()
         }
 
         // Help docs viewer — value-driven so the same window scene serves
@@ -161,7 +174,12 @@ struct GreyEminenceApp: App {
         }
         .windowResizability(.contentSize)
 
-        MenuBarExtra("Grey Eminence", systemImage: menuBarIcon) {
+        WindowGroup("Send feedback", id: "feedback") {
+            FeedbackSheet()
+        }
+        .windowResizability(.contentSize)
+
+        MenuBarExtra(AppIdentity.displayName, systemImage: menuBarIcon) {
             if let container = sharedModelContainer {
                 MenuBarView(viewModel: recordingViewModel)
                     .modelContainer(container)
@@ -197,7 +215,7 @@ private func seedInterviewDefaults(in context: ModelContext) {
     InterviewTemplateSeeder.seedIfEmpty(in: context)
 
     let seedVersion = UserDefaults.standard.integer(forKey: "interviewSeedVersion")
-    guard seedVersion < 4 else { return }
+    guard seedVersion < 5 else { return }
 
     // Seed role levels if empty
     let roleLevelDescriptor = FetchDescriptor<RoleLevel>()
@@ -240,7 +258,7 @@ private func seedInterviewDefaults(in context: ModelContext) {
     PersistenceGate.save(context, site: "seedInterviewDefaults/wipeOrg")
 
     seedOrganizationAndRubrics(in: context)
-    UserDefaults.standard.set(4, forKey: "interviewSeedVersion")
+    UserDefaults.standard.set(5, forKey: "interviewSeedVersion")
 }
 
 // MARK: - Organization & Rubric Seed Data
@@ -262,14 +280,14 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
 
     let appEng = Department(name: "Application Engineering", sortOrder: 0)
     context.insert(appEng)
-    let ipp = insertTeam("IPP", sortOrder: 0, department: appEng)
-    _ = insertTeam("Nexus", sortOrder: 1, department: appEng)
-    _ = insertTeam("Atomic Forms", sortOrder: 2, department: appEng)
-    _ = insertTeam("OLP", sortOrder: 3, department: appEng)
-    _ = insertTeam("Milo - Medical", sortOrder: 4, department: appEng)
-    _ = insertTeam("Milo - Disability", sortOrder: 5, department: appEng)
-    _ = insertTeam("Milo - Outreach Legal", sortOrder: 6, department: appEng)
-    _ = insertTeam("Benefit Karma", sortOrder: 7, department: appEng)
+    let productAlpha = insertTeam("Product Alpha", sortOrder: 0, department: appEng)
+    _ = insertTeam("Product Beta", sortOrder: 1, department: appEng)
+    _ = insertTeam("Forms", sortOrder: 2, department: appEng)
+    _ = insertTeam("Catalog", sortOrder: 3, department: appEng)
+    _ = insertTeam("Health — Clinical", sortOrder: 4, department: appEng)
+    _ = insertTeam("Health — Accessibility", sortOrder: 5, department: appEng)
+    _ = insertTeam("Health — Legal", sortOrder: 6, department: appEng)
+    _ = insertTeam("Benefits", sortOrder: 7, department: appEng)
 
     let dataSvc = Department(name: "Data Services", sortOrder: 1)
     context.insert(dataSvc)
@@ -285,10 +303,10 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
 
     // --- Roles ---
 
-    let roleEngII_IPP = InterviewRole(level: level("Engineer II"), department: appEng, team: ipp)
-    context.insert(roleEngII_IPP)
-    let roleEngIII_IPP = InterviewRole(level: level("Engineer III"), department: appEng, team: ipp)
-    context.insert(roleEngIII_IPP)
+    let roleEngII_Alpha = InterviewRole(level: level("Engineer II"), department: appEng, team: productAlpha)
+    context.insert(roleEngII_Alpha)
+    let roleEngIII_Alpha = InterviewRole(level: level("Engineer III"), department: appEng, team: productAlpha)
+    context.insert(roleEngIII_Alpha)
     let roleSrFE = InterviewRole(level: level("Engineer III"), department: platEng, team: platform, customTitle: "Senior Frontend Engineer")
     context.insert(roleSrFE)
     let roleEM_AppEng = InterviewRole(level: level("Engineering Manager I"), department: appEng)
@@ -302,13 +320,13 @@ private func seedOrganizationAndRubrics(in context: ModelContext) {
 
     // 1. General Engineering Interview (System Design + Coding)
     let generalRubric = Rubric(name: "General Engineering Interview")
-    generalRubric.role = roleEngII_IPP
+    generalRubric.role = roleEngII_Alpha
     context.insert(generalRubric)
     seedGeneralEngineeringRubric(generalRubric, in: context)
 
     // 2. Senior Engineering Interview (same structure, for Eng III)
     let seniorRubric = Rubric(name: "Senior Engineering Interview")
-    seniorRubric.role = roleEngIII_IPP
+    seniorRubric.role = roleEngIII_Alpha
     context.insert(seniorRubric)
     seedGeneralEngineeringRubric(seniorRubric, in: context)
 
@@ -413,7 +431,7 @@ private func seedSystemDesignRubric(_ rubric: Rubric, in context: ModelContext) 
         ("Started high-level, then drilled into details", "yes", 1),
         ("Cargo-culted a buzzword without justifying it (e.g., \"we'll use Kafka\")", "yes", -1),
         ("Cron job mentioned as the answer to a real-time problem", "yes", -1),
-        ("Surveys and Calls are the Same — collapsed two distinct flows into one when they shouldn't", "yes", 1),
+        ("Collapsed two distinct user flows into one when they shouldn't", "yes", 1),
     ].enumerated() {
         let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
         b.section = architecture
@@ -648,7 +666,7 @@ private func seedGeneralEngineeringRubric(_ rubric: Rubric, in context: ModelCon
         ("Too detailed non-functional", "yes", -1),
         ("High-level not ERD", "yes", 1),
         ("Cron Job Mentioned", "yes", -1),
-        ("Surveys and Calls are the Same", "yes", 1),
+        ("Collapsed two distinct user flows", "yes", 1),
     ].enumerated() {
         let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
         b.section = sd
@@ -739,7 +757,7 @@ private func seedEngineeringManagerRubric(_ rubric: Rubric, in context: ModelCon
         ("Too detailed non-functional", "yes", -1),
         ("High-level not ERD", "yes", 1),
         ("Cron Job Mentioned", "yes", -1),
-        ("Surveys and Calls are the Same", "yes", 1),
+        ("Collapsed two distinct user flows", "yes", 1),
     ].enumerated() {
         let b = RubricBonusSignal(label: label, expectedAnswer: expected, bonusValue: value, sortOrder: i)
         b.section = sd
@@ -829,7 +847,7 @@ struct DatabaseErrorView: View {
                 .foregroundStyle(.orange)
             Text("Could Not Open Database")
                 .font(.title2.weight(.semibold))
-            Text("Grey Eminence was unable to open its data store. This can happen after a corrupted update.\n\nYou can try deleting the database and restarting, or contact support.")
+            Text("\(AppIdentity.displayName) was unable to open its data store. This can happen after a corrupted update.\n\nYou can try deleting the database and restarting, or contact support.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 400)

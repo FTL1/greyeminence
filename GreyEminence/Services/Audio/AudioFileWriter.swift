@@ -22,8 +22,10 @@ actor AudioFileWriter {
     private let fileFormat: AVAudioFormat
     private var chunkIndex: Int = 0
     private var chunkURLsInternal: [URL] = []
-    /// Cached format used to start the first chunk. Needed so `checkpoint` can
-    /// open the next chunk without the caller re-specifying the format.
+    /// PCM format actually written to the file (float32, deinterleaved,
+    /// 1–2 ch, AAC-legal rate). Mic aggregate devices often tap as
+    /// interleaved / >2ch / Int16; AAC preflight rejects those with
+    /// `kExtAudioFileError_MaxPacketSizeUnknown` (-66567).
     private var startedFormat: AVAudioFormat?
     /// Rolling count of write failures. Callers use this to detect a persistent
     /// problem (e.g. full disk, encoder-format mismatch) and stop recording
@@ -44,8 +46,9 @@ actor AudioFileWriter {
     }
 
     func start(inputFormat: AVAudioFormat) throws {
-        try Self.preflightEncoder(for: inputFormat)
-        startedFormat = inputFormat
+        let writeFormat = Self.writeableFormat(from: inputFormat)
+        try Self.preflightEncoder(for: writeFormat)
+        startedFormat = writeFormat
         // If we're resuming an interrupted recording, the base URL and/or
         // its part siblings may already exist on disk from the prior session.
         // Writing into the base URL via AVAudioFile(forWriting:) would truncate
@@ -63,6 +66,7 @@ actor AudioFileWriter {
     /// startup can surface the real encoder error before the user commits an
     /// hour of audio to settings that silently reject every buffer.
     nonisolated static func preflightEncoder(for inputFormat: AVAudioFormat) throws {
+        let writeFormat = writeableFormat(from: inputFormat)
         let tmpURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ge-preflight-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: tmpURL) }
@@ -70,19 +74,21 @@ actor AudioFileWriter {
         do {
             let file = try AVAudioFile(
                 forWriting: tmpURL,
-                settings: encoderSettings(for: inputFormat),
-                commonFormat: inputFormat.commonFormat,
-                interleaved: inputFormat.isInterleaved
+                settings: encoderSettings(for: writeFormat),
+                commonFormat: writeFormat.commonFormat,
+                interleaved: writeFormat.isInterleaved
             )
-            guard let probe = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: 1024) else {
-                throw AudioFileWriterError.encoderPreflightFailed("buffer alloc failed")
+            guard let probe = AVAudioPCMBuffer(pcmFormat: writeFormat, frameCapacity: 1024) else {
+                throw AudioFileWriterError.encoderPreflightFailed("buffer alloc failed for \(describeFormat(writeFormat))")
             }
             probe.frameLength = 1024
             try file.write(from: probe)
         } catch let err as AudioFileWriterError {
             throw err
         } catch {
-            throw AudioFileWriterError.encoderPreflightFailed(error.localizedDescription)
+            throw AudioFileWriterError.encoderPreflightFailed(
+                "\(error.localizedDescription) [in \(describeFormat(inputFormat)) → \(describeFormat(writeFormat))]"
+            )
         }
 
         do {
@@ -97,7 +103,8 @@ actor AudioFileWriter {
             throw AudioFileWriterError.notStarted
         }
         do {
-            try audioFile.write(from: buffer)
+            let toWrite = try converted(buffer)
+            try audioFile.write(from: toWrite)
             consecutiveWriteFailures = 0
         } catch {
             consecutiveWriteFailures += 1
@@ -149,14 +156,94 @@ actor AudioFileWriter {
     // MARK: - Private
 
     private func openChunk(inputFormat: AVAudioFormat) throws {
+        let writeFormat = Self.writeableFormat(from: inputFormat)
         let url = Self.chunkURL(base: baseURL, index: chunkIndex)
         audioFile = try AVAudioFile(
             forWriting: url,
-            settings: Self.encoderSettings(for: inputFormat),
-            commonFormat: inputFormat.commonFormat,
-            interleaved: inputFormat.isInterleaved
+            settings: Self.encoderSettings(for: writeFormat),
+            commonFormat: writeFormat.commonFormat,
+            interleaved: writeFormat.isInterleaved
         )
         chunkURLsInternal.append(url)
+    }
+
+    private func converted(_ buffer: AVAudioPCMBuffer) throws -> AVAudioPCMBuffer {
+        guard let writeFormat = startedFormat else { return buffer }
+        if Self.formatsMatch(buffer.format, writeFormat) { return buffer }
+        return try Self.convertBuffer(buffer, to: writeFormat)
+    }
+
+    /// AAC-safe PCM: float32, deinterleaved, 1–2 channels, legal sample rate.
+    nonisolated static func writeableFormat(from input: AVAudioFormat) -> AVAudioFormat {
+        let channels = AVAudioChannelCount(min(max(Int(input.channelCount), 1), 2))
+        let rate = snapSampleRate(input.sampleRate)
+        return AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: rate,
+            channels: channels,
+            interleaved: false
+        )!
+    }
+
+    nonisolated static func snapSampleRate(_ raw: Double) -> Double {
+        var rate = raw
+        if !rate.isFinite || rate < 8000 { rate = 16000 }
+        if rate > 48000 { rate = 48000 }
+        let allowed: [Double] = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000]
+        return allowed.min(by: { abs($0 - rate) < abs($1 - rate) }) ?? 48000
+    }
+
+    nonisolated static func formatsMatch(_ a: AVAudioFormat, _ b: AVAudioFormat) -> Bool {
+        a.sampleRate == b.sampleRate
+            && a.channelCount == b.channelCount
+            && a.commonFormat == b.commonFormat
+            && a.isInterleaved == b.isInterleaved
+    }
+
+    nonisolated static func describeFormat(_ format: AVAudioFormat) -> String {
+        let sample: String
+        switch format.commonFormat {
+        case .pcmFormatFloat32: sample = "f32"
+        case .pcmFormatFloat64: sample = "f64"
+        case .pcmFormatInt16: sample = "i16"
+        case .pcmFormatInt32: sample = "i32"
+        default: sample = "other"
+        }
+        return "\(Int(format.sampleRate))Hz \(format.channelCount)ch \(sample) \(format.isInterleaved ? "interleaved" : "deinterleaved")"
+    }
+
+    nonisolated static func convertBuffer(
+        _ buffer: AVAudioPCMBuffer,
+        to target: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer {
+        guard let converter = AVAudioConverter(from: buffer.format, to: target) else {
+            throw AudioFileWriterError.encoderPreflightFailed(
+                "no converter \(describeFormat(buffer.format)) → \(describeFormat(target))"
+            )
+        }
+        let ratio = target.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * max(ratio, 1) + 32)
+        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: max(capacity, 1)) else {
+            throw AudioFileWriterError.encoderPreflightFailed("convert buffer alloc failed")
+        }
+        var error: NSError?
+        var consumed = false
+        let status = converter.convert(to: output, error: &error) { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
+            outStatus.pointee = .haveData
+            return buffer
+        }
+        if let error {
+            throw AudioFileWriterError.encoderPreflightFailed("convert: \(error.localizedDescription)")
+        }
+        if status == .error {
+            throw AudioFileWriterError.encoderPreflightFailed("convert status error")
+        }
+        return output
     }
 
     /// Speech-tier AAC. AAC-LC has floors both per-channel and per-sample-
@@ -168,15 +255,16 @@ actor AudioFileWriter {
     /// Bitrate scales with channels × rate factor so we stay above the
     /// encoder floor for 1–2 channels at 16–48 kHz.
     nonisolated static func encoderSettings(for inputFormat: AVAudioFormat) -> [String: Any] {
-        let channels = max(Int(inputFormat.channelCount), 1)
-        let outputRate = min(inputFormat.sampleRate, 48000)
-        let rateMultiplier = max(2, Int(ceil(outputRate / 24000.0)))
-        let bitrate = 16000 * channels * rateMultiplier
+        let writeable = writeableFormat(from: inputFormat)
+        let channels = Int(writeable.channelCount)
+        // Stay well above AAC-LC's per-channel floor. Do not combine
+        // AVEncoderAudioQualityKey with an explicit bitrate — they fight
+        // and some Macs then throw -66567 (max packet size unknown).
+        let bitrate = 64_000 * channels
         return [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: outputRate,
-            AVNumberOfChannelsKey: inputFormat.channelCount,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+            AVSampleRateKey: writeable.sampleRate,
+            AVNumberOfChannelsKey: channels,
             AVEncoderBitRateKey: bitrate,
         ]
     }

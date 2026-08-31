@@ -1,9 +1,9 @@
 import XCTest
 @testable import Grey_Eminence
 
-/// Ownership filter for action items: the tool serves one user, so items
-/// clearly owned by other attendees are dropped — except in a 1:1, where the
-/// other person's commitments are promises to the user.
+/// Pane filter for action items: the tool shows the user their own work.
+/// Other attendees' commitments are stored (for dossiers) but hidden here
+/// except in a 1:1, where the other person's commitments are promises to the user.
 final class ActionItemOwnershipTests: XCTestCase {
 
     private let multiPersonRoster = MeetingRoster(myName: "Matthew Purdon", otherAttendees: ["Harsh", "Carlos", "Priya"])
@@ -20,6 +20,12 @@ final class ActionItemOwnershipTests: XCTestCase {
         XCTAssertTrue(AIIntelligenceService.keepsActionItem(assignee: "Matthew Purdon", roster: multiPersonRoster))
         // First-name reference from the transcript still matches My Profile.
         XCTAssertTrue(AIIntelligenceService.keepsActionItem(assignee: "Matthew", roster: multiPersonRoster))
+        let renamed = MeetingRoster(
+            myName: "Matthew Purdon",
+            otherAttendees: ["Harsh", "Carlos"],
+            myAliases: ["Alex"]
+        )
+        XCTAssertTrue(AIIntelligenceService.keepsActionItem(assignee: "Alex", roster: renamed))
     }
 
     func testDiarizationPlaceholdersCountAsUnclearOwnership() {

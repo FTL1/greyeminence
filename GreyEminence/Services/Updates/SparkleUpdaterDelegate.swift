@@ -61,8 +61,13 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
     // MARK: - SPUUpdaterDelegate
 
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
-        Self.log("Feed URL requested by updater")
-        return nil  // let Sparkle use the Info.plist value
+        if AppIdentity.isGreyConseilBuild {
+            let url = AppIdentity.updatesFeedURL
+            Self.log("Feed URL -> \(url)")
+            return url
+        }
+        Self.log("Feed URL requested by updater (Info.plist)")
+        return nil
     }
 
     nonisolated func updaterMayCheck(forUpdates updater: SPUUpdater) -> Bool {
@@ -76,7 +81,7 @@ final class SparkleUpdaterDelegate: NSObject, SPUUpdaterDelegate, @preconcurrenc
         Self.log("updaterMayCheckForUpdates -> false (Debug build)")
         return false
         #else
-        Self.log("updaterMayCheckForUpdates -> true")
+        Self.log("updaterMayCheckForUpdates -> true (\(AppIdentity.displayName))")
         return true
         #endif
     }

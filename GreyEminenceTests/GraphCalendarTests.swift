@@ -11,6 +11,21 @@ final class GraphCalendarTests: XCTestCase {
     /// RFC 7636 Appendix B test vector: verifier -> S256 code challenge.
     /// Exercises the exact `Data.base64URLEncodedString()` + SHA256 path the
     /// auth service uses to build `code_challenge`.
+    func testClientIDFromDefaultsCountsAsConfigured() {
+        let key = GraphConfig.clientIDDefaultsKey
+        let previous = UserDefaults.standard.string(forKey: key)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+        UserDefaults.standard.set("11111111-2222-3333-4444-555555555555", forKey: key)
+        XCTAssertTrue(GraphConfig.isConfigured)
+        XCTAssertEqual(GraphConfig.clientID, "11111111-2222-3333-4444-555555555555")
+    }
+
     func testPKCEChallengeMatchesRFCVector() {
         let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
         let expected = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
@@ -65,6 +80,20 @@ final class GraphCalendarTests: XCTestCase {
         """
         let e = try XCTUnwrap(try GraphCalendarProvider.decodeEvents(from: Data(json.utf8)).first)
         XCTAssertEqual(e.attendees.map(\.name), ["Sam Lee"])  // room dropped
+    }
+
+    func testOrganizerIsIncludedWhenMissingFromAttendees() throws {
+        let json = """
+        {"value":[
+          {"id":"AAA","subject":"Planning","type":"singleInstance",
+           "start":{"dateTime":"2026-06-01T15:00:00.0000000","timeZone":"UTC"},
+           "end":{"dateTime":"2026-06-01T15:30:00.0000000","timeZone":"UTC"},
+           "organizer":{"emailAddress":{"name":"Bob Dipshit","address":"bob@org.com"}},
+           "attendees":[{"emailAddress":{"name":"Sam Lee","address":"sam@org.com"}}]}
+        ]}
+        """
+        let e = try XCTUnwrap(try GraphCalendarProvider.decodeEvents(from: Data(json.utf8)).first)
+        XCTAssertEqual(e.attendees.map(\.name), ["Bob Dipshit", "Sam Lee"])
     }
 
     func testRecurringOccurrenceUsesSeriesMasterAsLinkIdentifier() throws {
@@ -145,5 +174,22 @@ final class GraphCalendarTests: XCTestCase {
         """
         let events = try GraphCalendarProvider.decodeEvents(from: Data(json.utf8))
         XCTAssertTrue(events.isEmpty)
+    }
+
+    func testGraphEventDecodesCancellationFlag() throws {
+        let json = """
+        {"id":"abc","subject":"Design Session","isCancelled":true}
+        """
+        let event = try JSONDecoder().decode(GraphEvent.self, from: Data(json.utf8))
+        XCTAssertEqual(event.isCancelled, true)
+    }
+
+    func testMissingCancellationFlagIsNotCancelled() throws {
+        let json = """
+        {"id":"abc","subject":"Design Session"}
+        """
+        let event = try JSONDecoder().decode(GraphEvent.self, from: Data(json.utf8))
+        XCTAssertNil(event.isCancelled)
+        XCTAssertFalse(event.isCancelled == true)
     }
 }

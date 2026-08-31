@@ -1,5 +1,19 @@
 import SwiftUI
 
+enum TopicMapBrowseMode: String, CaseIterable {
+    case topics
+    case people
+    case speakers
+
+    var label: String {
+        switch self {
+        case .topics: "Topics"
+        case .people: "People"
+        case .speakers: "Speakers"
+        }
+    }
+}
+
 struct TopicNode: Identifiable {
     let id: String          // normalized (lowercased) topic label
     let label: String       // display form (most frequent casing)

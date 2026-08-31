@@ -9,11 +9,29 @@ struct ScreenShareSettingsView: View {
     @AppStorage(ScreenShareSettings.analysisEnabledKey) private var analysisEnabled = true
     @AppStorage(ScreenShareSettings.maxAnalyzedFramesKey) private var maxAnalyzedFrames = ScreenShareSettings.defaultMaxAnalyzedFrames
     @AppStorage(ScreenShareSettings.frameAnalysisModelKey) private var frameAnalysisModel = ScreenShareSettings.defaultFrameAnalysisModel
+    @AppStorage("aiProvider") private var aiProvider = "anthropic"
 
     @State private var audioManager = AudioSessionManager()
     @State private var framesBytesOnDisk: Int64?
     @State private var showPurgeConfirmation = false
     @State private var purgeResult: String?
+
+    private var isXAIProvider: Bool { aiProvider == "xai" }
+
+    /// Under xAI, a leftover Claude/Haiku stored value would show as an
+    /// unmatched picker tag. Surface it as "same as main" until the user
+    /// picks a Grok ID.
+    private var frameModelSelection: Binding<String> {
+        Binding(
+            get: {
+                if isXAIProvider, AIClientFactory.isClaudeFamilyModelID(frameAnalysisModel) {
+                    return ""
+                }
+                return frameAnalysisModel
+            },
+            set: { frameAnalysisModel = $0 }
+        )
+    }
 
     var body: some View {
         Form {
@@ -41,6 +59,7 @@ struct ScreenShareSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .helpTip(.settingsScreenCapture)
 
             Toggle(isOn: $autoDetect) {
                 VStack(alignment: .leading) {
@@ -50,6 +69,7 @@ struct ScreenShareSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .helpTip(.settingsScreenAutoDetect)
             .disabled(!captureEnabled)
 
             HStack {
@@ -78,8 +98,10 @@ struct ScreenShareSettingsView: View {
         Section {
             Toggle(isOn: $analysisEnabled) {
                 VStack(alignment: .leading) {
-                    Text("Analyze frames with Claude")
-                    Text("Sends meaningfully-changed frames to Claude for a short description of what's on screen, using your API key from AI settings. Without this, frames still get on-device text recognition.")
+                    Text(isXAIProvider ? "Analyze frames with Grok" : "Analyze frames with Claude")
+                    Text(isXAIProvider
+                         ? "Sends meaningfully-changed frames to Grok for a short description of what's on screen, using your xAI key from AI settings. Without this, frames still get on-device text recognition."
+                         : "Sends meaningfully-changed frames to Claude for a short description of what's on screen, using your API key from AI settings. Without this, frames still get on-device text recognition.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -93,16 +115,26 @@ struct ScreenShareSettingsView: View {
                 }
             }
             .disabled(!captureEnabled || !analysisEnabled)
-            Text("Caps Claude usage per meeting. Frames beyond the cap are kept with on-device text only.")
+            Text(isXAIProvider
+                 ? "Caps API usage per meeting. Frames beyond the cap are kept with on-device text only."
+                 : "Caps Claude usage per meeting. Frames beyond the cap are kept with on-device text only.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Picker("Frame analysis model", selection: $frameAnalysisModel) {
-                Text("Haiku 4.5 (recommended)").tag(ScreenShareSettings.defaultFrameAnalysisModel)
-                Text("Same as main model").tag("")
+            Picker("Frame analysis model", selection: frameModelSelection) {
+                if isXAIProvider {
+                    Text("Same as main model").tag("")
+                    Text("Grok 4.6").tag("grok-4.6")
+                    Text("Grok 4.5").tag("grok-4.5")
+                } else {
+                    Text("Haiku 4.5 (recommended)").tag(ScreenShareSettings.defaultFrameAnalysisModel)
+                    Text("Same as main model").tag("")
+                }
             }
             .disabled(!captureEnabled || !analysisEnabled)
-            Text("Haiku describes frames at a fraction of the main model's cost. Meeting summaries and session recaps always use the main model.")
+            Text(isXAIProvider
+                 ? "Claude model IDs are not sent to xAI. Meeting summaries and session recaps always use the main model."
+                 : "Haiku describes frames at a fraction of the main model's cost. Meeting summaries and session recaps always use the main model.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -179,7 +211,7 @@ struct ScreenShareSettingsView: View {
                     }
                 }
             }
-            Text("The same permission already covers system-audio capture — granting it once enables both.")
+            Text("The same permission already covers system-audio capture — granting it once enables both. If this still says Not granted after System Settings shows ON, open Settings → Developer → Capture permissions and run the test. Each new Grey Conseil DMG is a new identity.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {

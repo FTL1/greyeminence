@@ -65,6 +65,20 @@ struct LiveInterviewView: View {
                 LiveTranscriptView(
                     segments: recordingVM.segments,
                     segmentConfidence: recordingVM.segmentConfidence,
+                    onRenameSpeaker: { speaker, name, saveAsDefault in
+                        recordingVM.renameSpeaker(speaker, to: name, saveAsDefault: saveAsDefault)
+                    },
+                    onLinkSpeakerToContact: { speaker, contact in
+                        recordingVM.linkSpeakerToContact(speaker, contact: contact)
+                    },
+                    attendees: recordingVM.currentMeeting?.attendees ?? [],
+                    onEnrollVoicePrint: { speaker in
+                        recordingVM.enrollVoicePrint(for: speaker)
+                    },
+                    voicePrintProgress: recordingVM.voicePrintProgress,
+                    voicePrintState: { speaker, contacts in
+                        recordingVM.voicePrintState(for: speaker, contacts: contacts)
+                    },
                     scrollToSegmentID: Binding(
                         get: { interviewViewModel.scrollToSegmentID },
                         set: { interviewViewModel.scrollToSegmentID = $0 }

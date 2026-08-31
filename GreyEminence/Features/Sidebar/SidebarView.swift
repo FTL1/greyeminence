@@ -21,6 +21,7 @@ struct SidebarView: View {
                 VStack(spacing: 2) {
                     sidebarItem(.dashboard)
                     sidebarItem(.ask)
+                    sidebarItem(.find)
 
                     sectionHeader("Recording")
                     sidebarItem(.recording)
@@ -28,9 +29,14 @@ struct SidebarView: View {
                     sectionHeader("Library")
                     sidebarItem(.meetings)
                     sidebarItem(.archive)
-                    tasksItem
                     sidebarItem(.interviews)
                     sidebarItem(.people)
+
+                    sectionHeader("Intelligence")
+                    sidebarItem(.insights)
+                    sidebarItem(.questions)
+                    tasksItem
+                    sidebarItem(.summaries)
                     sidebarItem(.topicMap)
                     if developerToolsEnabled {
                         sidebarItem(.activityLog)
@@ -48,6 +54,17 @@ struct SidebarView: View {
         .frame(width: isExpanded ? expandedWidth : collapsedWidth)
         .background(.background)
         .animation(.easeInOut(duration: 0.2), value: isExpanded)
+        .focusedValue(\.currentHelpPane, selection?.rawValue ?? "Main window")
+        .onAppear {
+            if let selection {
+                UserDefaults.standard.set(selection.rawValue, forKey: "lastHelpPane")
+            }
+        }
+        .onChange(of: selection) { _, dest in
+            if let dest {
+                UserDefaults.standard.set(dest.rawValue, forKey: "lastHelpPane")
+            }
+        }
     }
 
     // MARK: - Toggle
@@ -66,6 +83,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut("s", modifiers: .command)
+            .helpTip(.sidebarCollapse)
             if !isExpanded { Spacer() }
         }
         .padding(.horizontal, 10)
@@ -121,6 +139,7 @@ struct SidebarView: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .help(destination.helpText)
     }
 
     // MARK: - Tasks Item (with badge)
@@ -172,6 +191,7 @@ struct SidebarView: View {
             .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .help(destination.helpText)
     }
 
     // MARK: - Settings Button (bottom)

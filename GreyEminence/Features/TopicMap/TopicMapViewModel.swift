@@ -9,6 +9,11 @@ final class TopicMapViewModel {
     var selectedTopicID: String?
     var hoveredTopicID: String?
     var searchText: String = ""
+    var browseMode: TopicMapBrowseMode = .topics
+    var selectedPersonID: UUID?
+    var selectedSpeakerID: String?
+    private(set) var rosterPeople: [TopicMapRoster.Person] = []
+    private(set) var rosterSpeakers: [TopicMapRoster.SpeakerRow] = []
 
     // Zoom/pan
     var scale: CGFloat = 1.0
@@ -133,6 +138,11 @@ final class TopicMapViewModel {
         nodes = newNodes
         edges = newEdges
         lastCanvasSize = canvasSize
+        let unique = TopicMapRoster.uniqueMeetings(from: topicMeetings)
+        rosterPeople = TopicMapRoster.people(in: unique)
+        rosterSpeakers = TopicMapRoster.speakers(in: unique)
+        selectedPersonID = nil
+        selectedSpeakerID = nil
 
         // Reset view + focus state
         scale = 1.0
@@ -247,6 +257,8 @@ final class TopicMapViewModel {
             setSelectedTopic((selectedTopicID == id) ? nil : id)
         } else {
             setSelectedTopic(nil)
+            selectedPersonID = nil
+            selectedSpeakerID = nil
         }
     }
 
@@ -255,6 +267,11 @@ final class TopicMapViewModel {
     /// detail panel — behaves consistently.
     func setSelectedTopic(_ id: String?) {
         guard id != selectedTopicID else { return }
+        if id != nil {
+            selectedPersonID = nil
+            selectedSpeakerID = nil
+            browseMode = .topics
+        }
         selectedTopicID = id
         if id != nil {
             enterFocus()
@@ -383,7 +400,20 @@ final class TopicMapViewModel {
     var searchMatches: Set<String> {
         guard !searchText.isEmpty else { return [] }
         let query = searchText.lowercased()
-        return Set(nodes.filter { $0.label.lowercased().contains(query) }.map(\.id))
+        var matches = Set(nodes.filter { $0.label.lowercased().contains(query) }.map(\.id))
+        let personIDs = Set(
+            rosterPeople.filter { $0.name.lowercased().contains(query) }.flatMap(\.meetingIDs)
+        )
+        let speakerIDs = Set(
+            rosterSpeakers.filter { $0.displayName.lowercased().contains(query) }.flatMap(\.meetingIDs)
+        )
+        let related = personIDs.union(speakerIDs)
+        if !related.isEmpty {
+            for node in nodes where !node.meetingIDs.isDisjoint(with: related) {
+                matches.insert(node.id)
+            }
+        }
+        return matches
     }
 
     var isSearchActive: Bool { !searchText.isEmpty }
@@ -394,6 +424,9 @@ final class TopicMapViewModel {
     }
 
     func nodeOpacity(for node: TopicNode) -> Double {
+        if let filter = relatedMeetingFilter {
+            return node.meetingIDs.isDisjoint(with: filter) ? 0.10 : 1.0
+        }
         if isSearchActive {
             return searchMatches.contains(node.id) ? 1.0 : 0.08
         }
@@ -408,6 +441,13 @@ final class TopicMapViewModel {
     }
 
     func edgeOpacity(for edge: TopicEdge) -> Double {
+        if let filter = relatedMeetingFilter {
+            let source = nodes[edge.sourceIndex]
+            let target = nodes[edge.targetIndex]
+            let sourceHit = !source.meetingIDs.isDisjoint(with: filter)
+            let targetHit = !target.meetingIDs.isDisjoint(with: filter)
+            return (sourceHit && targetHit) ? 0.35 : 0.0
+        }
         if isSearchActive {
             let s = searchMatches.contains(nodes[edge.sourceIndex].id)
             let t = searchMatches.contains(nodes[edge.targetIndex].id)
@@ -446,8 +486,82 @@ final class TopicMapViewModel {
     }
 
     var selectedMeetings: [Meeting] {
-        guard let node = selectedNode else { return [] }
-        return topicMeetings[node.label] ?? []
+        if let node = selectedNode {
+            return topicMeetings[node.label] ?? []
+        }
+        if let filter = relatedMeetingFilter {
+            return TopicMapRoster.uniqueMeetings(from: topicMeetings)
+                .filter { filter.contains($0.id) }
+                .sorted { $0.date > $1.date }
+        }
+        return []
+    }
+
+    var relatedMeetingFilter: Set<UUID>? {
+        if selectedTopicID != nil { return nil }
+        if let person = selectedPerson { return person.meetingIDs }
+        if let speaker = selectedSpeaker { return speaker.meetingIDs }
+        return nil
+    }
+
+    var selectedPerson: TopicMapRoster.Person? {
+        guard let id = selectedPersonID else { return nil }
+        return rosterPeople.first { $0.id == id }
+    }
+
+    var selectedSpeaker: TopicMapRoster.SpeakerRow? {
+        guard let id = selectedSpeakerID else { return nil }
+        return rosterSpeakers.first { $0.id == id }
+    }
+
+    var showsDetail: Bool {
+        selectedTopicID != nil || selectedPersonID != nil || selectedSpeakerID != nil
+    }
+
+    var peopleForSelection: [TopicMapRoster.Person] {
+        TopicMapRoster.people(in: selectedMeetings)
+    }
+
+    var speakersForSelection: [TopicMapRoster.SpeakerRow] {
+        TopicMapRoster.speakers(in: selectedMeetings)
+    }
+
+    var actionsForSelection: [ActionItem] {
+        TopicMapRoster.actions(in: selectedMeetings)
+    }
+
+    var topTopicsForSelection: [(label: String, count: Int)] {
+        guard let filter = relatedMeetingFilter else { return [] }
+        return TopicMapRoster.topTopics(meetingIDs: filter, topicMeetings: topicMeetings)
+    }
+
+    func setBrowseMode(_ mode: TopicMapBrowseMode) {
+        browseMode = mode
+        switch mode {
+        case .topics:
+            selectedPersonID = nil
+            selectedSpeakerID = nil
+        case .people:
+            setSelectedTopic(nil)
+            selectedSpeakerID = nil
+        case .speakers:
+            setSelectedTopic(nil)
+            selectedPersonID = nil
+        }
+    }
+
+    func setSelectedPerson(_ id: UUID?) {
+        selectedPersonID = id
+        selectedSpeakerID = nil
+        if selectedTopicID != nil { setSelectedTopic(nil) }
+        browseMode = .people
+    }
+
+    func setSelectedSpeaker(_ id: String?) {
+        selectedSpeakerID = id
+        selectedPersonID = nil
+        if selectedTopicID != nil { setSelectedTopic(nil) }
+        browseMode = .speakers
     }
 
     struct Neighbour: Identifiable, Hashable {

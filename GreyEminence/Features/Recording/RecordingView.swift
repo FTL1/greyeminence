@@ -9,22 +9,11 @@ struct RecordingView: View {
     /// intelligence view fills the body and the transcript is expected to live
     /// in a separate pane (e.g. the inspector).
     var showsTranscript: Bool = true
+    @State private var isEditingRecordingTitle = false
 
     var body: some View {
         VStack(spacing: 0) {
             RecordingToolbar(viewModel: viewModel, modelContext: modelContext)
-
-            if viewModel.state != .idle, let meeting = viewModel.currentMeeting {
-                Divider()
-                MeetingAttendeesRow(meeting: meeting)
-                    .padding(.horizontal)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.bar)
-                    .onChange(of: meeting.attendees.count) { _, _ in
-                        viewModel.speakerContactMapper.prepopulate(from: meeting.attendees)
-                    }
-            }
 
             Divider()
 
@@ -33,7 +22,39 @@ struct RecordingView: View {
             } else if showsTranscript {
                 LiveTranscriptView(
                     segments: viewModel.segments,
-                    segmentConfidence: viewModel.segmentConfidence
+                    segmentConfidence: viewModel.segmentConfidence,
+                    onRenameSpeaker: { speaker, name, saveAsDefault in
+                        viewModel.renameSpeaker(speaker, to: name, saveAsDefault: saveAsDefault)
+                    },
+                    onLinkSpeakerToContact: { speaker, contact in
+                        viewModel.linkSpeakerToContact(speaker, contact: contact)
+                    },
+                    roster: viewModel.speakerRoster,
+                    showsRoster: false,
+                    onAssignVoice: { voice, seat in
+                        viewModel.assignDetectedVoice(voice, to: seat)
+                    },
+                    onPaintSegment: { id in
+                        if let seat = viewModel.speakerRoster.paintSeat {
+                            viewModel.tagSegment(id, as: seat)
+                        }
+                    },
+                    onAddedPerson: { _, contact in
+                        if let meeting = viewModel.currentMeeting {
+                            viewModel.applyRosterToMeeting(meeting, in: modelContext)
+                            if let contact, !meeting.attendees.contains(where: { $0.id == contact.id }) {
+                                meeting.attendees.append(contact)
+                            }
+                        }
+                    },
+                    attendees: viewModel.currentMeeting?.attendees ?? [],
+                    onEnrollVoicePrint: { speaker in
+                        viewModel.enrollVoicePrint(for: speaker)
+                    },
+                    voicePrintProgress: viewModel.voicePrintProgress,
+                    voicePrintState: { speaker, contacts in
+                        viewModel.voicePrintState(for: speaker, contacts: contacts)
+                    }
                 )
             } else {
                 LiveMeetingIntelligenceView(
@@ -45,7 +66,8 @@ struct RecordingView: View {
                     shareObservations: viewModel.screenObservationLog,
                     isCapturingShare: {
                         if case .capturing = viewModel.screenCaptureState { true } else { false }
-                    }()
+                    }(),
+                    meeting: viewModel.currentMeeting
                 )
             }
 
@@ -55,8 +77,31 @@ struct RecordingView: View {
             }
         }
         .navigationTitle(viewModel.currentMeeting?.title ?? "New Recording")
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                if let meeting = viewModel.currentMeeting {
+                    MeetingTitleLabel(
+                        meeting: meeting,
+                        isEditing: $isEditingRecordingTitle,
+                        font: .headline,
+                        weight: .semibold,
+                        singleClickStartsEditing: true
+                    )
+                    .frame(minWidth: 180, maxWidth: 420)
+                } else {
+                    Text("New Recording")
+                        .font(.headline)
+                }
+            }
+        }
+        .onChange(of: viewModel.currentMeeting?.attendees.count) { _, _ in
+            guard let meeting = viewModel.currentMeeting else { return }
+            viewModel.speakerContactMapper.prepopulate(from: meeting.attendees)
+            viewModel.seedRoster(from: meeting)
+        }
         .task {
             await TranscriptionCoordinator.preloadModels()
+            await viewModel.promptForMicrophoneIfNeeded()
         }
         // NOTE: the calendar-event picker sheet is presented at the ContentView
         // root, not here — a recording can be started from the menu bar or the
@@ -100,6 +145,7 @@ struct RecordingView: View {
             .buttonStyle(.borderedProminent)
             .tint(.red)
             .keyboardShortcut("r", modifiers: .command)
+            .helpTip(.startRecording)
 
             Spacer()
         }

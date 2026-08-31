@@ -122,9 +122,9 @@ struct ClaudeAPIClient: AIClient, Sendable {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.httpBody = try JSONEncoder().encode(body)
         // Larger max_tokens (8192) means generation can run longer, so the
-        // per-request ceiling is 60s. Still inside the outer 90s withTimeout
+        // per-request ceiling is 120s. Still inside the outer withTimeout
         // that wraps each individual sendMessage attempt.
-        request.timeoutInterval = 60
+        request.timeoutInterval = 120
 
         return request
     }

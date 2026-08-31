@@ -80,15 +80,31 @@ actor ScreenFrameAnalysisService {
 
     var analysisModelIdentifier: String { client.modelIdentifier }
 
-    /// Queue frames for the next batch. Returns IDs refused because the
-    /// per-meeting budget is exhausted (callers mark those rows `skipped`).
+    /// Queue frames for the next batch. Returns IDs refused (budget exhausted
+    /// or a blank white/black capture). Callers mark those rows `skipped`.
     func enqueue(_ frames: [FrameSnapshot]) -> [UUID] {
         guard !budgetExhausted else {
             LogManager.send("Frame analysis enqueue refused (\(frames.count) frame(s)): budget exhausted", category: .screen, meetingID: meetingID)
             return frames.map(\.frameID)
         }
-        pending.append(contentsOf: frames)
-        return []
+        var kept: [FrameSnapshot] = []
+        var blank: [UUID] = []
+        for frame in frames {
+            if ScreenFrameTriage.isBlankJPEG(frame.jpegData) {
+                blank.append(frame.frameID)
+            } else {
+                kept.append(frame)
+            }
+        }
+        if !blank.isEmpty {
+            LogManager.send(
+                "Skipped \(blank.count) blank screen frame(s) — not sent for vision analysis",
+                category: .screen,
+                meetingID: meetingID
+            )
+        }
+        pending.append(contentsOf: kept)
+        return blank
     }
 
     /// Analyze one batch if anything is pending. Drains the entire pending

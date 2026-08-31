@@ -5,6 +5,7 @@ import ImageIO
 // SCShareableContent — without this the release build rejects every
 // `try await SCShareableContent...` call from actor-isolated code.
 @preconcurrency import ScreenCaptureKit
+import CoreVideo
 import UniformTypeIdentifiers
 
 // MARK: - Events & value types
@@ -113,6 +114,7 @@ actor ScreenShareCaptureService {
     private var config = Config()
     private var suspended = false
     private var permissionDenied = false
+    private var consecutiveDiscoveryFailures = 0
     private var frameCapReached = false
 
     /// Manual picker override; wins over auto-detect. `nil` = auto.
@@ -144,6 +146,7 @@ actor ScreenShareCaptureService {
         self.config = config
         self.suspended = false
         self.permissionDenied = false
+        self.consecutiveDiscoveryFailures = 0
         self.frameCapReached = false
         self.manualWindowID = nil
         self.keptCount = 0
@@ -253,12 +256,10 @@ actor ScreenShareCaptureService {
         do {
             content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
         } catch {
-            // Most common cause is TCC denial; SCK throws the same way for
-            // transient failures, so only latch denial when we've never
-            // captured anything (a mid-recording revoke also lands here).
             handleDiscoveryFailure(error)
             return
         }
+        consecutiveDiscoveryFailures = 0
         // The recording may have stopped while we were suspended on the
         // SCShareableContent fetch — a session started now would be a
         // zombie logged after "recording stopped".
@@ -304,13 +305,32 @@ actor ScreenShareCaptureService {
     }
 
     private func handleDiscoveryFailure(_ error: Error) {
+        consecutiveDiscoveryFailures += 1
+        let preflight = CGPreflightScreenCaptureAccess()
+        LogManager.send(
+            "Shareable content failed",
+            category: .screen,
+            level: .warning,
+            detail: "preflight=\(preflight) consecutive=\(consecutiveDiscoveryFailures) \(error.localizedDescription)",
+            meetingID: meetingID
+        )
+        guard ScreenCapturePermission.shouldLatchDenial(
+            preflightGranted: preflight,
+            consecutiveFailures: consecutiveDiscoveryFailures,
+            error: error
+        ) else { return }
         guard !permissionDenied else { return }
         permissionDenied = true
         if let sessionID = currentSessionID {
             endSession(sessionID, reason: .windowGone)
         }
         continuation?.yield(.permissionDenied)
-        LogManager.send("Screen-share capture disabled: \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
+        LogManager.send(
+            "Screen-share capture disabled: permission denied for this binary",
+            category: .screen,
+            level: .warning,
+            meetingID: meetingID
+        )
     }
 
     private func startSession(with candidate: WindowCandidate) {
@@ -500,22 +520,9 @@ actor ScreenShareCaptureService {
             return
         }
 
-        let filter = SCContentFilter(desktopIndependentWindow: window)
-        let configuration = SCStreamConfiguration()
-        let pixelSize = ScreenFrameTriage.scaledSize(
-            for: CGSize(width: window.frame.width * 2, height: window.frame.height * 2),
-            targetPixelCount: config.targetPixelCount
-        )
-        configuration.width = Int(pixelSize.width)
-        configuration.height = Int(pixelSize.height)
-        configuration.showsCursor = false
-
         let image: CGImage
         do {
-            image = try await SCScreenshotManager.captureImage(
-                contentFilter: filter,
-                configuration: configuration
-            )
+            image = try await screenshot(window: window, windowID: windowID, meetingID: meetingID)
         } catch {
             missedPolls += 1
             LogManager.send("Frame capture failed: \(error.localizedDescription)", category: .screen, level: .warning, meetingID: meetingID)
@@ -525,6 +532,17 @@ actor ScreenShareCaptureService {
             return
         }
         missedPolls = 0
+
+        if ScreenFrameTriage.isBlankCapture(image) {
+            continuation?.yield(.frameDropped(sessionID: sessionID))
+            LogManager.send(
+                "Frame dropped: blank capture (white/black field) for \"\(currentWindowTitle)\"",
+                category: .screen,
+                level: .warning,
+                meetingID: meetingID
+            )
+            return
+        }
 
         let hash = ScreenFrameTriage.dHash(image)
         let distance = lastKeptHash.map { ScreenFrameTriage.hammingDistance(hash, $0) }
@@ -602,6 +620,50 @@ actor ScreenShareCaptureService {
             endSession(sessionID, reason: .capReached)
             LogManager.send("Frame cap reached (\(keptCount)) — capture stopped for this recording", category: .screen, level: .warning, meetingID: meetingID)
         }
+    }
+
+    /// ScreenCaptureKit first, sized from the filter's content rect. If that
+    /// image is a blank field (Teams overlay / compositor miss), fall back to
+    /// the window-server snapshot which still sees Electron contents.
+    private func screenshot(
+        window: SCWindow,
+        windowID: CGWindowID,
+        meetingID: UUID
+    ) async throws -> CGImage {
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        let scale = max(CGFloat(filter.pointPixelScale), 1)
+        let content = filter.contentRect
+        let source = (content.width > 2 && content.height > 2)
+            ? CGSize(width: content.width * scale, height: content.height * scale)
+            : CGSize(width: window.frame.width * scale, height: window.frame.height * scale)
+        let pixelSize = ScreenFrameTriage.scaledSize(for: source, targetPixelCount: config.targetPixelCount)
+        configuration.width = max(Int(pixelSize.width.rounded()), 2)
+        configuration.height = max(Int(pixelSize.height.rounded()), 2)
+        configuration.showsCursor = false
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+
+        let sck = try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
+        if !ScreenFrameTriage.isBlankCapture(sck) {
+            return sck
+        }
+        if let fallback = CGWindowListCreateImage(
+            .null,
+            [.optionIncludingWindow],
+            windowID,
+            [.boundsIgnoreFraming, .bestResolution]
+        ), !ScreenFrameTriage.isBlankCapture(fallback) {
+            LogManager.send(
+                "ScreenCaptureKit returned a blank frame; used window-server snapshot instead",
+                category: .screen,
+                meetingID: meetingID
+            )
+            return fallback
+        }
+        return sck
     }
 
     private static func encodeJPEG(_ image: CGImage, quality: Double) -> Data? {

@@ -19,6 +19,8 @@ final class FeatureHighlightTests: XCTestCase {
         XCTAssertEqual(SemVer.compare("0.9.2", "0.23.0"), .orderedAscending)
         // Leading "v" and trailing tags are ignored.
         XCTAssertEqual(SemVer.compare("v0.23.13", "0.23.13-beta"), .orderedSame)
+        // Grey Conseil suffixes compare by the numeric tail: ftl18 > ftl17.
+        XCTAssertEqual(SemVer.compare("0.28.4-ftl18", "0.28.4-ftl17"), .orderedDescending)
     }
 
     // MARK: Pending highlights

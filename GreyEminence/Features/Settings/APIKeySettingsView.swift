@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 struct APIKeySettingsView: View {
     @AppStorage("aiProvider") private var selectedProvider: String = "anthropic"
     @AppStorage("claudeModel") private var selectedModel: String = "claude-sonnet-4-20250514"
+    @AppStorage("xaiModel") private var selectedXAIModel: String = "grok-4.6"
+    @AppStorage("xaiCustomModel") private var xaiCustomModel: String = ""
+    @AppStorage("aiAnalysisTimeoutSeconds") private var analysisTimeoutSeconds: Int = 0
     @AppStorage("awsProfile") private var awsProfile: String = "default"
     @AppStorage("awsRegion") private var awsRegion: String = "us-east-1"
 
@@ -25,6 +28,12 @@ struct APIKeySettingsView: View {
     }
 
     private var isAnthropic: Bool { selectedProvider == "anthropic" }
+    private var isXAI: Bool { selectedProvider == "xai" }
+
+    private var providerDisplayName: String {
+        AIProvider(rawValue: selectedProvider)?.displayName
+            ?? (isXAI ? "xAI (Grok)" : isAnthropic ? "Anthropic API" : "AWS Bedrock")
+    }
 
     var body: some View {
         Form {
@@ -32,16 +41,19 @@ struct APIKeySettingsView: View {
                 Picker("Provider", selection: $selectedProvider) {
                     Text("Anthropic API").tag("anthropic")
                     Text("AWS Bedrock").tag("bedrock")
+                    Text("xAI (Grok)").tag("xai")
                 }
+                .helpTip(.settingsAIProvider)
                 .onChange(of: selectedProvider) {
                     validationResult = nil
+                    loadAPIKey()
                 }
                 // This picker IS the live setting, not a tab — switching it
                 // here immediately switches every AI feature in the app.
                 // Without this callout, a validated key on one provider
                 // coexists invisibly with a broken active provider.
                 Label {
-                    Text("All AI features are using **\(isAnthropic ? "Anthropic API" : "AWS Bedrock")** right now. Changing this picker switches the whole app immediately — validating a provider only tests that provider.")
+                    Text("All AI features are using **\(providerDisplayName)** right now. Changing this picker switches the whole app immediately — validating a provider only tests that provider.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } icon: {
@@ -57,6 +69,8 @@ struct APIKeySettingsView: View {
 
             if isAnthropic {
                 anthropicSection
+            } else if isXAI {
+                xaiSection
             } else {
                 bedrockSection
             }
@@ -106,6 +120,7 @@ struct APIKeySettingsView: View {
                     saveAPIKey()
                 }
                 .disabled(apiKey.isEmpty)
+                .helpTip(.settingsAPIKey)
 
                 if isSaved {
                     Label("Saved", systemImage: "checkmark.circle.fill")
@@ -125,6 +140,7 @@ struct APIKeySettingsView: View {
                     validateAnthropic()
                 }
                 .disabled(apiKey.isEmpty || isValidating)
+                .helpTip(.settingsValidateKey)
             }
 
             if keyIsMemoryOnly {
@@ -138,6 +154,85 @@ struct APIKeySettingsView: View {
                 .foregroundStyle(.secondary)
         } header: {
             Label("Claude API Key", systemImage: "key")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .textCase(nil)
+        }
+    }
+
+    // MARK: - xAI
+
+    private var xaiSection: some View {
+        Section {
+            HStack {
+                if isKeyVisible {
+                    TextField("xai-…", text: $apiKey)
+                        .textFieldStyle(.roundedBorder)
+                        .fontDesign(.monospaced)
+                } else {
+                    SecureField("xai-…", text: $apiKey)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                Button {
+                    isKeyVisible.toggle()
+                } label: {
+                    Image(systemName: isKeyVisible ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if !apiKey.isEmpty && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("xai-") {
+                Text("xAI keys usually start with xai-. This one doesn't — it may still work.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
+                Button("Save to Keychain") {
+                    saveAPIKey()
+                }
+                .disabled(apiKey.isEmpty)
+                .helpTip(.settingsAPIKey)
+
+                if isSaved {
+                    Label("Saved", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
+                } else if keyIsMemoryOnly {
+                    Label("Not saved to Keychain", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                }
+
+                Spacer()
+
+                validationStatus
+
+                Button("Validate") {
+                    validateXAI()
+                }
+                .disabled(apiKey.isEmpty || isValidating)
+            }
+
+            if keyIsMemoryOnly {
+                Text("The API key could not be saved to Keychain. It will work this session but will be lost when you quit the app.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Text("Your API key is stored securely in the macOS Keychain and never transmitted except to the xAI API. SuperGrok Heavy is an account tier (limits / model access); API usage is billed per token in the Console.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Link("xAI Console", destination: URL(string: "https://console.x.ai")!)
+                Link("API keys", destination: URL(string: "https://console.x.ai/team/default/api-keys")!)
+                Link("API quickstart", destination: URL(string: "https://docs.x.ai/developers/quickstart")!)
+            }
+            .font(.caption)
+        } header: {
+            Label("xAI API Key", systemImage: "key")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .textCase(nil)
@@ -263,17 +358,47 @@ struct APIKeySettingsView: View {
 
     private var modelSection: some View {
         Section {
-            Picker("Model", selection: $selectedModel) {
-                Text("Opus 4 (Most capable)").tag("claude-opus-4-20250514")
-                Text("Sonnet 4 (Balanced)").tag("claude-sonnet-4-20250514")
-                Text("Haiku 3.5 (Fastest)").tag("claude-haiku-4-5-20251001")
+            if isXAI {
+                Picker("Model", selection: $selectedXAIModel) {
+                    Text("Grok 4.6 (flagship)").tag("grok-4.6")
+                    Text("Grok 4.5").tag("grok-4.5")
+                    Text("Custom model ID").tag("custom")
+                }
+                if selectedXAIModel == "custom" || !xaiCustomModel.isEmpty {
+                    TextField("e.g. grok-4-heavy or a Console model ID", text: $xaiCustomModel)
+                        .textFieldStyle(.roundedBorder)
+                        .fontDesign(.monospaced)
+                    Text("Paste any model ID from the xAI Console. SuperGrok Heavy is an account tier; if Console lists a Heavy model, put that ID here.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Picker("Model", selection: $selectedModel) {
+                    Text("Opus 4 (Most capable)").tag("claude-opus-4-20250514")
+                    Text("Sonnet 4 (Balanced)").tag("claude-sonnet-4-20250514")
+                    Text("Haiku 3.5 (Fastest)").tag("claude-haiku-4-5-20251001")
+                }
             }
 
-            LabeledContent("Analysis Interval") {
+            Picker("Analysis timeout", selection: $analysisTimeoutSeconds) {
+                Text("Auto (\(isXAI ? "4 min" : "2 min"))").tag(0)
+                Text("2 minutes").tag(120)
+                Text("4 minutes").tag(240)
+                Text("6 minutes").tag(360)
+                Text("10 minutes").tag(600)
+            }
+            .helpTip(.settingsTimeout)
+            Text("How long Reanalyze / meeting intelligence may wait for one API reply. Raise this if Grok times out on long transcripts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            LabeledContent("Live analysis interval") {
                 Text("~45 seconds")
             }
 
-            Text("Meeting intelligence uses Claude to generate summaries, action items, and follow-up questions from your meeting transcript. Model changes apply to the next recording.")
+            Text(isXAI
+                 ? "Meeting intelligence uses Grok to generate summaries, action items, and follow-up questions from your meeting transcript. Model changes apply to the next analysis."
+                 : "Meeting intelligence uses Claude to generate summaries, action items, and follow-up questions from your meeting transcript. Model changes apply to the next analysis.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } header: {
@@ -309,11 +434,15 @@ struct APIKeySettingsView: View {
 
     // MARK: - Actions
 
+    private func currentKeychainKey() -> String {
+        isXAI ? AIPromptTemplates.xaiKeychainKey : AIPromptTemplates.keychainKey
+    }
+
     private func saveAPIKey() {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         do {
-            try KeychainHelper.set(trimmed, key: AIPromptTemplates.keychainKey)
+            try KeychainHelper.set(trimmed, key: currentKeychainKey())
             isSaved = true
             keyIsMemoryOnly = false
             keychainSaveError = nil
@@ -404,7 +533,7 @@ struct APIKeySettingsView: View {
     }
 
     private func loadAPIKey() {
-        let stored = try? KeychainHelper.get(AIPromptTemplates.keychainKey)
+        let stored = try? KeychainHelper.get(currentKeychainKey())
         apiKey = stored ?? ""
         // If no key is stored in keychain but apiKey somehow has a value (e.g., prior session memory-only),
         // that's fine — keyIsMemoryOnly will only be set if a save attempt explicitly fails.
@@ -453,6 +582,32 @@ struct APIKeySettingsView: View {
                 validationResult = .failure(error.localizedDescription)
             }
             isSSOLoggingIn = false
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                validationResult = nil
+            }
+        }
+    }
+
+    private func validateXAI() {
+        isValidating = true
+        validationResult = nil
+        Task {
+            do {
+                let client = XAIAPIClient(
+                    apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                    model: selectedXAIModel
+                )
+                _ = try await client.sendMessage(
+                    system: "Reply with exactly: OK",
+                    userContent: "Reply OK",
+                    maxTokens: 16
+                )
+                validationResult = .success
+            } catch {
+                validationResult = .failure(error.localizedDescription)
+            }
+            isValidating = false
             Task {
                 try? await Task.sleep(for: .seconds(5))
                 validationResult = nil

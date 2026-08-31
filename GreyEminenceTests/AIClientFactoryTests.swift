@@ -65,4 +65,49 @@ final class AIClientFactoryTests: XCTestCase {
         XCTAssertEqual(choice.model, haiku)
         XCTAssertFalse(choice.fellBackToMainModel)
     }
+
+    func testXAIDoesNotKeepClaudeHaikuFrameModel() {
+        let choice = AIClientFactory.frameAnalysisModel(
+            preferred: haiku, mainModel: "grok-4.6",
+            provider: .xai, haikuProfileAvailable: true
+        )
+        XCTAssertEqual(choice.model, "grok-4.6")
+        XCTAssertTrue(choice.fellBackToMainModel)
+    }
+
+    func testXAIEmptyPreferenceUsesMainGrokModel() {
+        let choice = AIClientFactory.frameAnalysisModel(
+            preferred: "", mainModel: "grok-4.6",
+            provider: .xai, haikuProfileAvailable: true
+        )
+        XCTAssertEqual(choice.model, "grok-4.6")
+        XCTAssertFalse(choice.fellBackToMainModel)
+    }
+
+    func testXAIKeepsExplicitGrokFrameModel() {
+        let choice = AIClientFactory.frameAnalysisModel(
+            preferred: "grok-4.5", mainModel: "grok-4.6",
+            provider: .xai, haikuProfileAvailable: true
+        )
+        XCTAssertEqual(choice.model, "grok-4.5")
+        XCTAssertFalse(choice.fellBackToMainModel)
+    }
+
+    func testSelectedModelReadsProviderSpecificDefaults() {
+        let defaults = UserDefaults(suiteName: "AIClientFactoryTests.\(UUID().uuidString)")!
+        defaults.set("claude-opus-4-20250514", forKey: "claudeModel")
+        defaults.set("grok-4.5", forKey: "xaiModel")
+        XCTAssertEqual(
+            AIClientFactory.selectedModel(for: .anthropic, defaults: defaults),
+            "claude-opus-4-20250514"
+        )
+        XCTAssertEqual(
+            AIClientFactory.selectedModel(for: .xai, defaults: defaults),
+            "grok-4.5"
+        )
+        XCTAssertEqual(
+            AIClientFactory.selectedModel(for: .xai, defaults: UserDefaults(suiteName: "empty.\(UUID().uuidString)")!),
+            "grok-4.6"
+        )
+    }
 }

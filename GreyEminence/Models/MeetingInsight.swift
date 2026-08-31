@@ -25,6 +25,17 @@ final class MeetingInsight {
     /// Lets us show "this insight was produced with an older prompt, regenerate?" UX.
     var promptVersion: String?
 
+    /// Which part this pass rewrote: `full`, `summary`, `followUps`,
+    /// `actionItems`, `topics`. Nil on insights written before history existed.
+    var scopeRaw: String?
+
+    /// `standard`, `deep`, `deepest`, or `revert`.
+    var depthRaw: String?
+
+    /// Snapshot of action items produced by this pass, so Revert / View Log
+    /// can restore them without guessing.
+    var actionItemsJSON: String?
+
     var meeting: Meeting?
 
     init(
@@ -33,7 +44,10 @@ final class MeetingInsight {
         topics: [String] = [],
         rawLLMResponse: String? = nil,
         modelIdentifier: String? = nil,
-        promptVersion: String? = nil
+        promptVersion: String? = nil,
+        scopeRaw: String? = nil,
+        depthRaw: String? = nil,
+        actionItemsJSON: String? = nil
     ) {
         self.id = UUID()
         self.summary = summary
@@ -43,5 +57,8 @@ final class MeetingInsight {
         self.rawLLMResponse = rawLLMResponse
         self.modelIdentifier = modelIdentifier
         self.promptVersion = promptVersion
+        self.scopeRaw = scopeRaw
+        self.depthRaw = depthRaw
+        self.actionItemsJSON = actionItemsJSON
     }
 }

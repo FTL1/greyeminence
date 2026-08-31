@@ -43,7 +43,31 @@ struct RecordingInspectorPanel: View {
             } else {
                 LiveTranscriptView(
                     segments: viewModel.segments,
-                    segmentConfidence: viewModel.segmentConfidence
+                    segmentConfidence: viewModel.segmentConfidence,
+                    onRenameSpeaker: { speaker, name, saveAsDefault in
+                        viewModel.renameSpeaker(speaker, to: name, saveAsDefault: saveAsDefault)
+                    },
+                    onLinkSpeakerToContact: { speaker, contact in
+                        viewModel.linkSpeakerToContact(speaker, contact: contact)
+                    },
+                    roster: viewModel.speakerRoster,
+                    showsRoster: false,
+                    onAssignVoice: { voice, seat in
+                        viewModel.assignDetectedVoice(voice, to: seat)
+                    },
+                    onPaintSegment: { id in
+                        if let seat = viewModel.speakerRoster.paintSeat {
+                            viewModel.tagSegment(id, as: seat)
+                        }
+                    },
+                    attendees: viewModel.currentMeeting?.attendees ?? [],
+                    onEnrollVoicePrint: { speaker in
+                        viewModel.enrollVoicePrint(for: speaker)
+                    },
+                    voicePrintProgress: viewModel.voicePrintProgress,
+                    voicePrintState: { speaker, contacts in
+                        viewModel.voicePrintState(for: speaker, contacts: contacts)
+                    }
                 )
             }
         }

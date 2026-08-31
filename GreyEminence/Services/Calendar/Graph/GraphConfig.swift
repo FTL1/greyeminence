@@ -13,8 +13,17 @@ import Foundation
 /// The client ID is NOT a secret — public-client OAuth is protected by PKCE,
 /// not by a secret, so it's safe to ship embedded.
 enum GraphConfig {
-    /// Replace the placeholder with the real Application (client) ID.
-    static let clientID = "<PASTE_CLIENT_ID>"
+    /// Compiled fallback. Prefer Settings → Calendar (UserDefaults).
+    static let compiledClientID = "<PASTE_CLIENT_ID>"
+    static let clientIDDefaultsKey = "graphClientID"
+
+    /// Application (client) ID. Settings can paste one without a rebuild.
+    static var clientID: String {
+        let stored = UserDefaults.standard.string(forKey: clientIDDefaultsKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !stored.isEmpty { return stored }
+        return compiledClientID
+    }
 
     /// Multi-tenant + personal Microsoft accounts.
     static let authority = "https://login.microsoftonline.com/common"
@@ -36,7 +45,10 @@ enum GraphConfig {
     static let accountEmailKey = "graphAccountEmail"
     static let accountNameKey = "graphAccountName"
 
-    /// False while the placeholder client ID is in place — the feature stays
-    /// dormant (no sign-in attempts) until a real ID is configured.
-    static var isConfigured: Bool { !clientID.hasPrefix("<") && !clientID.isEmpty }
+    /// False until a real Entra Application (client) ID is pasted in Settings
+    /// or compiled into `compiledClientID`.
+    static var isConfigured: Bool {
+        let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !id.isEmpty && !id.hasPrefix("<")
+    }
 }

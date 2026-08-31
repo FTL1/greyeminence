@@ -81,7 +81,7 @@ final class GraphCalendarProvider {
             queryItems: [
                 .init(name: "startDateTime", value: iso.string(from: around.addingTimeInterval(-minutes * 60))),
                 .init(name: "endDateTime", value: iso.string(from: around.addingTimeInterval(minutes * 60))),
-                .init(name: "$select", value: "subject,start,end,attendees,seriesMasterId,type,isAllDay"),
+                .init(name: "$select", value: "subject,start,end,attendees,organizer,seriesMasterId,type,isAllDay,isCancelled"),
                 .init(name: "$orderby", value: "start/dateTime"),
                 .init(name: "$top", value: "50"),
             ],
@@ -131,10 +131,19 @@ final class GraphCalendarProvider {
         // cross-occurrence id, so series-match it as a one-off (linkIdentifier =
         // its own id) rather than keying every occurrence to a different value.
         let isRecurring = ev.seriesMasterId != nil
-        let attendees = (ev.attendees ?? []).compactMap { att -> EventAttendee? in
+        var attendees = (ev.attendees ?? []).compactMap { att -> EventAttendee? in
             // Conference rooms come through as type "resource" — not people.
             guard att.type?.lowercased() != "resource" else { return nil }
             return EventAttendee.resolve(name: att.emailAddress?.name, email: att.emailAddress?.address)
+        }
+        if let organizer = EventAttendee.resolve(
+            name: ev.organizer?.emailAddress?.name,
+            email: ev.organizer?.emailAddress?.address
+        ), !attendees.contains(where: {
+            if let a = $0.email, let b = organizer.email, a == b { return true }
+            return $0.name.compare(organizer.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }) {
+            attendees.insert(organizer, at: 0)
         }
         return CalendarEvent(
             id: ev.id,
@@ -144,6 +153,8 @@ final class GraphCalendarProvider {
             endDate: end,
             attendees: attendees,
             isRecurring: isRecurring,
+            isCancelled: ev.isCancelled == true
+                || CalendarEvent.titleIndicatesCancellation(ev.subject),
             source: .microsoftGraph
         )
     }
@@ -185,7 +196,13 @@ struct GraphEvent: Decodable {
     let start: GraphDateTime?
     let end: GraphDateTime?
     let attendees: [GraphAttendee]?
+    let organizer: GraphOrganizer?
     let isAllDay: Bool?
+    let isCancelled: Bool?
+}
+
+struct GraphOrganizer: Decodable {
+    let emailAddress: GraphEmailAddress?
 }
 
 struct GraphDateTime: Decodable {

@@ -37,6 +37,7 @@ struct RecordingToolbar: View {
                 .foregroundStyle(viewModel.isRecording ? .primary : .secondary)
                 .lineLimit(1)
                 .fixedSize()
+                .helpTip(.recTimer)
 
             Spacer()
 
@@ -50,6 +51,7 @@ struct RecordingToolbar: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
+                    .helpTip(.recordButton)
                 } else {
                     // Pause/Resume
                     Button {
@@ -65,6 +67,7 @@ struct RecordingToolbar: View {
                         )
                     }
                     .buttonStyle(.bordered)
+                    .helpTip(.pauseRecording)
 
                     // Stop
                     Button {
@@ -74,6 +77,7 @@ struct RecordingToolbar: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.red)
+                    .helpTip(.stopRecording)
                 }
             }
 
@@ -149,12 +153,14 @@ struct RecordingToolbar: View {
                     .foregroundStyle(.secondary)
                 LevelBar(level: viewModel.micLevel)
             }
+            .helpTip(.micMeter)
             HStack(spacing: 2) {
                 Image(systemName: "speaker.wave.2.fill")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 LevelBar(level: viewModel.systemLevel)
             }
+            .helpTip(.systemMeter)
         }
         .fixedSize()
     }
@@ -171,6 +177,7 @@ struct RecordingToolbar: View {
         }
         .lineLimit(1)
         .fixedSize()
+        .helpTip(.segmentCount)
     }
 }
 
@@ -254,9 +261,7 @@ private struct CalendarLinkLabel: View {
         }
         .font(.caption)
         .foregroundStyle(linkedTitle == nil ? Color.secondary : Color.green)
-        .help(linkedTitle == nil
-              ? "Link this recording to a calendar event"
-              : "Linked to \"\(linkedTitle ?? "")\" — click to change or unlink")
+        .helpTip(.linkCalendarEvent)
     }
 }
 
@@ -272,14 +277,15 @@ struct LevelBar: View {
         // UI during recording (every new transcript segment retriggered the
         // pass). Computing the fill width from an explicit `width` keeps
         // layout O(1).
-        let fill = width * CGFloat(min(max(level, 0), 1))
+        let meter = AudioLevelMeter.fill(rms: level)
+        let fill = width * CGFloat(meter)
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(.secondary.opacity(0.2))
             RoundedRectangle(cornerRadius: 2)
-                .fill(level > 0.8 ? .red : (level > 0.5 ? .yellow : .green))
+                .fill(meter > 0.85 ? Color.red : (meter > 0.65 ? Color.yellow : Color.green))
                 .frame(width: fill)
-                .animation(.linear(duration: 0.1), value: level)
+                .animation(.linear(duration: 0.1), value: meter)
         }
         .frame(width: width, height: height)
     }

@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Grey Eminence</string>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Grey Eminence</string>
+	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleVersion</key>
@@ -19,21 +19,23 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Grey Eminence needs microphone access to record meeting audio and provide live transcription.</string>
+	<string>Grey Conseil needs microphone access to record meeting audio and provide live transcription. Use only in a manner that is lawful where you are.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>Grey Eminence needs to capture system audio to transcribe meeting participants speaking through your speakers.</string>
+	<string>Grey Conseil needs to capture system audio to transcribe meeting participants speaking through your speakers. Use only in a manner that is lawful where you are.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Grey Eminence uses on-device speech recognition to provide live transcription of your meetings.</string>
+	<string>Grey Conseil uses on-device speech recognition to provide live transcription of your meetings.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Grey Conseil can link a transcript speaker to someone in Apple Contacts or Outlook (via Contacts). Names and emails stay on this Mac.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Grey Eminence reads your upcoming calendar events to auto-name recordings and match attendees to your contacts. Calendar data is read locally and never leaves your Mac.</string>
+	<string>Grey Conseil reads your upcoming calendar events to auto-name recordings and match attendees to your contacts. Calendar data is read locally and never leaves your Mac.</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright 2024-2026. All rights reserved.</string>
+	<string>Copyright © 2026 Matthew Purdon. Unofficial Grey Conseil portions under the same license.</string>
 	<key>SUPublicEDKey</key>
-	<string>WcY3bO1Kn//JaSzIQ34jfsqE3wF1Z02qy4B5ar446NM=</string>
+	<string>YOyoHHGKi4s99Ze1dIcPl1GZKK/bfZtm0QjwATBzI7Q=</string>
 	<key>SUFeedURL</key>
-	<string>https://github.com/mpurdon/greyeminence/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/FTL1/grey-conseil/releases/latest/download/appcast.xml</string>
 	<key>SUEnableInstallerLauncherService</key>
 	<true/>
 	<!--

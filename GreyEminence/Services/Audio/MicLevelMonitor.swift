@@ -113,11 +113,18 @@ final class MicLevelMonitor {
             return
         }
 
-        // Handler is @Sendable so the closure doesn't inherit MainActor isolation
+        // Handler is @Sendable so the closure doesn't inherit MainActor isolation.
+        // Store raw RMS (gain applied). The Settings bar maps this through
+        // dBFS — a linear 0…1 scale leaves speech stuck on the first LED.
         Self.installMeterTap(on: inputNode, format: format) { [weak self] rms in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.level = min(rms * self.gain, 1.0)
+                let instant = max(0, rms * self.gain)
+                if instant > self.level {
+                    self.level = instant
+                } else {
+                    self.level = max(instant, self.level * 0.82)
+                }
             }
         }
 
@@ -168,7 +175,7 @@ final class MicLevelMonitor {
             sum += sample * sample
         }
         let rms = sqrt(sum / Float(frameCount))
-        return min(rms * 5, 1.0)
+        return rms
     }
 
     nonisolated private static func currentDeviceUID(for unit: AudioUnit) -> String? {

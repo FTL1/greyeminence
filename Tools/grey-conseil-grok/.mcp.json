@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "grey-conseil": {
+      "command": "python3",
+      "args": [
+        "~/.grok/plugins/grey-conseil/mcp/server.py"
+      ]
+    }
+  }
+}

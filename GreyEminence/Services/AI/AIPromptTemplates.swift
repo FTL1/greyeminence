@@ -2,11 +2,13 @@ import Foundation
 
 enum AIPromptTemplates {
     static let keychainKey = "claude_api_key"
+    /// Dedicated xAI Console key. Never reuse `keychainKey`.
+    static let xaiKeychainKey = "xai_api_key"
 
     /// Bumped whenever the built-in prompt text changes meaningfully. Persisted with
     /// MeetingInsight so we can tell which prompt generation produced a given result
     /// and offer "regenerate with newer prompt" UX later.
-    static let promptVersion = "meeting.v3"
+    static let promptVersion = "meeting.v6"
 
     // MARK: - Public accessors
     //
@@ -22,6 +24,28 @@ enum AIPromptTemplates {
     static func initialAnalysisPrompt(transcript: String) -> String {
         let template = PromptStore.shared.get(.meetingInitial, default: defaultInitialAnalysisPrompt)
         return PromptStore.render(template, values: ["transcript": transcript])
+    }
+
+    /// Full rewrite used by the Reanalyze button. Does not see prior insights.
+    static func reanalysisPrompt(
+        transcript: String,
+        calendarTitle: String,
+        myName: String?,
+        suppressedActionItems: [String] = [],
+        suppressedFollowUps: [String] = []
+    ) -> String {
+        let template = PromptStore.shared.get(.meetingReanalysis, default: defaultReanalysisPrompt)
+        return PromptStore.render(template, values: [
+            "transcript": transcript,
+            "calendarTitle": calendarTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "(none)"
+                : calendarTitle,
+            "myName": myName?.isEmpty == false ? myName! : "Me",
+            "suppressionBlock": suppressionBlock(
+                actionItems: suppressedActionItems,
+                followUps: suppressedFollowUps
+            ),
+        ])
     }
 
     static func rollingAnalysisPrompt(
@@ -76,10 +100,10 @@ enum AIPromptTemplates {
 
         RELATED DISCUSSIONS FROM OTHER MEETINGS:
         The snippets below come from OTHER meetings' transcripts — none of this was said \
-        in this meeting. Use them ONLY to find blind spots: if they raise concerns, \
-        constraints, stakeholders, decisions, or topics relevant to this meeting's purpose \
-        that this meeting never touched, turn those into follow_ups. Do NOT import them \
-        into the summary, action items, or topics.
+        in this meeting. Use them ONLY to find blind spots that are relevant to THIS \
+        meeting's inferred purpose. Do NOT import them into the summary, action items, \
+        or topics, and do NOT turn them into a generic domain questionnaire (financing, \
+        environmental, engagement, timeline) unless someone in THIS meeting raised that gap.
 
         \(snippets)
         """
@@ -99,7 +123,10 @@ enum AIPromptTemplates {
         observations of that screen at the given transcript timestamps. This content \
         IS part of the meeting — use it to inform the summary, topics, follow-up \
         questions, and action items — but never attribute it as something a person \
-        said, and never quote it as speech.
+        said, and never quote it as speech. If the screen is a document, deck, or \
+        proposal being reviewed for sending or correction, treat that as work product \
+        (what the user is trying to fix), not as proof that the meeting's only topic \
+        is the document's subject matter.
 
         \(observations)
         """
@@ -134,6 +161,9 @@ enum AIPromptTemplates {
         case .meetingInitial: defaultInitialAnalysisPrompt
         case .meetingRolling: defaultRollingAnalysisPrompt
         case .meetingFinal:   defaultFinalCleanupPrompt
+        case .meetingReanalysis: defaultReanalysisPrompt
+        case .meetingDeep: defaultDeepPrompt
+        case .meetingDeepest: defaultDeepestPrompt
         case .screenSystem:   defaultScreenSystemPrompt
         case .screenAnalysis: defaultScreenAnalysisPrompt
         case .screenSessionSynthesis: defaultSessionSynthesisPrompt
@@ -244,14 +274,15 @@ enum AIPromptTemplates {
     /// ownership rules (mine / unowned / 1:1 exception) reliably.
     static func rosterBlock(_ roster: MeetingRoster?) -> String {
         guard let roster, !roster.otherAttendees.isEmpty else { return "" }
-        let user = roster.myName.map { "\($0) — they appear in the transcript as \"Me\"" }
-            ?? "the person appearing in the transcript as \"Me\""
+        let transcriptLabel = roster.myAliases.first ?? Speaker.defaultMeLabel
+        let user = roster.myName.map { "\($0) — they appear in the transcript as \"\(transcriptLabel)\"" }
+            ?? "the person appearing in the transcript as \"\(transcriptLabel)\""
         return """
 
 
         MEETING PARTICIPANTS:
         The tool user is \(user). Other attendees: \(roster.otherAttendees.joined(separator: ", ")).
-        When setting "assignee", use exactly "Me" for the tool user or one of the attendee \
+        When setting "assignee", use exactly "\(transcriptLabel)" or "Me" for the tool user or one of the attendee \
         names above — match the person the transcript actually refers to; never invent a \
         name that isn't listed.
         """
@@ -286,7 +317,7 @@ enum AIPromptTemplates {
         no explanation before or after:
 
         {
-          "title": "Short descriptive meeting title (5-8 words, final analysis only, omit during rolling analysis)",
+          "title": "Short descriptive meeting title (5-8 words) naming PURPOSE, not calendar subject. Omit only during rolling live analysis",
           "summary": [
             {
               "title": "Section title (2-5 words, sentence case, no period)",
@@ -302,6 +333,11 @@ enum AIPromptTemplates {
         }
 
         Rules:
+        - Infer the meeting's PURPOSE from what the tool user ("Me") was trying to get done — \
+        updating documents, aligning language with what another speaker actually said, sending \
+        a package, getting a decision — not merely the subject matter on a calendar invite or \
+        a shared screen. Lead the summary with that purpose. A calendar title may be generic \
+        or wrong.
         - "summary" MUST be a JSON array of section objects as shown above. Return [] if there \
         is not enough substantive content yet — never return filler sections.
         - Group related points into coherent sections. Aim for 2-5 sections with 2-6 points each. \
@@ -311,59 +347,199 @@ enum AIPromptTemplates {
         - Never include meta-observations about the meeting itself (e.g. "Meeting covered several topics").
         - The "intro" field is optional — include it only when a sentence of context genuinely helps \
         frame the points below it. Otherwise omit the key entirely.
-        - "action_items" exist for ONE person: the tool user (the "Me" speaker in the \
-        transcript). Include only (1) tasks the user personally committed to or was asked \
-        to take on, and (2) tasks nobody clearly owns. Do NOT include tasks another \
-        attendee clearly owns — the summary already captures what other people are doing. \
-        EXCEPTION — 1:1 meetings: when exactly two people are in the meeting (the user and \
-        one other person), include the other person's commitments too, and if a task is \
-        definitely not the user's, set "assignee" to the other participant's name rather \
-        than leaving it unowned. \
+        - "action_items" are every concrete commitment spoken in this meeting, whoever owns \
+        it. The app stores all of them and filters the on-screen list for the tool user; \
+        dossiers export per person. Include (1) tasks the user committed to or was asked to \
+        take on, (2) tasks another attendee clearly owns, and (3) tasks nobody clearly owns. \
         Be selective: only concrete, deliberate commitments — never vague intentions, \
-        hypotheticals, or process observations. A typical 30-minute meeting yields 3-6 \
-        genuine action items; more than 8 means you are over-extracting — merge related \
+        hypotheticals, or process observations. A typical 30-minute meeting yields 3-8 \
+        genuine action items; more than 12 means you are over-extracting — merge related \
         tasks and drop the marginal ones. \
-        Set "assignee" to "Me" when the task is the user's, the other participant's name \
-        under the 1:1 exception, or null when ownership is genuinely unclear. \
+        Set "assignee" to "Me" when the task is the tool user's, the other participant's \
+        name when they own it, or null when ownership is genuinely unclear. \
         Set "source_quote" to a short verbatim snippet (one sentence, 5-25 words) copied from \
         the transcript that triggered this action — the exact words a speaker said, not your \
         paraphrase. This anchors the task to a specific moment in the conversation. Pick the \
         single most direct sentence; do not concatenate multiple turns.
-        - "follow_ups" are BLIND SPOTS: specific questions about things that were NOT \
-        discussed in the meeting but are likely relevant to its purpose — the questions \
-        nobody thought to ask. Look for: risks or failure modes nobody raised, stakeholders \
-        or perspectives that were missing from the conversation, alternatives that went \
-        unexamined, dependencies or second-order consequences of the decisions made, and \
-        (when RELATED DISCUSSIONS from other meetings are provided) relevant prior context \
-        this meeting overlooked. \
-        Hard rules: a follow-up must NOT be answerable from the transcript — if the meeting \
-        discussed it, even partially, it does not belong here. DO NOT restate a summary \
-        point or an action item as a question — if a task is "Investigate X", do not emit \
-        "What is X?" or "Who will investigate X?". DO NOT ask for status updates on things \
-        already assigned. Avoid generic questions that could be asked of any meeting \
-        ("What is the timeline?") — every question must be anchored in this meeting's \
-        specific content. Quality over quantity: 2-5 sharp questions beat a long list. \
-        If nothing qualifies, return an empty array.
+        - "follow_ups" are, in this order: (1) questions ASKED in this meeting that were \
+        not answered, (2) next questions implied by work still outstanding in THIS conversation \
+        (a document to fix, a number another speaker voiced that the user's materials must match, \
+        a decision that lacks an owner), (3) only then a few true blind spots. \
+        Do NOT emit a generic domain questionnaire (financing status, environmental diligence, \
+        engagement, timeline) unless someone in THIS meeting raised that gap. If the meeting \
+        was about correcting outbound documents or aligning them with what a speaker actually \
+        said, follow-ups must be about those documents and those facts. \
+        DO NOT restate a summary point or an action item as a question. Quality over quantity: \
+        2-5 sharp questions beat a long list. If nothing qualifies, return an empty array.
         - "topics" should include TWO types, merged into one flat array ordered by prominence: \
         (1) Theme topics: broad subjects discussed (e.g. "System Design", "Code Review Process") \
         (2) Key terms: specific proper nouns, acronyms, tools, services, platforms, libraries, \
-        or named systems mentioned (e.g. "OLP", "AIDC", "Kafka", "DynamoDB", "React"). \
+        or named systems mentioned (e.g. "Jira", "Confluence", "Kafka", "DynamoDB", "React"). \
         Extract ALL specific named entities — these are critical for cross-meeting knowledge mapping. \
-        Prefer the canonical form (e.g. "DynamoDB" not "dynamo", "AIDC" not "aidc").
+        Prefer the canonical form (e.g. "DynamoDB" not "dynamo", "Jira" not "jira").
         - If there is not enough content to produce meaningful insights, return empty arrays and \
         [] for summary. Do not generate placeholder or filler text.
-        - When updating a rolling analysis, ALWAYS preserve all previous action items, topics, \
-        and follow-up questions. The PREVIOUS SUMMARY is a JSON array — parse it, keep all existing \
-        sections and points, add new points to the relevant sections or add new sections for new topics. \
-        Never drop earlier insights unless explicitly resolved, contradicted, or revealed \
-        to be owned by another attendee (per the action_items ownership rules).
+        - Title: always return a 5-8 word title that names the PURPOSE (what the user was \
+        trying to get done), not merely the calendar subject or a shared document's topic. \
+        Omit "title" only during a rolling live pass whose user message contains PREVIOUS SUMMARY.
+        - When the user message contains a PREVIOUS SUMMARY block, this is a rolling live \
+        update: preserve previous action items, topics, and follow-up questions. Parse the \
+        previous summary JSON, keep existing sections and points, and add new ones. Never \
+        drop earlier insights unless explicitly resolved, contradicted, or revealed to be \
+        owned by another attendee (per the action_items ownership rules).
+        - When the user message is a fresh reanalysis or the first complete-transcript pass \
+        (no PREVIOUS SUMMARY block), do not preserve any prior insights. Rewrite from this \
+        transcript. Infer purpose again; a previous run may have latched onto subject matter.
         """
 
     private static let defaultInitialAnalysisPrompt: String = """
         Analyze the following meeting transcript and produce structured insights.
 
+        Infer PURPOSE first: what was the tool user ("Me") trying to get done — fix a \
+        document, align language with what another speaker actually said, send a package, \
+        get a decision — not merely the subject on a calendar invite or a shared screen.
+
         TRANSCRIPT:
         {{transcript}}
+        """
+
+    private static let defaultReanalysisPrompt: String = """
+        Re-analyze this meeting from scratch. Ignore any prior summary, action items, \
+        follow-ups, or topics you (or another model) produced earlier. The user clicked \
+        Reanalyze because those outputs did not match what the meeting was actually for.
+
+        Calendar or stored title (may be generic or wrong — do not treat it as the purpose):
+        {{calendarTitle}}
+
+        The tool user is {{myName}}. They appear in the transcript as "Me" or under that name. \
+        Your job is to serve them: what do they need to do, fix, send, or align because of \
+        what was said?
+
+        Infer PURPOSE from the conversation first:
+        - If they are correcting documents, a deck, a proposal, or language sent to \
+        prospects/lenders/engineers so it matches what another speaker actually voiced, \
+        that IS the meeting. Lead the summary with that work, then the facts they need \
+        to capture.
+        - Shared-screen content is evidence of the artifact being reviewed, not automatically \
+        the meeting's only topic.
+
+        Then produce the JSON schema from your instructions:
+        - title: 5-8 words naming the PURPOSE (e.g. aligning outbound documents with spoken \
+        facts), not the calendar subject.
+        - summary: purpose first, then decisions and the facts another speaker stated that \
+        the user's materials must reflect.
+        - action_items: every concrete commitment, with assignee. Include document/comms \
+        work implied by the talk ("update the proposal / ROM / scope write-up so it uses \
+        the numbers and wording the other speaker actually said").
+        - follow_ups: unanswered questions from THIS room, then implied next questions about \
+        the work product. Do not invent a due-diligence questionnaire.
+        - topics: both the work product (e.g. prospect documents) and named subject-matter terms.
+
+        TRANSCRIPT:
+        {{transcript}}
+        {{suppressionBlock}}
+        """
+
+    static func sectionAnalysisPrompt(
+        depth: InsightDepth,
+        scope: InsightScope,
+        transcript: String,
+        calendarTitle: String,
+        myName: String?,
+        currentSummary: String,
+        currentActionItems: [ParsedActionItem],
+        currentFollowUps: [String],
+        currentTopics: [String],
+        vocalCues: String,
+        suppressedActionItems: [String] = [],
+        suppressedFollowUps: [String] = []
+    ) -> String {
+        let key: PromptKey = depth == .deepest ? .meetingDeepest : .meetingDeep
+        let template = PromptStore.shared.get(
+            key,
+            default: depth == .deepest ? defaultDeepestPrompt : defaultDeepPrompt
+        )
+        return PromptStore.render(template, values: [
+            "section": scope.promptName,
+            "transcript": transcript,
+            "calendarTitle": calendarTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "(none)" : calendarTitle,
+            "myName": myName?.isEmpty == false ? myName! : "Me",
+            "currentSummary": currentSummary.isEmpty ? "[]" : currentSummary,
+            "currentActionItems": formatActionItems(currentActionItems),
+            "currentFollowUps": formatNumberedList(currentFollowUps),
+            "currentTopics": formatTopics(currentTopics),
+            "vocalCues": vocalCues,
+            "suppressionBlock": suppressionBlock(
+                actionItems: suppressedActionItems,
+                followUps: suppressedFollowUps
+            ),
+        ])
+    }
+
+    private static let defaultDeepPrompt: String = """
+        Deep re-analysis of {{section}} for this meeting. The current on-screen \
+        write-up is wrong or too shallow. Rewrite {{section}} from the transcript. \
+        Do not invent facts, stakeholders, or diligence questions that nobody raised.
+
+        Calendar or stored title (hint only): {{calendarTitle}}
+        Tool user: {{myName}}
+
+        Return the full JSON schema. Put new work in {{section}}. Keep other fields \
+        identical to CURRENT unless they are factually contradicted by the transcript.
+
+        CURRENT SUMMARY:
+        {{currentSummary}}
+
+        CURRENT ACTION ITEMS:
+        {{currentActionItems}}
+
+        CURRENT FOLLOW-UPS:
+        {{currentFollowUps}}
+
+        CURRENT TOPICS:
+        {{currentTopics}}
+
+        Be more thorough than a first pass: more evidence, more specific numbers and \
+        wording speakers actually used, purpose first (what {{myName}} was trying to \
+        get done). 2-5 follow-ups if that is the section; no generic questionnaire.
+
+        TRANSCRIPT:
+        {{transcript}}
+        {{suppressionBlock}}
+        """
+
+    private static let defaultDeepestPrompt: String = """
+        Deepest re-analysis of {{section}}. Use the transcript AND the vocal-energy \
+        measurements below (from the saved audio). Energy is a measured amplitude \
+        ratio, not an emotion label. You may treat elevated energy as extra weight \
+        that those words mattered; you may treat quiet lines as possible asides. \
+        Do NOT invent frustration, excitement, sarcasm, or other feelings unless \
+        the words themselves support that reading.
+
+        Calendar or stored title (hint only): {{calendarTitle}}
+        Tool user: {{myName}}
+
+        Return the full JSON schema. Rewrite {{section}}. Keep other fields identical \
+        to CURRENT unless the transcript contradicts them. Do not invent facts.
+
+        CURRENT SUMMARY:
+        {{currentSummary}}
+
+        CURRENT ACTION ITEMS:
+        {{currentActionItems}}
+
+        CURRENT FOLLOW-UPS:
+        {{currentFollowUps}}
+
+        CURRENT TOPICS:
+        {{currentTopics}}
+
+        {{vocalCues}}
+
+        TRANSCRIPT:
+        {{transcript}}
+        {{suppressionBlock}}
         """
 
     private static let defaultRollingAnalysisPrompt: String = """
@@ -398,25 +574,30 @@ enum AIPromptTemplates {
         during live analysis. Produce a final, polished version of the insights.
 
         Your tasks:
-        - Generate a short, descriptive title for this meeting (5-8 words max, no quotes). \
-        The title should capture the main topic or purpose, e.g. "Sprint Planning - Auth Service Redesign" \
-        or "Q1 Budget Review with Finance". Return it in the "title" field.
-        - Produce a clean, comprehensive summary as a JSON array of section objects (same schema \
-        as always). The CURRENT SUMMARY below is already in this JSON format — refine it: \
-        merge redundant points, tighten wording, reorder sections by importance, remove any \
-        meta-observations. Cover the full meeting arc.
+        - Generate a short, descriptive title (5-8 words max, no quotes) that names the \
+        PURPOSE — what the tool user was trying to get done — not merely the calendar \
+        subject or a shared document's topic. Example: "Align prospect docs with spoken facts" \
+        rather than "25MW Warehouse Engineering Review" if the talk was about correcting \
+        outbound materials. Return it in the "title" field.
+        - Re-infer PURPOSE from the FULL transcript. The CURRENT SUMMARY is a live-analysis \
+        draft and may have latched onto subject matter (a PDF on screen, a calendar title) \
+        instead of purpose — rewrite it if so. Lead with purpose, then decisions and the \
+        facts another speaker stated that the user's materials must reflect. Merge redundant \
+        points, tighten wording, cover the full meeting arc.
         - Deduplicate action items — merge near-duplicates, remove redundant ones, \
-        and keep the clearest phrasing. Re-check ownership against the full transcript: \
-        drop any item another attendee clearly owns (unless the two-person exception \
-        applies) and fix assignees that don't match what was actually said.
-        - Re-derive the follow-up questions against the FULL transcript. Drop any \
-        accumulated question the transcript actually answers or that overlaps an action \
-        item, merge near-duplicates, and add new blind-spot questions now visible from \
-        the complete meeting arc (and from RELATED DISCUSSIONS, when provided).
+        and keep the clearest phrasing. Include document/comms work implied by the talk. \
+        Re-check ownership against the full transcript: drop any item another attendee \
+        clearly owns (unless the two-person exception applies) and fix assignees that \
+        don't match what was actually said.
+        - Re-derive follow-up questions against the FULL transcript and THIS meeting's \
+        purpose. Drop any accumulated question the transcript actually answers, that \
+        overlaps an action item, or that is a generic domain questionnaire nobody raised \
+        here. Unanswered in-room questions first, then outstanding work-product questions, \
+        then at most a few true blind spots (including from RELATED DISCUSSIONS, when provided).
         - Consolidate topics — remove exact duplicates and merge near-duplicates, but keep both \
-        theme topics (broad subjects) AND key terms (specific names, acronyms, tools, services). \
-        Order themes first by prominence, then key terms alphabetically. Preserve canonical forms \
-        (e.g. "DynamoDB" not "dynamo").
+        theme topics (broad subjects, including the work product) AND key terms (specific names, \
+        acronyms, tools, services). Order themes first by prominence, then key terms alphabetically. \
+        Preserve canonical forms (e.g. "DynamoDB" not "dynamo").
         - Correct any speaker attribution errors that are obvious from context.
 
         ACCUMULATED INSIGHTS FROM LIVE ANALYSIS:

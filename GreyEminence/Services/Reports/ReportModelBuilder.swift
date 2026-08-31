@@ -26,7 +26,8 @@ enum ReportModelBuilder {
     static func build(
         from meeting: Meeting,
         storage: StorageManager = .shared,
-        includeTranscript: Bool = false
+        includeTranscript: Bool = false,
+        dedupeTranscript: Bool = true
     ) -> ReportModel {
         let insight = meeting.latestInsight
 
@@ -43,7 +44,9 @@ enum ReportModelBuilder {
             followUpQuestions: insight?.followUpQuestions ?? [],
             topics: insight?.topics ?? [],
             shareSessions: shareSessions(for: meeting, storage: storage),
-            transcript: includeTranscript ? transcript(for: meeting) : []
+            transcript: includeTranscript
+                ? transcript(for: meeting, dedupe: dedupeTranscript)
+                : []
         )
     }
 
@@ -61,6 +64,7 @@ enum ReportModelBuilder {
             title: meeting.title,
             date: meeting.date,
             duration: meeting.formattedDuration,
+            durationMinutes: Self.durationMinutes(meeting.duration),
             attendees: meeting.attendees.map(\.name).sorted(),
             sourceApp: MeetingAppRegistry.displayName(
                 for: meeting.sourceAppBundleID,
@@ -70,11 +74,22 @@ enum ReportModelBuilder {
         )
     }
 
+    nonisolated static func durationMinutes(_ duration: TimeInterval) -> Int {
+        max(0, Int((duration / 60.0).rounded()))
+    }
+
     // MARK: - Sections
 
     /// Summaries are stored as JSON `[SummarySection]` by the current
     /// analysis pipeline, but older meetings hold a flat markdown string.
     /// Those still deserve a report, so they become one untitled section.
+    ///
+    /// Section ids and titles without reading images. The export picker and
+    /// the built model must number sections identically.
+    static func sectionTitles(for meeting: Meeting) -> [(id: Int, title: String)] {
+        sections(from: meeting.latestInsight).map { ($0.id, $0.title) }
+    }
+
     private static func sections(from insight: MeetingInsight?) -> [ReportModel.Section] {
         guard let summary = insight?.summary,
               !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -353,14 +368,22 @@ enum ReportModelBuilder {
 
     // MARK: - Transcript
 
-    private static func transcript(for meeting: Meeting) -> [ReportModel.TranscriptLine] {
-        meeting.segments
+    private static func transcript(
+        for meeting: Meeting,
+        dedupe: Bool
+    ) -> [ReportModel.TranscriptLine] {
+        let source = dedupe
+            ? TranscriptDeduplicator.deduplicate(meeting.segments).segments
+            : meeting.segments
+        return source
             .sorted { $0.startTime < $1.startTime }
-            .map {
-                ReportModel.TranscriptLine(
-                    speaker: $0.speaker.displayName,
-                    formattedTimestamp: $0.formattedTimestamp,
-                    text: $0.text
+            .compactMap { segment in
+                let text = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return ReportModel.TranscriptLine(
+                    speaker: segment.speaker.displayName,
+                    formattedTimestamp: segment.formattedTimestamp,
+                    text: text
                 )
             }
     }

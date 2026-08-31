@@ -1,21 +1,26 @@
 import SwiftUI
 import SwiftData
+import AppKit
 
 struct MeetingHeaderBar: View {
     @Bindable var meeting: Meeting
     @Environment(\.modelContext) private var modelContext
     @Bindable private var reProcessingQueue: ReProcessingQueue = .shared
     @AppStorage("developerToolsEnabled") private var developerToolsEnabled = false
+    @AppStorage("transcriptExportFormat") private var transcriptExportFormat = TranscriptExportFormat.txt.rawValue
     @State private var isEditingTitle = false
-    @State private var editedTitle: String = ""
     @State private var exportState: ExportState = .idle
     @State private var showTranscriptSavePanel = false
+    @State private var isExportingTranscript = false
     /// Coverage of this meeting in the embedding store. `nil` = not yet
     /// checked (don't render the Index button until we know), `0` = missing,
     /// `>0` = covered. Refreshed when the meeting changes and after an
     /// on-demand index pass completes.
     @State private var indexedRecordCount: Int?
     @State private var isIndexingForSearch = false
+    @Environment(MeetingFindController.self) private var meetingFind
+    @FocusState private var findFocused: Bool
+    @State private var findExpanded = false
 
     private enum ExportState: Equatable {
         case idle, success, error(String)
@@ -33,22 +38,13 @@ struct MeetingHeaderBar: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                if isEditingTitle {
-                    TextField("Meeting title", text: $editedTitle, onCommit: {
-                        meeting.title = editedTitle
-                        isEditingTitle = false
-                    })
-                    .textFieldStyle(.roundedBorder)
-                    .font(.title2)
-                } else {
-                    Text(meeting.title)
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .onTapGesture(count: 2) {
-                            editedTitle = meeting.title
-                            isEditingTitle = true
-                        }
-                }
+                MeetingTitleLabel(
+                    meeting: meeting,
+                    isEditing: $isEditingTitle,
+                    font: .title2,
+                    weight: .bold,
+                    singleClickStartsEditing: true
+                )
 
                 if developerToolsEnabled {
                     HStack(spacing: 4) {
@@ -126,7 +122,7 @@ struct MeetingHeaderBar: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
-                        .help("Re-transcribe this meeting with WhisperKit large-v3 for higher accuracy")
+                        .helpTip(.meetingUpgradeV3)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                     }
@@ -154,7 +150,7 @@ struct MeetingHeaderBar: View {
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.mini)
-                            .help("Add this meeting's transcript to the Ask search index")
+                            .helpTip(.meetingIndexSearch)
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                         }
@@ -166,6 +162,8 @@ struct MeetingHeaderBar: View {
                 if meeting.status == .completed {
                     MeetingAttendeesRow(meeting: meeting)
                 }
+
+                meetingFindRow
             }
 
             Spacer()
@@ -176,6 +174,10 @@ struct MeetingHeaderBar: View {
             }
         }
         .padding()
+        .onChange(of: meetingFind.focusNonce) { _, _ in
+            findExpanded = true
+            findFocused = true
+        }
         .onChange(of: showTranscriptSavePanel) { _, show in
             guard show else { return }
             showTranscriptSavePanel = false
@@ -216,6 +218,60 @@ struct MeetingHeaderBar: View {
     }
 
     @ViewBuilder
+    private var meetingFindRow: some View {
+        ViewThatFits(in: .horizontal) {
+            meetingFindField(compact: false)
+            if findExpanded || !meetingFind.query.isEmpty {
+                meetingFindField(compact: true)
+            } else {
+                Button {
+                    findExpanded = true
+                    meetingFind.requestFocus()
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .helpTip(.meetingFind)
+            }
+        }
+        .padding(.top, 6)
+    }
+
+    private var meetingFindQueryBinding: Binding<String> {
+        Binding(get: { meetingFind.query }, set: { meetingFind.query = $0 })
+    }
+
+    private var meetingFindTranscriptBinding: Binding<Bool> {
+        Binding(get: { meetingFind.includeTranscript }, set: { meetingFind.includeTranscript = $0 })
+    }
+
+    private func meetingFindField(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search this meeting", text: meetingFindQueryBinding)
+                .textFieldStyle(.plain)
+                .focused($findFocused)
+                .onSubmit { meetingFind.nextTranscriptMatch() }
+            Toggle("Transcript", isOn: meetingFindTranscriptBinding)
+                .toggleStyle(.checkbox)
+                .helpTip(.meetingFindTranscript)
+            if !meetingFind.query.isEmpty {
+                Button("Clear") {
+                    meetingFind.query = ""
+                    findExpanded = false
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .frame(minWidth: compact ? 220 : 320, maxWidth: 520)
+    }
+
+    @ViewBuilder
     private func actionButtons(iconOnly: Bool) -> some View {
         HStack(spacing: 8) {
             Button {
@@ -237,17 +293,75 @@ struct MeetingHeaderBar: View {
             .keyboardShortcut("e", modifiers: .command)
             .help(exportHelpText)
 
-            Button {
-                showTranscriptSavePanel = true
-            } label: {
-                actionLabel(title: "Save Transcript", systemImage: "doc.badge.arrow.up", iconOnly: iconOnly)
+            exportTranscriptButton(iconOnly: iconOnly)
+
+            if developerToolsEnabled {
+                Button {
+                    showTranscriptSavePanel = true
+                } label: {
+                    actionLabel(title: "Save Transcript", systemImage: "doc.badge.arrow.up", iconOnly: iconOnly)
+                }
+                .help("Save .getranscript.json for rubric testing")
             }
-            .help("Save transcript as a file for rubric testing")
 
             statusBadge
         }
         .lineLimit(1)
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func exportTranscriptButton(iconOnly: Bool) -> some View {
+        let format = TranscriptExportFormat(rawValue: transcriptExportFormat) ?? .txt
+        if isExportingTranscript {
+            ProgressView()
+                .controlSize(.small)
+        } else {
+            Menu {
+                Picker("Format", selection: $transcriptExportFormat) {
+                    ForEach(TranscriptExportFormat.allCases) { item in
+                        Text(item.menuTitle).tag(item.rawValue)
+                    }
+                }
+                .pickerStyle(.inline)
+                Divider()
+                Button("Copy Full Transcript") {
+                    copyFullTranscript()
+                }
+                .disabled(meeting.segments.isEmpty)
+            } label: {
+                if iconOnly {
+                    Image(systemName: "doc.plaintext")
+                } else {
+                    Label("Transcript", systemImage: "doc.plaintext")
+                        .font(.caption)
+                }
+            } primaryAction: {
+                exportFullTranscript(format)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fixedSize()
+            .disabled(meeting.segments.isEmpty)
+            .help("Click: export the full transcript as \(format.menuTitle). Arrow: choose a format or copy.")
+        }
+    }
+
+    private func exportFullTranscript(_ format: TranscriptExportFormat) {
+        guard !isExportingTranscript else { return }
+        isExportingTranscript = true
+        Task { @MainActor in
+            defer { isExportingTranscript = false }
+            _ = await TranscriptExportService.presentSavePanel(for: meeting, format: format)
+        }
+    }
+
+    private func copyFullTranscript() {
+        let text = TranscriptExportService.clipboardText(for: meeting)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        TransientActivityCoordinator.shared.flash("Full transcript copied")
     }
 
     @ViewBuilder

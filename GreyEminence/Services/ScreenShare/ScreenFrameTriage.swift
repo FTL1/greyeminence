@@ -53,6 +53,47 @@ enum ScreenFrameTriage {
         return hammingDistance(hash, last) >= threshold
     }
 
+    // MARK: - Blank capture
+
+    /// True when the image is a near-uniform white or black field — the usual
+    /// result of capturing a compositor overlay or a window whose contents
+    /// never made it into the screenshot. Those frames are not meeting content.
+    static func isBlankCapture(_ image: CGImage) -> Bool {
+        let width = 16, height = 16
+        var pixels = [UInt8](repeating: 0, count: width * height)
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return false }
+        context.interpolationQuality = .low
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var minValue = 255
+        var maxValue = 0
+        var sum = 0
+        for pixel in pixels {
+            let value = Int(pixel)
+            if value < minValue { minValue = value }
+            if value > maxValue { maxValue = value }
+            sum += value
+        }
+        let range = maxValue - minValue
+        let mean = sum / pixels.count
+        return range <= 8 && (mean >= 247 || mean <= 8)
+    }
+
+    static func isBlankJPEG(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return true
+        }
+        return isBlankCapture(image)
+    }
+
     // MARK: - Visual-only change
 
     /// True when two OCR texts are near-identical (≥ 95% line overlap) —

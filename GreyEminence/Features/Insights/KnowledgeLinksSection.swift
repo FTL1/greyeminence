@@ -2,29 +2,128 @@ import SwiftUI
 
 struct KnowledgeLinksSection: View {
     let topics: [String]
+    var meeting: Meeting?
+    var onOpenSegment: ((Meeting, UUID) -> Void)?
+    var reanalyzeControl: InsightReanalyzeControl? = nil
+    var onMove: ((IndexSet, Int) -> Void)? = nil
+    var onDelete: ((Int) -> Void)? = nil
+    var onModify: ((Int, String) -> Void)? = nil
+    var onResearch: ((String) -> Void)? = nil
     @State private var isExpanded = true
+    @State private var showCloud = false
+    @State private var cloudTopic: String?
+    @State private var selectedIndex: Int?
+    @State private var editingIndex: Int?
+    @State private var draft = ""
+    @Environment(\.topicMapViewModel) private var topicMapViewModel
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            FlowLayout(spacing: 6) {
-                ForEach(topics, id: \.self) { topic in
-                    TopicBadge(topic: topic)
+            if onMove != nil || onDelete != nil {
+                List {
+                    ForEach(Array(topics.enumerated()), id: \.offset) { index, topic in
+                        InsightItemChrome(
+                            isSelected: selectedIndex == index,
+                            onSelect: { selectedIndex = index },
+                            copyText: topic,
+                            onModify: onModify == nil ? nil : {
+                                draft = topic
+                                editingIndex = index
+                            },
+                            onDelete: onDelete == nil ? nil : { onDelete?(index) },
+                            onResearch: onResearch == nil ? nil : { onResearch?(topic) }
+                        ) {
+                            TopicBadge(topic: topic) {
+                                openCloud(topic: topic)
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                    .onMove { source, dest in
+                        onMove?(source, dest)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(max(topics.count, 1) * 40))
+                .padding(.top, 4)
+                .help("Click to select. Right-click to modify, research, or delete. Drag to reorder.")
+            } else {
+                FlowLayout(spacing: 6) {
+                    ForEach(topics, id: \.self) { topic in
+                        TopicBadge(topic: topic) {
+                            openCloud(topic: topic)
+                        }
+                    }
+                }
+                .padding(.top, 4)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Button {
+                    openCloud(topic: nil)
+                } label: {
+                    Image(systemName: "link")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Color.purple.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help("Open this meeting's topic cloud")
+                .disabled(meeting == nil)
+
+                Text("Topics")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                if let reanalyzeControl {
+                    reanalyzeControl
                 }
             }
-            .padding(.top, 4)
-        } label: {
-            Label {
-                Text("Topics")
-            } icon: {
-                Image(systemName: "link")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(Color.purple.gradient, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            }
-            .font(.subheadline.weight(.semibold))
         }
         .padding(.horizontal)
+        .sheet(isPresented: Binding(
+            get: { editingIndex != nil },
+            set: { if !$0 { editingIndex = nil } }
+        )) {
+            InsightEditSheet(
+                title: "Modify topic",
+                text: $draft,
+                onCancel: { editingIndex = nil },
+                onSave: {
+                    if let editingIndex {
+                        onModify?(editingIndex, draft)
+                    }
+                    self.editingIndex = nil
+                }
+            )
+        }
+        .sheet(isPresented: $showCloud) {
+            if let meeting {
+                MeetingTopicCloudSheet(
+                    meeting: meeting,
+                    initialTopic: cloudTopic,
+                    onOpenSegment: onOpenSegment,
+                    onOpenInTopicMap: { topic in
+                        topicMapViewModel?.pendingFocusTopic = topic
+                    }
+                )
+            }
+        }
+    }
+
+    private func openCloud(topic: String?) {
+        guard meeting != nil else {
+            if let topic {
+                topicMapViewModel?.pendingFocusTopic = topic
+            }
+            return
+        }
+        cloudTopic = topic
+        showCloud = true
     }
 }
 
@@ -45,21 +144,31 @@ extension EnvironmentValues {
 
 struct TopicBadge: View {
     let topic: String
+    var onSelect: (() -> Void)?
     @Environment(\.topicMapViewModel) private var topicMapViewModel
+    @Environment(\.meetingFindQuery) private var findQuery
 
     var body: some View {
         Button {
-            topicMapViewModel?.pendingFocusTopic = topic
+            if let onSelect {
+                onSelect()
+            } else {
+                topicMapViewModel?.pendingFocusTopic = topic
+            }
         } label: {
-            Text(topic)
-                .font(.caption)
+            HighlightedBody(text: topic, query: findQuery, font: .caption, color: .purple)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(.purple.opacity(0.1), in: Capsule())
-                .foregroundStyle(.purple)
+                .background(
+                    findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || topic.range(of: findQuery, options: [.caseInsensitive, .diacriticInsensitive]) == nil
+                        ? Color.purple.opacity(0.1)
+                        : Color.yellow.opacity(0.28),
+                    in: Capsule()
+                )
         }
         .buttonStyle(.plain)
-        .help("View in Topic Map")
+        .help(onSelect == nil ? "View in Topic Map" : "Show conversation about \(topic)")
     }
 }
 

@@ -19,8 +19,12 @@ final class RecordingViewModel {
         case analyzing
     }
 
+    static let liveIntelligenceDefaultsKey = "liveIntelligenceEnabled"
+
     var state: RecordingState = .idle
     var aiActivityState: AIActivityState = .idle
+    /// Rolling Grok/Claude while recording. Independent of Watch-for-meetings.
+    var liveIntelligenceEnabled: Bool = UserDefaults.standard.object(forKey: liveIntelligenceDefaultsKey) as? Bool ?? true
     /// True while `stopRecording` is tearing down the previous recording's
     /// audio capture and persisting its transcript. Set synchronously at the
     /// start of stop and cleared as soon as that fast teardown finishes (before
@@ -67,6 +71,7 @@ final class RecordingViewModel {
     private let log = LogManager.shared
     private var timer: Timer?
     private var processingTasks: [Task<Void, Never>] = []
+    private var intelligenceTask: Task<Void, Never>?
     private var modelContext: ModelContext?
     private var lastPersistedSegmentCount: Int = 0
 
@@ -133,6 +138,9 @@ final class RecordingViewModel {
     private let coordinator = TranscriptionCoordinator()
     private let vocabularyManager = VocabularyManager()
     let speakerContactMapper = SpeakerContactMapper()
+    let speakerRoster = SpeakerRoster()
+    let speakerUndo = SpeakerLabelUndo()
+    var voicePrintProgress: VoicePrintEnrollmentProgress = .idle
 
     // Calendar & Meeting Prep
     let calendarService = CalendarService()
@@ -200,6 +208,7 @@ final class RecordingViewModel {
         selectedEvent = event
         calendarSelectionCleared = false
         refreshPrepContext(in: modelContext)
+        seedRoster(from: event)
     }
 
     /// Explicit "Not a calendar meeting": clears the selection + prep and
@@ -245,6 +254,8 @@ final class RecordingViewModel {
         // post-hoc "link a past meeting" flow).
         calendarService.linkEvent(event, to: meeting, in: modelContext, setTitle: true)
         speakerContactMapper.prepopulate(from: meeting.attendees)
+        seedRoster(from: meeting)
+        coordinator.inviteeNames = meeting.attendees.map(\.name)
     }
 
     /// Manual variant invoked from the recording toolbar. Operates on the
@@ -323,6 +334,7 @@ final class RecordingViewModel {
 
         // Re-populate speaker mapper from attendees
         speakerContactMapper.prepopulate(from: meeting.attendees)
+        seedRoster(from: meeting)
 
         log.log("Resuming interrupted recording (\(sorted.count) existing segments, \(meeting.formattedDuration) elapsed)", category: .audio)
 
@@ -426,6 +438,40 @@ final class RecordingViewModel {
         }
     }
 
+    func setLiveIntelligenceEnabled(_ enabled: Bool) {
+        liveIntelligenceEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.liveIntelligenceDefaultsKey)
+        if !enabled {
+            stopLiveIntelligence(reason: "user turned Live AI off")
+        } else if state == .recording, intelligenceTask == nil {
+            startIntelligenceService()
+        }
+    }
+
+    func stopLiveIntelligence(reason: String) {
+        intelligenceTask?.cancel()
+        intelligenceTask = nil
+        intelligenceService = nil
+        aiActivityState = .idle
+        log.log("Live AI stopped: \(reason)", category: .ai)
+    }
+
+    /// Stop recording, cancel live AI, and disarm auto-start. Idle then
+    /// captures no audio until Watch or Record is used again.
+    func killSwitch(in modelContext: ModelContext) {
+        stopLiveIntelligence(reason: "kill switch")
+        liveIntelligenceEnabled = false
+        UserDefaults.standard.set(false, forKey: Self.liveIntelligenceDefaultsKey)
+        UserDefaults.standard.set(false, forKey: "autoStartRecording")
+        setAutoDetectionEnabled(false)
+        if state == .recording || state == .paused {
+            stopRecording(in: modelContext)
+        }
+        errorMessage = CaptureSafetyPolicy.StopReason.killSwitch.message
+        log.log("Kill switch: recording, live AI, and auto-start are off", category: .audio, level: .warning)
+        TransientActivityCoordinator.shared.flash(CaptureSafetyPolicy.StopReason.killSwitch.message)
+    }
+
     func startRecording(in modelContext: ModelContext, autoDetected: Bool = false, resuming existing: Meeting? = nil) {
         // Guard against rapid double-click / stale UI triggering two starts in
         // a row. If we're already recording or paused, ignore silently and log
@@ -500,6 +546,10 @@ final class RecordingViewModel {
                 meetingID: meeting.id
             )
         }
+        applyRosterToMeeting(meeting, in: modelContext)
+        seedRoster(from: meeting)
+        coordinator.inviteeNames = meeting.attendees.map(\.name)
+        coordinator.myLabels = [SpeakerNames.effectiveMeName, Speaker.defaultMeLabel].compactMap { $0 }
         self.modelContext = modelContext
         currentMeeting = meeting
         state = .recording
@@ -749,6 +799,7 @@ final class RecordingViewModel {
 
         meeting.status = .completed
         meeting.duration = elapsedTime
+        GrokLibrary.upsert(meeting)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -898,7 +949,8 @@ final class RecordingViewModel {
                     if let result = try await service.performFinalAnalysis(
                         segments: finalSnapshots,
                         roster: roster,
-                        screenObservations: screenBlock
+                        screenObservations: screenBlock,
+                        calendarTitle: meeting.analysisTitleHint
                     ) {
                         resultSummary = result.summary
                         resultActionItems = result.actionItems.map { parsed in
@@ -1371,7 +1423,7 @@ final class RecordingViewModel {
     func addManualNote() {
         guard !manualNote.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         let segment = TranscriptSegment(
-            speaker: .me,
+            speaker: Speaker.resolvedMe(),
             text: "[Note] \(manualNote)",
             startTime: elapsedTime,
             endTime: elapsedTime,
@@ -1381,16 +1433,41 @@ final class RecordingViewModel {
         manualNote = ""
     }
 
+    /// First-open prompt so Record is not the first time macOS asks. Safe
+    /// to call repeatedly; only `.notDetermined` shows a dialog.
+    func promptForMicrophoneIfNeeded() async {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else { return }
+        _ = await AVCaptureDevice.requestAccess(for: .audio)
+    }
+
     // MARK: - Real Audio Capture
 
     private func startRealCapture(meetingID: UUID) {
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            Task { @MainActor in
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+                self.startRealCaptureAfterMicAuth(meetingID: meetingID)
+            }
+            return
+        }
+        startRealCaptureAfterMicAuth(meetingID: meetingID)
+    }
+
+    private func startRealCaptureAfterMicAuth(meetingID: UUID) {
         let storageManager = StorageManager.shared
 
         let micAuthStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         log.log("Mic permission at capture start: \(micAuthStatus.rawValue) (\(Self.describe(authorization: micAuthStatus)))\(autoDetectedRecordingStart ? " [auto-detected]" : "")", category: .audio)
         if micAuthStatus != .authorized {
-            errorMessage = "Microphone permission is not granted (\(Self.describe(authorization: micAuthStatus))). Mic audio will not be captured. Grant permission in System Settings → Privacy & Security → Microphone."
+            errorMessage = "Microphone permission is not granted (\(Self.describe(authorization: micAuthStatus))). Mic audio will not be captured. Grant permission in System Settings → Privacy & Security → Microphone — this DMG is a new identity after each ad-hoc install."
             log.log("Mic permission not granted — recording will have no mic audio", category: .audio, level: .warning)
+            AudioSessionManager.openMicrophonePrivacySettings()
+        }
+
+        // System-audio taps / screen share also reset TCC on each ad-hoc
+        // replace. Prompt here if this binary has never been granted.
+        Task {
+            _ = await ScreenCapturePermission.probe(requestIfNeeded: true)
         }
 
         if let free = Self.freeDiskBytesForRecordings(), free < 500_000_000 {
@@ -1406,6 +1483,7 @@ final class RecordingViewModel {
         let coordTask = Task {
             do {
                 try await coordinator.start()
+                await self.seedEnrolledVoicePrints()
                 await MainActor.run {
                     self.log.log("Transcription coordinator started", category: .transcription)
                 }
@@ -1468,6 +1546,7 @@ final class RecordingViewModel {
                 var summedAmplitude: Float = 0
                 var lastDiagLog = Date()
                 var silenceWarningSurfaced = false
+                var micEncodeGaveUp = false
                 let captureStart = Date()
 
                 for await taggedBuffer in micStream {
@@ -1479,7 +1558,7 @@ final class RecordingViewModel {
                     if !firstBufferLogged {
                         firstBufferLogged = true
                         await MainActor.run {
-                            self.log.log("First mic buffer arrived (RMS \(String(format: "%.4f", level)), \(taggedBuffer.buffer.frameLength) frames @ \(Int(taggedBuffer.buffer.format.sampleRate))Hz, autoDetected=\(autoDetectedStart))", category: .audio)
+                            self.log.log("First mic buffer arrived (RMS \(String(format: "%.4f", level)), \(taggedBuffer.buffer.frameLength) frames, \(AudioFileWriter.describeFormat(taggedBuffer.buffer.format)), autoDetected=\(autoDetectedStart))", category: .audio)
                         }
                     }
                     // Periodic amplitude summary so silent-mic recordings are
@@ -1531,27 +1610,30 @@ final class RecordingViewModel {
                         lastDiagLog = Date()
                     }
 
-                    if !(await micWriter.isWriting) {
+                    if !(await micWriter.isWriting), !micEncodeGaveUp {
                         do {
                             try await micWriter.start(inputFormat: taggedBuffer.buffer.format)
                         } catch let err as AudioFileWriterError {
                             if case .encoderPreflightFailed = err {
+                                micEncodeGaveUp = true
                                 await MainActor.run {
-                                    self.errorMessage = "Mic audio encoder rejected the input format (\(err.localizedDescription)). Audio will not be saved for this recording."
+                                    self.errorMessage = "Mic audio could not be saved (\(err.localizedDescription)). Transcription will still run."
                                 }
                                 self.log.log("Mic preflight failed: \(err.localizedDescription)", category: .audio, level: .error)
-                                break
+                            } else {
+                                await self.recordWriteFailure(source: "mic", writer: micWriter, error: err)
                             }
-                            await self.recordWriteFailure(source: "mic", writer: micWriter, error: err)
                         } catch {
                             await self.recordWriteFailure(source: "mic", writer: micWriter, error: error)
                         }
                     }
-                    do {
-                        try await micWriter.write(taggedBuffer.buffer)
-                    } catch {
-                        let stop = await self.recordWriteFailure(source: "mic", writer: micWriter, error: error)
-                        if stop { break }
+                    if await micWriter.isWriting {
+                        do {
+                            try await micWriter.write(taggedBuffer.buffer)
+                        } catch {
+                            let stop = await self.recordWriteFailure(source: "mic", writer: micWriter, error: error)
+                            if stop { break }
+                        }
                     }
 
                     await MainActor.run {
@@ -1699,6 +1781,7 @@ final class RecordingViewModel {
     // MARK: - AI Intelligence
 
     private func startIntelligenceService() {
+        guard liveIntelligenceEnabled else { return }
         let prepCtx = prepContext
         let aiTask = Task { [weak self] in
             guard let self else { return }
@@ -1720,9 +1803,9 @@ final class RecordingViewModel {
                 return
             }
 
-            let model = UserDefaults.standard.string(forKey: "claudeModel") ?? "claude-sonnet-4-20250514"
+            let modelID = client.modelIdentifier
             await MainActor.run {
-                self.log.log("AI intelligence service starting (model: \(model))", category: .ai)
+                self.log.log("AI intelligence service starting (model: \(modelID))", category: .ai)
             }
             let meetingID = await MainActor.run { self.currentMeeting?.id }
             let service = AIIntelligenceService(
@@ -1741,6 +1824,15 @@ final class RecordingViewModel {
             await self.countdown(seconds: 30, label: "first analysis")
 
             while !Task.isCancelled {
+                let liveOff = await MainActor.run {
+                    CaptureSafetyPolicy.shouldStopLiveAI(liveEnabled: self.liveIntelligenceEnabled)
+                }
+                if liveOff {
+                    await MainActor.run {
+                        self.stopLiveIntelligence(reason: "Live AI turned off")
+                    }
+                    break
+                }
                 await MainActor.run {
                     self.aiActivityState = .analyzing
                 }
@@ -1750,7 +1842,7 @@ final class RecordingViewModel {
                 // calendar event is linked/unlinked mid-recording.
                 let roster = await MainActor.run { self.currentMeeting.map { MeetingRoster.snapshot(for: $0) } }
                 await MainActor.run {
-                    self.log.log("AI sending \(snapshots.count) segments to Claude API", category: .ai)
+                    self.log.log("AI sending \(snapshots.count) segments to \(modelID)", category: .ai)
                 }
 
                 // New screen observations since the last successful pass,
@@ -1816,6 +1908,7 @@ final class RecordingViewModel {
                 await self.countdown(seconds: 45, label: "next analysis")
             }
         }
+        intelligenceTask = aiTask
         processingTasks.append(aiTask)
     }
 
@@ -1836,6 +1929,245 @@ final class RecordingViewModel {
                 }
             }
             try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    /// Remember this diarized speaker as a People contact and apply the
+    /// contact's name for the rest of the session.
+    func linkSpeakerToContact(_ speaker: Speaker, contact: Contact) {
+        speakerContactMapper.remember(speaker.displayName, contact: contact)
+        if !contact.speakerAliases.contains(where: { $0.compare(speaker.displayName, options: .caseInsensitive) == .orderedSame }) {
+            contact.speakerAliases.append(speaker.displayName)
+        }
+        if speaker.isMe { return }
+        if speaker.displayName.compare(contact.name, options: .caseInsensitive) != .orderedSame {
+            renameSpeaker(speaker, to: contact.name)
+        }
+        if let meeting = currentMeeting, !meeting.attendees.contains(where: { $0.id == contact.id }) {
+            meeting.attendees.append(contact)
+        }
+    }
+
+    func seedEnrolledVoicePrints() async {
+        guard let modelContext else { return }
+        let contacts = (try? modelContext.fetch(FetchDescriptor<Contact>())) ?? []
+        let attendeeIDs = Set((currentMeeting?.attendees ?? []).map(\.id))
+        let seeded = VoicePrintSeeding.contactsToSeed(
+            contacts: contacts,
+            meetingAttendeeIDs: attendeeIDs,
+            myContactID: Meeting.storedMyContactID
+        )
+        let prints: [(Speaker, [Float])] = seeded.compactMap { contact in
+            guard let embedding = contact.voicePrintEmbedding() else { return nil }
+            if contact.id == Meeting.storedMyContactID {
+                return (Speaker.resolvedMe(), embedding)
+            }
+            return (.other(contact.name), embedding)
+        }
+        guard !prints.isEmpty else { return }
+        await coordinator.seedEnrolledPrints(prints)
+        log.log("Seeded \(prints.count) voice print(s) for this meeting (not the whole People list)", category: .transcription)
+    }
+
+    func enrollVoicePrint(for speaker: Speaker) {
+        Task { await performVoicePrintEnrollment(for: speaker) }
+    }
+
+    func performVoicePrintEnrollment(for speaker: Speaker) async {
+        voicePrintProgress = .working(speaker.identityKey)
+        let contacts = (try? modelContext?.fetch(FetchDescriptor<Contact>())) ?? []
+        let mapped = speakerContactMapper.speakerToContact[speaker.displayName]
+        var contact = VoicePrintEnrollment.resolveContact(for: speaker, contacts: contacts, mapped: mapped)
+
+        if contact == nil, !speaker.isGuestPlaceholder, !speaker.displayNameIsPlaceholder {
+            let created = Contact(name: speaker.displayName)
+            modelContext?.insert(created)
+            contact = created
+        }
+
+        guard let contact else {
+            voicePrintProgress = .failed(speaker.identityKey, VoicePrintEnrollment.EnrollmentError.needsPerson.localizedDescription)
+            return
+        }
+
+        do {
+            var embedding = await coordinator.voicePrint(for: speaker)
+            if embedding == nil || (embedding?.count ?? 0) < 8 {
+                guard let meeting = currentMeeting else {
+                    throw VoicePrintEnrollment.EnrollmentError.notEnoughAudio
+                }
+                guard let request = VoicePrintEnrollment.request(
+                    for: speaker,
+                    in: meeting,
+                    segments: segments
+                ) else {
+                    throw VoicePrintEnrollment.EnrollmentError.notEnoughAudio
+                }
+                embedding = try await VoicePrintEnrollment.extractEmbedding(request)
+            }
+            guard let embedding, embedding.count >= 8 else {
+                throw VoicePrintEnrollment.EnrollmentError.notEnoughAudio
+            }
+            contact.mergeVoicePrint(embedding)
+            speakerContactMapper.remember(speaker.displayName, contact: contact)
+            if !contact.speakerAliases.contains(where: { $0.compare(speaker.displayName, options: .caseInsensitive) == .orderedSame }) {
+                contact.speakerAliases.append(speaker.displayName)
+            }
+            if !speaker.isMe, speaker.displayName.compare(contact.name, options: .caseInsensitive) != .orderedSame {
+                renameSpeaker(speaker, to: contact.name)
+            }
+            if let context = modelContext {
+                PersistenceGate.save(context, site: "enrollVoicePrint", critical: false, meetingID: currentMeeting?.id)
+            }
+            await coordinator.seedEnrolledPrints([(contact.id == Meeting.storedMyContactID ? Speaker.resolvedMe() : .other(contact.name), embedding)])
+            voicePrintProgress = .idle
+            log.log("Enrolled voice print for \(contact.name)", category: .transcription)
+        } catch {
+            voicePrintProgress = .failed(speaker.identityKey, error.localizedDescription)
+            log.log("Voice-print enroll failed: \(error.localizedDescription)", category: .transcription, level: .warning)
+        }
+    }
+
+    func voicePrintState(for speaker: Speaker, contacts: [Contact]) -> VoicePrintUIState {
+        if case .working(let key) = voicePrintProgress, key == speaker.identityKey {
+            return .working
+        }
+        if case .failed(let key, let message) = voicePrintProgress, key == speaker.identityKey {
+            return .failed(message)
+        }
+        let mapped = speakerContactMapper.speakerToContact[speaker.displayName]
+        if let contact = VoicePrintEnrollment.resolveContact(for: speaker, contacts: contacts, mapped: mapped),
+           contact.hasVoicePrint {
+            return .enrolled(onto: contact.name, at: contact.voicePrintUpdatedAt)
+        }
+        if let contact = VoicePrintEnrollment.resolveContact(for: speaker, contacts: contacts, mapped: mapped) {
+            return .ready(onto: contact.name)
+        }
+        if speaker.isGuestPlaceholder {
+            return .needsPerson
+        }
+        return .ready(onto: speaker.displayName)
+    }
+
+    func seedRoster(from meeting: Meeting) {
+        let myID = Meeting.storedMyContactID
+        let names = meeting.attendees
+            .filter { $0.id != myID }
+            .map(\.name)
+        speakerRoster.seed(
+            attendeeNames: names,
+            meName: SpeakerNames.effectiveMeName
+        )
+        if let myID {
+            if let index = speakerRoster.seats.firstIndex(where: \.isMe) {
+                speakerRoster.seats[index].contactID = myID
+            }
+        }
+        for index in speakerRoster.seats.indices {
+            if speakerRoster.seats[index].contactID != nil { continue }
+            if let contact = meeting.attendees.first(where: {
+                SpeakerNameMatcher.samePerson(speakerRoster.seats[index].name, $0.name)
+                    || $0.name.compare(speakerRoster.seats[index].name, options: .caseInsensitive) == .orderedSame
+            }) {
+                speakerRoster.seats[index].contactID = contact.id
+            }
+        }
+    }
+
+    func seedRoster(from event: CalendarEvent) {
+        let names = event.attendees
+            .filter { !$0.isCurrentUser }
+            .map(\.name)
+        speakerRoster.seed(
+            attendeeNames: names,
+            meName: SpeakerNames.effectiveMeName
+        )
+    }
+
+    func applyRosterToMeeting(_ meeting: Meeting, in modelContext: ModelContext) {
+        for seat in speakerRoster.seats where !seat.isMe {
+            if meeting.attendees.contains(where: {
+                $0.name.compare(seat.name, options: .caseInsensitive) == .orderedSame
+            }) {
+                continue
+            }
+            if let contactID = seat.contactID {
+                let id = contactID
+                let descriptor = FetchDescriptor<Contact>(predicate: #Predicate { $0.id == id })
+                if let contact = try? modelContext.fetch(descriptor).first,
+                   !meeting.attendees.contains(where: { $0.id == contact.id }) {
+                    meeting.attendees.append(contact)
+                    continue
+                }
+            }
+            let contact = Contact(name: seat.name)
+            modelContext.insert(contact)
+            meeting.attendees.append(contact)
+            if let index = speakerRoster.seats.firstIndex(where: { $0.id == seat.id }) {
+                speakerRoster.seats[index].contactID = contact.id
+            }
+        }
+    }
+
+    /// Bind every line of a detected voice to a roster person and lock the ID.
+    func assignDetectedVoice(_ detected: Speaker, to seat: SpeakerRoster.Seat) {
+        speakerRoster.bind(detected: detected, to: seat.id)
+        speakerRoster.setLocked(seat.id, true)
+        if detected.isMe { return }
+        renameSpeaker(detected, to: seat.name)
+        speakerRoster.adopt(from: detected, onto: seat.speaker, in: coordinator.segments)
+        speakerRoster.unifyOntoSeats(in: coordinator.segments)
+        if let contactID = seat.contactID {
+            let id = contactID
+            let descriptor = FetchDescriptor<Contact>(predicate: #Predicate { $0.id == id })
+            if let contact = try? modelContext?.fetch(descriptor).first {
+                linkSpeakerToContact(detected, contact: contact)
+            }
+        }
+    }
+
+    /// Paint one transcript line as a roster person (does not rename every
+    /// line that shared the old guest ID — use assignDetectedVoice for that).
+    func tagSegment(_ id: UUID, as seat: SpeakerRoster.Seat) {
+        speakerUndo.capture(coordinator.segments)
+        coordinator.relabelSegments([id], to: seat.speaker)
+        speakerRoster.bind(detected: seat.speaker, to: seat.id)
+        refreshSegmentsFromCoordinator()
+    }
+
+    func undoLastSpeakerChange() {
+        guard let labels = speakerUndo.pop() else { return }
+        SpeakerLabelUndo.apply(labels, to: coordinator.segments)
+        refreshSegmentsFromCoordinator()
+        log.log("Undid last speaker remapping", category: .transcription)
+    }
+
+    /// Mid-session speaker rename. Applies to past and future segments for
+    /// that diarization identity. For the local speaker, `saveAsDefault`
+    /// writes Settings; otherwise only this recording is affected.
+    func renameSpeaker(_ speaker: Speaker, to displayName: String, saveAsDefault: Bool = false) {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if speaker.isMe {
+            SpeakerNames.setSessionMeName(trimmed, saveAsDefault: saveAsDefault)
+        }
+
+        let newSpeaker = Speaker.renamed(from: speaker, displayName: trimmed)
+        speakerUndo.capture(coordinator.segments)
+        coordinator.relabelSpeaker(speaker, to: newSpeaker)
+        refreshSegmentsFromCoordinator()
+        log.log("Renamed speaker \(speaker.displayName) → \(newSpeaker.displayName)", category: .transcription)
+    }
+
+    private func refreshSegmentsFromCoordinator() {
+        let dedupResult = TranscriptDeduplicator.deduplicate(coordinator.segments)
+        segments = dedupResult.segments
+        for i in 0..<segments.count {
+            if let recorded = segmentSectionTags[segments[i].id] {
+                segments[i].sectionTag = recorded.tag
+                segments[i].sectionTagID = recorded.tagID
+            }
         }
     }
 
@@ -1959,10 +2291,27 @@ final class RecordingViewModel {
             Task { @MainActor in
                 guard let self, let start = self.recordingStartDate else { return }
                 self.elapsedTime = Date().timeIntervalSince(start) - self.accumulatedPauseDuration
+                self.applyCaptureSafetyCaps()
             }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+    }
+
+    private func applyCaptureSafetyCaps() {
+        let lastSpeech = segments.map(\.endTime).max() ?? 0
+        let gap = elapsedTime - lastSpeech
+        if let reason = CaptureSafetyPolicy.shouldAutoStopRecording(
+            elapsed: elapsedTime,
+            autoDetected: autoDetectedRecordingStart,
+            secondsSinceSpeech: segments.isEmpty ? elapsedTime : gap
+        ), let context = modelContext {
+            errorMessage = reason.message
+            log.log("Auto-stop: \(reason.message)", category: .audio, level: .warning)
+            TransientActivityCoordinator.shared.flash(reason.message)
+            stopRecording(in: context, autoDetected: true)
+            return
+        }
     }
 
     /// Record a write failure and decide whether the capture loop should stop.
@@ -2028,8 +2377,7 @@ final class RecordingViewModel {
             sum += sample * sample
         }
         let rms = sqrt(sum / Float(frameCount))
-        // Convert to 0-1 range (rough normalization)
-        return min(rms * 5, 1.0)
+        return rms
     }
 }
 

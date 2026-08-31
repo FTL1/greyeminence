@@ -1,9 +1,12 @@
+import AppKit
 import SwiftUI
 import SwiftData
 
 struct DeveloperSettingsView: View {
     @AppStorage("developerToolsEnabled") private var developerToolsEnabled = false
+    @AppStorage(DevLog.verboseDefaultsKey) private var verboseLogging = false
     @State private var showPromptEditor = false
+    @State private var exportError: String?
     @Environment(\.modelContext) private var modelContext
     @State private var debugInfo: DebugInfo?
 
@@ -11,6 +14,7 @@ struct DeveloperSettingsView: View {
         Form {
             Section {
                 Toggle("Enable developer tools", isOn: $developerToolsEnabled)
+                    .helpTip(.settingsDevTools)
                 Text("Shows the Activity Log in the sidebar and deduplication debug tools in the transcript view.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -20,6 +24,34 @@ struct DeveloperSettingsView: View {
                     .foregroundStyle(.primary)
                     .textCase(nil)
             }
+
+            Section {
+                Toggle("Dev Mode (verbose log)", isOn: $verboseLogging)
+                    .helpTip(.settingsDevMode)
+                Text("Records speaker clicks, renames, AI failures, and other diagnostics. Leave this on while testing so you can export a file for debugging.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Export debug log…") {
+                    do {
+                        try DevLogExporter.presentSavePanel()
+                    } catch {
+                        exportError = error.localizedDescription
+                    }
+                }
+                .helpTip(.settingsExportLog)
+                if let exportError {
+                    Text(exportError)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Label("Dev Mode", systemImage: "ladybug")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+            }
+
+            PermissionsHealthView()
 
             if developerToolsEnabled {
                 Section {
@@ -34,7 +66,7 @@ struct DeveloperSettingsView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    Text("Override the prompts sent to Claude for meeting analysis. Changes take effect on the next AI call. Clearing an override restores the built-in default.")
+                    Text("Override the prompts sent to the selected AI provider (Grok, Claude, or Bedrock) for meeting analysis. Changes take effect on the next AI call. Clearing an override restores the built-in default.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {

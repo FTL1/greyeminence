@@ -20,6 +20,10 @@ final class Meeting {
     var isAnalyzing: Bool = false
     var analysisError: String?
     var isInterviewMeeting: Bool = false
+    /// User filed this meeting away from the recent Meetings list. Archive
+    /// still lists it. Older-than-three-months meetings are in Archive even
+    /// when this is false.
+    var isArchived: Bool = false
     var createdAt: Date
 
     /// Identifier of the transcription backend used to produce the current
@@ -75,6 +79,14 @@ final class Meeting {
 
     /// True when this meeting is currently associated with a calendar event.
     var isLinkedToCalendar: Bool { calendarEventID != nil }
+
+    /// Title hint for AI analysis: the calendar event name when linked,
+    /// otherwise the stored title. May be generic or wrong — prompts treat it
+    /// as a hint, not as the meeting's purpose.
+    var analysisTitleHint: String {
+        let cal = calendarEventTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return cal.isEmpty ? title : cal
+    }
 
     @Relationship(deleteRule: .cascade, inverse: \TranscriptSegment.meeting)
     var segments: [TranscriptSegment]
@@ -132,14 +144,59 @@ final class Meeting {
         insights.max(by: { $0.createdAt < $1.createdAt })
     }
 
-    /// Record an AI-generated title. Always stored in `generatedTitle`; only
-    /// promoted to the visible `title` when the meeting isn't linked to a
-    /// calendar event (a linked meeting keeps the event's name).
+    /// On-screen list: the user's items, unowned items, and the other person
+    /// in a 1:1. Everyone's commitments stay stored for dossiers.
+    @MainActor
+    func paneActionItems() -> [ActionItem] {
+        let roster = MeetingRoster.snapshot(for: self)
+        return actionItems.filter {
+            AIIntelligenceService.keepsActionItem(
+                assignee: $0.displayAssignee ?? $0.assignee,
+                roster: roster
+            )
+        }
+        .sorted { lhs, rhs in
+            let left = lhs.sortIndex ?? Int.max
+            let right = rhs.sortIndex ?? Int.max
+            if left != right { return left < right }
+            return lhs.createdAt < rhs.createdAt
+        }
+    }
+
+    /// User typed a session name. Empty strings are ignored so a stray
+    /// clear doesn't blank the meeting.
+    @discardableResult
+    func renameDisplayTitle(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if trimmed == title { return false }
+        title = trimmed
+        return true
+    }
+
+    /// Placeholder names the AI (or calendar unlink) is allowed to replace.
+    static func isAutomaticTitle(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        if trimmed == "Untitled" || trimmed == "New Recording" { return true }
+        if trimmed.hasPrefix("Meeting ") { return true }
+        return false
+    }
+
+    /// Record an AI-generated title. Always stored in `generatedTitle`.
+    /// The visible `title` is left alone when the meeting is calendar-linked
+    /// or the user already typed a name.
     func applyGeneratedTitle(_ newTitle: String) {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let previousGenerated = generatedTitle
         generatedTitle = trimmed
-        if !isLinkedToCalendar {
+        if isLinkedToCalendar { return }
+        if previousGenerated == nil {
+            if Self.isAutomaticTitle(title) { title = trimmed }
+            return
+        }
+        if title == previousGenerated {
             title = trimmed
         }
     }

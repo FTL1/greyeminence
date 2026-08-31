@@ -5,6 +5,7 @@ struct MeetingDetailView: View {
     @Bindable var meeting: Meeting
     var onSplitMeeting: ((Meeting) -> Void)?
     @Binding var scrollToSegmentID: UUID?
+    @State private var meetingFind = MeetingFindController()
 
     init(
         meeting: Meeting,
@@ -34,6 +35,7 @@ struct MeetingDetailView: View {
             )
         }
         .frame(maxHeight: .infinity, alignment: .top)
+        .environment(meetingFind)
     }
 }
 

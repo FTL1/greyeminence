@@ -110,4 +110,53 @@ final class MeetingListGroupingTests: XCTestCase {
         XCTAssertEqual(grouped.first?.1.map(\.title), ["July call"])
         XCTAssertEqual(grouped.last?.1.map(\.title), ["June call"])
     }
+
+    func testSeriesGroupsSameTitleNewestFirst() throws {
+        let context = try makeContext()
+        let older = makeMeeting(date(2026, 7, 7), title: "Weekly Priorities", in: context)
+        let newer = makeMeeting(date(2026, 8, 11), title: "Weekly Priorities", in: context)
+        let other = makeMeeting(date(2026, 8, 13), title: "Civil Engineering Services Discussion", in: context)
+
+        let grouped = MeetingListGrouping.namedSections(
+            for: [older, newer, other],
+            related: false
+        )
+
+        XCTAssertEqual(grouped.map(\.0), [
+            "Civil Engineering Services Discussion",
+            "Weekly Priorities",
+        ])
+        XCTAssertEqual(grouped[1].1.map(\.date), [newer.date, older.date])
+    }
+
+    func testRelatedGroupsSharedLeadingWords() throws {
+        let context = try makeContext()
+        let standup = makeMeeting(date(2026, 8, 13), title: "Weekly Standup", in: context)
+        let priorities = makeMeeting(date(2026, 8, 11), title: "Weekly Priorities", in: context)
+        let older = makeMeeting(date(2026, 7, 7), title: "Weekly Priorities", in: context)
+        let other = makeMeeting(date(2026, 8, 12), title: "Civil Engineering Services Discussion", in: context)
+
+        let grouped = MeetingListGrouping.namedSections(
+            for: [standup, priorities, older, other],
+            related: true
+        )
+
+        XCTAssertEqual(grouped.map(\.0), [
+            "Exec series",
+            "Civil Engineering Services Discussion",
+        ])
+        XCTAssertEqual(grouped[0].1.map(\.id), [standup.id, priorities.id, older.id])
+    }
+
+    func testSeriesUsesCalendarSeriesTitleOverGeneratedTitle() throws {
+        let context = try makeContext()
+        let first = makeMeeting(date(2026, 8, 11), title: "Generated title A", in: context)
+        first.seriesTitle = "Weekly Priorities"
+        let second = makeMeeting(date(2026, 7, 21), title: "Generated title B", in: context)
+        second.seriesTitle = "Weekly Priorities"
+
+        let grouped = MeetingListGrouping.namedSections(for: [first, second], related: false)
+        XCTAssertEqual(grouped.map(\.0), ["Weekly Priorities"])
+        XCTAssertEqual(grouped[0].1.count, 2)
+    }
 }

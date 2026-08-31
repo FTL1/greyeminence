@@ -14,6 +14,10 @@ struct EditableTranscriptSegmentRow: View {
     /// When set (meeting has captured screen frames), the timestamp becomes
     /// a click target that seeks the screen-share player to this moment.
     var onSeekToTime: ((TimeInterval) -> Void)?
+    var onPlayLine: (() -> Void)?
+    var isPlayingLine: Bool = false
+    var speakerActions: SpeakerBadgeActions = SpeakerBadgeActions()
+    var highlightQuery: String = ""
 
     @State private var isEditingText = false
     @State private var editedText: String = ""
@@ -60,8 +64,17 @@ struct EditableTranscriptSegmentRow: View {
             // Speaker badge
             speakerBadgeView
 
-            // Edited indicator
-            if segment.isEdited {
+            if onPlayLine != nil {
+                Button {
+                    onPlayLine?()
+                } label: {
+                    Image(systemName: isPlayingLine ? "stop.fill" : "play.fill")
+                        .font(.caption2)
+                        .foregroundStyle(isPlayingLine ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(isPlayingLine ? "Stop this line" : "Play the audio for this line")
+            } else if segment.isEdited {
                 Image(systemName: "pencil")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -97,40 +110,37 @@ struct EditableTranscriptSegmentRow: View {
 
     @ViewBuilder
     private var speakerBadgeView: some View {
-        SpeakerBadge(speaker: segment.speaker)
-            .contextMenu {
-                Button("Change Speaker...") {
-                    showContactPicker = true
-                }
-                Button("Rename Speaker...") {
-                    speakerName = segment.speaker.displayName
-                    showSpeakerRename = true
-                }
-                Divider()
-                Menu("Change All From This Speaker") {
-                    Button("Change to Me") {
-                        changeSpeakerForAll(to: .me)
-                    }
-                    Button("Rename All...") {
-                        speakerName = segment.speaker.displayName
-                        showSpeakerRename = true
-                    }
-                }
-                if !segment.speaker.isMe {
-                    Button("Set as Me") {
-                        changeSpeaker(to: .me)
-                    }
-                }
+        SpeakerBadge(
+            speaker: segment.speaker,
+            actions: mergedSpeakerActions
+        )
+        .popover(isPresented: $showContactPicker) {
+            ContactPicker(excludedContacts: []) { contact in
+                changeSpeakerForAll(to: .other(contact.name))
+                showContactPicker = false
             }
-            .popover(isPresented: $showContactPicker) {
-                ContactPicker(excludedContacts: []) { contact in
-                    changeSpeaker(to: .other(contact.name))
-                    showContactPicker = false
-                }
+        }
+        .popover(isPresented: $showSpeakerRename) {
+            speakerRenamePopover
+        }
+    }
+
+    /// Editor-specific items (this-one vs all) sit behind the shared speaker menu.
+    private var mergedSpeakerActions: SpeakerBadgeActions {
+        var merged = speakerActions
+        if merged.onRename == nil {
+            merged.onRename = { name, _ in
+                speakerName = name
+                commitSpeakerRename(applyToAll: true)
             }
-            .popover(isPresented: $showSpeakerRename) {
-                speakerRenamePopover
-            }
+        }
+        if merged.onAddToContacts == nil {
+            merged.onAddToContacts = { showContactPicker = true }
+        }
+        if merged.onSetAsMe == nil, !segment.speaker.isMe {
+            merged.onSetAsMe = { changeSpeakerForAll(to: Speaker.resolvedMe()) }
+        }
+        return merged
     }
 
     // MARK: - Speaker Rename Popover
@@ -176,7 +186,7 @@ struct EditableTranscriptSegmentRow: View {
                     // Auto-focus handled by SwiftUI
                 }
         } else {
-            Text(segment.text)
+            Text(TranscriptTextHighlight.attributed(segment.text, query: highlightQuery))
                 .font(.body)
                 .textSelection(.enabled)
                 .onTapGesture(count: 2) {
@@ -290,7 +300,7 @@ struct EditableTranscriptSegmentRow: View {
             return
         }
 
-        let newSpeaker: Speaker = trimmed.lowercased() == "me" ? .me : .other(trimmed)
+        let newSpeaker = Speaker.renamed(from: segment.speaker, displayName: trimmed)
 
         if applyToAll {
             changeSpeakerForAll(to: newSpeaker)

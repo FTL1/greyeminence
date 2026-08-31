@@ -68,6 +68,23 @@ final class TopicMapTests: XCTestCase {
         XCTAssertNil(vm.weightToSelected("nonexistent"))
     }
 
+    func testSpeakerTokenGroupsLocalMeAndPrettyRemotes() {
+        XCTAssertEqual(TopicMapRoster.speakerToken(.me), "me")
+        XCTAssertEqual(TopicMapRoster.speakerToken(.meNamed("Alex")), "me")
+        XCTAssertEqual(TopicMapRoster.speakerToken(.other("Jordan")), "jordan")
+        XCTAssertEqual(TopicMapRoster.speakerToken(.other("Speaker 2")), "speaker-2")
+    }
+
+    func testTopTopicsRanksByMeetingOverlap() {
+        // Labels only — empty meeting lists are ignored.
+        let ranked = TopicMapRoster.topTopics(
+            meetingIDs: [],
+            topicMeetings: ["Budget": [], "Site B": []],
+            limit: 3
+        )
+        XCTAssertTrue(ranked.isEmpty)
+    }
+
     func testNoSelectionMeansNoNeighbours() {
         let vm = TopicMapViewModel()
         vm.nodes = [node("a"), node("b")]

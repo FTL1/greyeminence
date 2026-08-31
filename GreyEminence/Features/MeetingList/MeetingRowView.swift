@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct MeetingRowView: View {
-    let meeting: Meeting
+    @Bindable var meeting: Meeting
+    @Binding var renamingID: UUID?
 
     private var dateLabel: String {
         let calendar = Calendar.current
@@ -31,9 +32,13 @@ struct MeetingRowView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(meeting.title)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
+                    MeetingTitleLabel(
+                        meeting: meeting,
+                        isEditing: renamingBinding,
+                        font: .body,
+                        weight: .medium,
+                        singleClickStartsEditing: false
+                    )
 
                     if meeting.status == .recording {
                         Circle()
@@ -97,5 +102,18 @@ struct MeetingRowView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var renamingBinding: Binding<Bool> {
+        Binding(
+            get: { renamingID == meeting.id },
+            set: { editing in
+                if editing {
+                    renamingID = meeting.id
+                } else if renamingID == meeting.id {
+                    renamingID = nil
+                }
+            }
+        )
     }
 }

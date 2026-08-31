@@ -11,7 +11,7 @@ final class StorageManager: Sendable {
 
     private init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("GreyEminence", isDirectory: true)
+            .appendingPathComponent(AppIdentity.dataFolderName, isDirectory: true)
         self.appSupportURL = base
         self.recordingsURL = base.appendingPathComponent("Recordings", isDirectory: true)
         self.modelsURL = base.appendingPathComponent("Models", isDirectory: true)

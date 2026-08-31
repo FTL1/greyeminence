@@ -22,6 +22,9 @@ final class ActionItem {
     var meeting: Meeting?
     var assignedContact: Contact?
 
+    /// User-defined order in the meeting pane. Nil means "use createdAt".
+    var sortIndex: Int?
+
     init(text: String, assignee: String? = nil, isCompleted: Bool = false) {
         self.id = UUID()
         self.text = text

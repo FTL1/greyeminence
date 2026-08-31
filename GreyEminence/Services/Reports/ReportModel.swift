@@ -23,6 +23,8 @@ struct ReportModel: Sendable, Equatable {
         var title: String
         var date: Date
         var duration: String
+        /// Whole minutes, for export filenames. 0 when the meeting has no clock.
+        var durationMinutes: Int = 0
         var attendees: [String]
         /// "Microsoft Teams", "Zoom", … when the meeting knows where it came from.
         var sourceApp: String?
@@ -99,7 +101,9 @@ struct ReportModel: Sendable, Equatable {
         sections.isEmpty
             && actionItems.isEmpty
             && followUpQuestions.isEmpty
+            && topics.isEmpty
             && shareSessions.isEmpty
+            && transcript.isEmpty
     }
 
     /// Every figure in document order — anchored ones first, then the

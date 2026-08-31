@@ -1,7 +1,6 @@
+import AppKit
 import AVFoundation
-// @preconcurrency: CI's older SDK lacks Sendable annotations on
-// SCShareableContent (see ScreenShareCaptureService).
-@preconcurrency import ScreenCaptureKit
+import CoreAudio
 
 @Observable
 @MainActor
@@ -51,18 +50,53 @@ final class AudioSessionManager {
     }
 
     func checkScreenRecordingPermission() async {
-        // Screen recording permission is checked by attempting to get shareable content.
-        // If the user hasn't granted it, SCShareableContent will throw.
-        let granted = await Self.tryScreenRecordingAccess()
-        screenRecordingPermission = granted ? .granted : .denied
+        let report = await ScreenCapturePermission.probe(requestIfNeeded: false)
+        screenRecordingPermission = report.isEffectivelyGranted ? .granted : .denied
     }
 
-    private nonisolated static func tryScreenRecordingAccess() async -> Bool {
-        do {
-            _ = try await SCShareableContent.current
-            return true
-        } catch {
-            return false
+    /// Each ad-hoc DMG is a new TCC identity. Opening the pane is the only
+    /// recovery when status is already `.denied`.
+    nonisolated static func openMicrophonePrivacySettings() {
+        openPrivacyPane("Privacy_Microphone")
+    }
+
+    nonisolated static func openSystemAudioPrivacySettings() {
+        openPrivacyPane("Privacy_AudioCapture")
+    }
+
+    nonisolated static func openScreenRecordingPrivacySettings() {
+        openPrivacyPane("Privacy_ScreenCapture")
+    }
+
+    /// Tahoe has no handler for `x-apple.systemsettings:…Privacy_AudioCapture`
+    /// (LaunchServices shows “Search App Store”). Sequoia+ also merged
+    /// System Audio into Screen & System Audio Recording.
+    nonisolated static func privacyURLCandidates(for pane: String) -> [String] {
+        switch pane {
+        case "Privacy_AudioCapture":
+            return privacyURLCandidates(for: "Privacy_ScreenCapture")
+        case "Privacy_Notifications":
+            return [
+                "x-apple.systempreferences:com.apple.Notifications-Settings.extension",
+                "x-apple.systempreferences:com.apple.Notifications",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+            ]
+        default:
+            return [
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?\(pane)",
+                "x-apple.systempreferences:com.apple.preference.security?\(pane)",
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension",
+            ]
+        }
+    }
+
+    nonisolated static func openPrivacyPane(_ pane: String) {
+        for string in privacyURLCandidates(for: pane) {
+            guard let url = URL(string: string) else { continue }
+            if NSWorkspace.shared.urlForApplication(toOpen: url) != nil {
+                NSWorkspace.shared.open(url)
+                return
+            }
         }
     }
 

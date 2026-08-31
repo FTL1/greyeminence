@@ -14,6 +14,9 @@ struct AIPricing: Sendable, Equatable {
     static let haiku = AIPricing(inputPerMTok: 1, outputPerMTok: 5)
     static let sonnet = AIPricing(inputPerMTok: 3, outputPerMTok: 15)
     static let opus = AIPricing(inputPerMTok: 15, outputPerMTok: 75)
+    /// Approximate standard-context Grok flagship rates (docs.x.ai/developers/pricing).
+    /// Cache-read formula stays Anthropic-shaped (10% of input) — estimate only.
+    static let grok = AIPricing(inputPerMTok: 2, outputPerMTok: 6)
 
     /// Map a stored model identifier to a price family. Identifiers usually
     /// contain the family name ("anthropic:claude-haiku-…",
@@ -23,6 +26,7 @@ struct AIPricing: Sendable, Equatable {
     /// the UI shows tokens without a cost estimate.
     static func family(forModelIdentifier identifier: String, settings: TrajectorSettings?) -> AIPricing? {
         let lower = identifier.lowercased()
+        if lower.contains("xai:") || lower.contains("grok") { return .grok }
         if lower.contains("haiku") { return .haiku }
         if lower.contains("sonnet") { return .sonnet }
         if lower.contains("opus") { return .opus }

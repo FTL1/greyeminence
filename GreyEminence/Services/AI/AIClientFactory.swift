@@ -3,14 +3,58 @@ import Foundation
 enum AIProvider: String {
     case anthropic
     case bedrock
+    case xai
+
+    var displayName: String {
+        switch self {
+        case .anthropic: "Anthropic API"
+        case .bedrock: "AWS Bedrock"
+        case .xai: "xAI (Grok)"
+        }
+    }
+
+    static func current(defaults: UserDefaults = .standard) -> AIProvider {
+        AIProvider(rawValue: defaults.string(forKey: "aiProvider") ?? "anthropic") ?? .anthropic
+    }
 }
 
 enum AIClientFactory {
+    static let defaultClaudeModel = "claude-sonnet-4-20250514"
+    static let defaultXAIModel = "grok-4.6"
+
+    static let analysisTimeoutDefaultsKey = "aiAnalysisTimeoutSeconds"
+    static let xaiCustomModelDefaultsKey = "xaiCustomModel"
+
+    /// Per-call ceiling for meeting analysis. 0 in UserDefaults means
+    /// provider default (240s xAI, 120s Claude/Bedrock). Settings can
+    /// override from 30…600.
+    static var analysisTimeoutSeconds: Int {
+        let stored = UserDefaults.standard.integer(forKey: analysisTimeoutDefaultsKey)
+        if stored >= 30 { return min(stored, 600) }
+        return current() == .xai ? 240 : 120
+    }
+
+    static func current() -> AIProvider { AIProvider.current() }
+
     static func makeClient() async throws -> (any AIClient)? {
-        let providerRaw = UserDefaults.standard.string(forKey: "aiProvider") ?? "anthropic"
-        let provider = AIProvider(rawValue: providerRaw) ?? .anthropic
-        let model = UserDefaults.standard.string(forKey: "claudeModel") ?? "claude-sonnet-4-20250514"
-        return try await makeClient(provider: provider, model: model)
+        let provider = AIProvider.current()
+        return try await makeClient(provider: provider, model: selectedModel(for: provider))
+    }
+
+    /// Provider-specific model UserDefaults. Anthropic / Bedrock share
+    /// `claudeModel`; xAI uses `xaiModel` so a leftover Claude ID is never
+    /// sent to Grok.
+    static func selectedModel(for provider: AIProvider, defaults: UserDefaults = .standard) -> String {
+        switch provider {
+        case .anthropic, .bedrock:
+            return defaults.string(forKey: "claudeModel") ?? defaultClaudeModel
+        case .xai:
+            let custom = defaults.string(forKey: xaiCustomModelDefaultsKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !custom.isEmpty { return custom }
+            let picked = defaults.string(forKey: "xaiModel") ?? defaultXAIModel
+            return picked == "custom" ? defaultXAIModel : picked
+        }
     }
 
     /// Client for per-frame vision analysis. Defaults to Haiku — frame
@@ -18,9 +62,8 @@ enum AIClientFactory {
     /// cheaper per token. Session synthesis and transcript analysis stay
     /// on `makeClient()`.
     static func makeFrameAnalysisClient() async throws -> (any AIClient)? {
-        let providerRaw = UserDefaults.standard.string(forKey: "aiProvider") ?? "anthropic"
-        let provider = AIProvider(rawValue: providerRaw) ?? .anthropic
-        let mainModel = UserDefaults.standard.string(forKey: "claudeModel") ?? "claude-sonnet-4-20250514"
+        let provider = AIProvider.current()
+        let mainModel = selectedModel(for: provider)
 
         // No trajector settings at all means the main model also runs on
         // foundation IDs, so Haiku's foundation ID is equally reachable.
@@ -32,7 +75,10 @@ enum AIClientFactory {
             haikuProfileAvailable: trajector == nil || trajector?.haikuModel != nil
         )
         if choice.fellBackToMainModel {
-            LogManager.send("Frame analysis using main model \(mainModel): no Haiku inference profile in trajector settings", category: .screen)
+            let reason = provider == .xai
+                ? "Claude frame-analysis model is not valid on xAI"
+                : "no Haiku inference profile in trajector settings"
+            LogManager.send("Frame analysis using main model \(mainModel): \(reason)", category: .screen)
         }
         return try await makeClient(provider: provider, model: choice.model)
     }
@@ -56,10 +102,25 @@ enum AIClientFactory {
         guard !preferred.isEmpty, preferred != mainModel else {
             return FrameAnalysisModelChoice(model: mainModel, fellBackToMainModel: false)
         }
+        // xAI cannot invoke Claude IDs. A leftover Haiku default (or any
+        // Anthropic family tag) would 400 mid-meeting — fall back to the
+        // selected Grok model instead.
+        if provider == .xai, isClaudeFamilyModelID(preferred) {
+            return FrameAnalysisModelChoice(model: mainModel, fellBackToMainModel: true)
+        }
         if provider == .bedrock, preferred.contains("haiku"), !haikuProfileAvailable {
             return FrameAnalysisModelChoice(model: mainModel, fellBackToMainModel: true)
         }
         return FrameAnalysisModelChoice(model: preferred, fellBackToMainModel: false)
+    }
+
+    /// True for Anthropic / Claude family IDs that must not be sent to xAI.
+    static func isClaudeFamilyModelID(_ model: String) -> Bool {
+        let lower = model.lowercased()
+        return lower.contains("claude")
+            || lower.contains("haiku")
+            || lower.contains("sonnet")
+            || lower.contains("opus")
     }
 
     private static func makeClient(provider: AIProvider, model: String) async throws -> (any AIClient)? {
@@ -78,6 +139,13 @@ enum AIClientFactory {
             let credentials = try await AWSCredentialLoader.loadCredentials(profile: profile)
             let bedrockModel = resolveBedrockModel(for: model)
             return BedrockAPIClient(credentials: credentials, region: region, model: bedrockModel)
+
+        case .xai:
+            guard let apiKey = try KeychainHelper.get(AIPromptTemplates.xaiKeychainKey),
+                  !apiKey.isEmpty else {
+                return nil
+            }
+            return XAIAPIClient(apiKey: apiKey, model: model)
         }
     }
 

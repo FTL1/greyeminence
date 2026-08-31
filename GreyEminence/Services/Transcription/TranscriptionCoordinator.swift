@@ -16,10 +16,11 @@ final class TranscriptionCoordinator {
 
     private var processingTasks: [Task<Void, Never>] = []
 
-    // Buffer system audio samples for diarization (need ~10s chunks)
+    // Overlapping windows so the same voice is seen twice and IDs stick.
     private var systemAudioBuffer: [Float] = []
     private var systemBufferStartTime: TimeInterval = 0
-    private let diarizationChunkDuration: TimeInterval = 10.0
+    private let diarizationChunkDuration: TimeInterval = 15.0
+    private let diarizationHopDuration: TimeInterval = 7.5
 
     // Buffer mic audio for diarization (used when system audio is silent)
     private var micAudioBuffer: [Float] = []
@@ -35,6 +36,10 @@ final class TranscriptionCoordinator {
 
     // Vocabulary manager for custom term boosting
     var vocabularyManager: VocabularyManager?
+
+    /// Calendar invitees for self-introduction matching ("I'm Bob").
+    var inviteeNames: [String] = []
+    var myLabels: [String] = []
 
     /// Maximum gap (seconds) between consecutive confirmed results from the
     /// same speaker before they are merged into a single segment.
@@ -105,6 +110,7 @@ final class TranscriptionCoordinator {
         systemAudioBuffer = []
         micAudioBuffer = []
         hasSystemSpeech = false
+        SpeakerNames.resetSession()
 
         // Prepare diarization concurrently with model loading
         let diarizationTask = Task {
@@ -177,6 +183,33 @@ final class TranscriptionCoordinator {
 
         LogManager.shared.log("Transcription stopped (\(segments.count) segments)", category: .transcription)
         isProcessing = false
+    }
+
+    /// Rename a speaker for the rest of this session: rewrite existing
+    /// segments and the diarization map so future chunks keep the new name.
+    func relabelSpeaker(_ current: Speaker, to newSpeaker: Speaker) {
+        guard current != newSpeaker || current.isMe else { return }
+        for i in segments.indices where SpeakerRelabel.matchesForRelabel(segments[i].speaker, current: current) {
+            segments[i].speaker = newSpeaker
+        }
+        Task {
+            await diarization.relabel(current, to: newSpeaker)
+        }
+    }
+
+    func relabelSegments(_ ids: Set<UUID>, to newSpeaker: Speaker) {
+        guard !ids.isEmpty else { return }
+        for i in segments.indices where ids.contains(segments[i].id) {
+            segments[i].speaker = newSpeaker
+        }
+    }
+
+    func seedEnrolledPrints(_ prints: [(Speaker, [Float])]) async {
+        await diarization.seedEnrolledPrints(prints.map { (speaker: $0.0, embedding: $0.1) })
+    }
+
+    func voicePrint(for speaker: Speaker) async -> [Float]? {
+        await diarization.embedding(for: speaker)
     }
 
     // MARK: - Audio Input (called from audio threads)
@@ -271,7 +304,7 @@ final class TranscriptionCoordinator {
             currentMicDraftID = nil
 
             // Try to merge with the most recent final segment from the same speaker
-            if let lastIdx = segments.lastIndex(where: { $0.speaker == .me && $0.isFinal }),
+            if let lastIdx = segments.lastIndex(where: { $0.speaker.isMe && $0.isFinal }),
                update.timestamp - segments[lastIdx].endTime <= segmentMergeWindow {
                 segments[lastIdx].text += " " + text
                 segments[lastIdx].endTime = update.timestamp
@@ -281,7 +314,7 @@ final class TranscriptionCoordinator {
                 LogManager.shared.log("Mic segment merged: \(segments[lastIdx].text.prefix(80))", category: .transcription)
             } else {
                 let segment = TranscriptSegment(
-                    speaker: .me,
+                    speaker: Speaker.resolvedMe(),
                     text: text,
                     startTime: update.timestamp,
                     endTime: update.timestamp,
@@ -293,7 +326,7 @@ final class TranscriptionCoordinator {
             }
         } else {
             let segment = TranscriptSegment(
-                speaker: .me,
+                speaker: Speaker.resolvedMe(),
                 text: text,
                 startTime: update.timestamp,
                 endTime: update.timestamp,
@@ -321,14 +354,16 @@ final class TranscriptionCoordinator {
             segments.removeAll { $0.id == draftID }
         }
 
-        let defaultSpeaker = Speaker.other("Other")
+        // Prefer the last remote voice if they were just talking. Always
+        // starting as guest-1 made Pat's next sentence look like a new person.
+        let speaker = SpeakerContinuity.stickyRemote(at: update.timestamp, in: segments)
+            ?? Speaker.other(Speaker.guestLabel(index: 1))
 
         if update.isFinal {
             currentSystemDraftID = nil
 
-            // Try to merge with the most recent final segment from a system speaker
-            // (any speaker that isn't .me — system segments get relabeled by diarization later)
-            if let lastIdx = segments.lastIndex(where: { $0.speaker != .me && $0.isFinal }),
+            if let lastIdx = segments.lastIndex(where: { !$0.speaker.isMe && $0.isFinal }),
+               segments[lastIdx].speaker.matchesIdentity(speaker),
                update.timestamp - segments[lastIdx].endTime <= segmentMergeWindow {
                 segments[lastIdx].text += " " + text
                 segments[lastIdx].endTime = update.timestamp
@@ -337,7 +372,7 @@ final class TranscriptionCoordinator {
                 LogManager.shared.log("System segment merged: \(segments[lastIdx].text.prefix(80))", category: .transcription)
             } else {
                 let segment = TranscriptSegment(
-                    speaker: defaultSpeaker,
+                    speaker: speaker,
                     text: text,
                     startTime: update.timestamp,
                     endTime: update.timestamp,
@@ -347,9 +382,10 @@ final class TranscriptionCoordinator {
                 segments.append(segment)
                 LogManager.shared.log("System segment finalized: \(text.prefix(80))", category: .transcription)
             }
+            considerSelfIdentifications()
         } else {
             let segment = TranscriptSegment(
-                speaker: defaultSpeaker,
+                speaker: speaker,
                 text: text,
                 startTime: update.timestamp,
                 endTime: update.timestamp,
@@ -370,11 +406,13 @@ final class TranscriptionCoordinator {
         systemAudioBuffer.append(contentsOf: samples)
 
         let samplesNeeded = Int(diarizationChunkDuration * 16000)
+        let hopSamples = Int(diarizationHopDuration * 16000)
         if systemAudioBuffer.count >= samplesNeeded {
             let chunk = Array(systemAudioBuffer.prefix(samplesNeeded))
             let startTime = systemBufferStartTime
-            systemAudioBuffer.removeFirst(samplesNeeded)
-            systemBufferStartTime += diarizationChunkDuration
+            let drop = min(hopSamples, systemAudioBuffer.count)
+            systemAudioBuffer.removeFirst(drop)
+            systemBufferStartTime += diarizationHopDuration
 
             Task {
                 await processDiarizationChunk(chunk, startTime: startTime)
@@ -392,15 +430,19 @@ final class TranscriptionCoordinator {
             for diarized in diarizedSegments {
                 for i in segments.indices {
                     let seg = segments[i]
-                    if seg.speaker == .other("Other")
-                        && seg.isFinal
-                        && seg.startTime >= diarized.startTime - 1.0
-                        && seg.startTime <= diarized.endTime + 1.0
-                    {
-                        segments[i].speaker = diarized.speaker
+                    guard seg.isFinal else { continue }
+                    guard seg.startTime >= diarized.startTime - 1.0,
+                          seg.startTime <= diarized.endTime + 1.0 else { continue }
+                    let next = SpeakerContinuity.resolvedLabel(
+                        current: seg.speaker,
+                        proposed: diarized.speaker
+                    )
+                    if next != seg.speaker {
+                        segments[i].speaker = next
                     }
                 }
             }
+            considerSelfIdentifications()
         } catch {
             LogManager.shared.log("Diarization error: \(error.localizedDescription)", category: .transcription, level: .warning)
         }
@@ -423,11 +465,13 @@ final class TranscriptionCoordinator {
         micAudioBuffer.append(contentsOf: samples)
 
         let samplesNeeded = Int(diarizationChunkDuration * 16000)
+        let hopSamples = Int(diarizationHopDuration * 16000)
         if micAudioBuffer.count >= samplesNeeded {
             let chunk = Array(micAudioBuffer.prefix(samplesNeeded))
             let startTime = micBufferStartTime
-            micAudioBuffer.removeFirst(samplesNeeded)
-            micBufferStartTime += diarizationChunkDuration
+            let drop = min(hopSamples, micAudioBuffer.count)
+            micAudioBuffer.removeFirst(drop)
+            micBufferStartTime += diarizationHopDuration
 
             Task {
                 await processMicDiarizationChunk(chunk, startTime: startTime)
@@ -449,7 +493,7 @@ final class TranscriptionCoordinator {
             for diarized in diarizedSegments {
                 for i in segments.indices {
                     let seg = segments[i]
-                    if seg.speaker == .me
+                    if seg.speaker.isMe
                         && seg.isFinal
                         && seg.startTime >= diarized.startTime - 1.0
                         && seg.startTime <= diarized.endTime + 1.0
@@ -469,5 +513,16 @@ final class TranscriptionCoordinator {
         let startTime = micBufferStartTime
         micAudioBuffer = []
         await processMicDiarizationChunk(chunk, startTime: startTime)
+    }
+
+    private func considerSelfIdentifications() {
+        let mine = myLabels.isEmpty
+            ? ([SpeakerNames.effectiveMeName] + [Speaker.defaultMeLabel]).compactMap { $0 }
+            : myLabels
+        _ = SpeakerSelfIntroduction.apply(
+            segments: segments,
+            inviteeNames: inviteeNames,
+            myLabels: mine
+        )
     }
 }

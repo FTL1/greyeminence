@@ -69,6 +69,24 @@ final class AIUsageTests: XCTestCase {
         XCTAssertNil(AIPricing.family(forModelIdentifier: "bedrock:us-east-1:arn:aws:bedrock:us-east-1:123:application-inference-profile/zzz", settings: trajector))
     }
 
+    func testFamilyGrokAndXAI() {
+        XCTAssertEqual(AIPricing.family(forModelIdentifier: "xai:grok-4.6", settings: nil), .grok)
+        XCTAssertEqual(AIPricing.family(forModelIdentifier: "grok-4.5", settings: nil), .grok)
+    }
+
+    func testAIUsageDecodeDoesNotReadOpenAIFields() {
+        // Guardrail: Anthropic decoder must not silently treat Chat Completions
+        // usage as valid Anthropic tokens if someone reuses it on an xAI body.
+        let body = Data("""
+        {"usage":{"prompt_tokens":41,"completion_tokens":104}}
+        """.utf8)
+        let anthropic = AIUsage.decode(fromResponseBody: body)
+        if let anthropic {
+            XCTAssertEqual(anthropic.inputTokens, 0)
+            XCTAssertEqual(anthropic.outputTokens, 0)
+        }
+    }
+
     func testCostComputation() {
         // 1M input + 1M output on Haiku = $1 + $5.
         let usage = AIUsage(inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0)

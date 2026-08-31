@@ -7,6 +7,9 @@ enum PromptKey: String, CaseIterable, Identifiable, Sendable {
     case meetingInitial       = "meeting.initial"
     case meetingRolling       = "meeting.rolling"
     case meetingFinal         = "meeting.final"
+    case meetingReanalysis    = "meeting.reanalysis"
+    case meetingDeep          = "meeting.deep"
+    case meetingDeepest       = "meeting.deepest"
     case screenSystem         = "screen.system"
     case screenAnalysis       = "screen.analysis"
     case screenSessionSynthesis = "screen.sessionSynthesis"
@@ -21,6 +24,9 @@ enum PromptKey: String, CaseIterable, Identifiable, Sendable {
         case .meetingInitial: "Meeting — Initial Analysis"
         case .meetingRolling: "Meeting — Rolling Analysis"
         case .meetingFinal:   "Meeting — Final Cleanup"
+        case .meetingReanalysis: "Meeting — Fresh Reanalysis"
+        case .meetingDeep: "Meeting — Deep section"
+        case .meetingDeepest: "Meeting — Deepest (audio energy)"
         case .screenSystem:   "Screen Share — System Prompt"
         case .screenAnalysis: "Screen Share — Frame Analysis"
         case .screenSessionSynthesis: "Screen Share — Session Recap"
@@ -41,6 +47,10 @@ enum PromptKey: String, CaseIterable, Identifiable, Sendable {
             ["previousSummary", "previousActionItems", "previousFollowUps", "previousTopics", "newTranscript"]
         case .meetingFinal:
             ["fullTranscript", "currentSummary", "currentActionItems", "currentFollowUps", "currentTopics"]
+        case .meetingReanalysis:
+            ["transcript", "calendarTitle", "myName", "suppressionBlock"]
+        case .meetingDeep, .meetingDeepest:
+            ["section", "transcript", "calendarTitle", "myName", "currentSummary", "currentActionItems", "currentFollowUps", "currentTopics", "vocalCues", "suppressionBlock"]
         case .screenSystem:
             []
         case .screenAnalysis:

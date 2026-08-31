@@ -6,11 +6,15 @@ enum SidebarDestination: String, Hashable, CaseIterable {
     case meetings = "Meetings"
     case archive = "Archive"
     case recording = "New Recording"
+    case insights = "Insights"
+    case questions = "Questions"
     case tasks = "Tasks"
+    case summaries = "Summaries"
     case interviews = "Interviews"
     case people = "People"
     case topicMap = "Topic Map"
     case ask = "Ask"
+    case find = "Find"
     case activityLog = "Activity Log"
     case settings = "Settings"
 
@@ -20,11 +24,15 @@ enum SidebarDestination: String, Hashable, CaseIterable {
         case .meetings: "list.bullet.rectangle"
         case .archive: "archivebox"
         case .recording: "record.circle"
+        case .insights: "brain"
+        case .questions: "questionmark.bubble"
         case .tasks: "checkmark.circle"
+        case .summaries: "doc.text"
         case .interviews: "person.badge.shield.checkmark"
         case .people: "person.2"
         case .topicMap: "bubble.left.and.bubble.right"
         case .ask: "sparkles.square.filled.on.square"
+        case .find: "magnifyingglass"
         case .activityLog: "list.bullet.clipboard"
         case .settings: "gear"
         }
@@ -36,11 +44,15 @@ enum SidebarDestination: String, Hashable, CaseIterable {
         case .meetings: .indigo
         case .archive: .brown
         case .recording: .red
+        case .insights: .purple
+        case .questions: .teal
         case .tasks: .orange
+        case .summaries: .blue
         case .interviews: .cyan
         case .people: .green
         case .topicMap: .purple
         case .ask: .pink
+        case .find: .mint
         case .activityLog: .gray
         case .settings: .gray
         }
@@ -53,6 +65,26 @@ enum SidebarDestination: String, Hashable, CaseIterable {
             .frame(width: 26, height: 26)
             .background(iconColor.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
+
+    var helpText: String {
+        switch self {
+        case .dashboard: HelpTip.sidebarDashboard.tooltip
+        case .meetings: HelpTip.sidebarMeetings.tooltip
+        case .archive: HelpTip.sidebarArchive.tooltip
+        case .recording: HelpTip.sidebarRecording.tooltip
+        case .insights: HelpTip.sidebarInsights.tooltip
+        case .questions: HelpTip.sidebarQuestions.tooltip
+        case .tasks: HelpTip.sidebarTasks.tooltip
+        case .summaries: HelpTip.sidebarSummaries.tooltip
+        case .interviews: HelpTip.sidebarInterviews.tooltip
+        case .people: HelpTip.sidebarPeople.tooltip
+        case .topicMap: HelpTip.sidebarTopicMap.tooltip
+        case .ask: HelpTip.sidebarAsk.tooltip
+        case .find: HelpTip.sidebarFind.tooltip
+        case .activityLog: HelpTip.sidebarActivityLog.tooltip
+        case .settings: HelpTip.sidebarSettings.tooltip
+        }
+    }
 }
 
 struct ContentView: View {
@@ -60,8 +92,13 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var selectedDestination: SidebarDestination? = .dashboard
     @State private var selectedMeeting: Meeting?
+    @State private var selectedMeetingIDs: Set<UUID> = []
+    @State private var showReanalyzeAllConfirm = false
+    @State private var reanalyzeAllCount = 0
+    @State private var extractLaunch: ArchiveExtractLaunch?
     @State private var topicMapViewModel = TopicMapViewModel()
     @State private var askViewModel = AskViewModel()
+    @State private var meetingFind = MeetingFindController()
     @State private var pendingScrollSegmentID: UUID?
     /// Transcript → screen-share player: set by a timestamp tap or an Ask
     /// deep link; consumed by ScreenSharePlayerSection (expand, seek, clear).
@@ -73,6 +110,8 @@ struct ContentView: View {
     @AppStorage("myContactID") private var myContactIDString = ""
     @AppStorage("autoStartRecording") private var autoStartRecording = false
     @State private var showProfileSetup = false
+    @AppStorage("ftlLegalNoticeAccepted") private var legalNoticeAccepted = false
+    @State private var showLegalNotice = false
     @State private var interruptedMeeting: Meeting?
     @State private var showResumeAlert = false
     /// Highest app version whose feature highlights the user has seen. Empty on
@@ -86,7 +125,28 @@ struct ContentView: View {
     var interviewRecordingViewModel: InterviewRecordingViewModel
 
     var body: some View {
+        mainInterface
+    }
+
+    private var mainInterface: some View {
+        chrome
+            .environment(meetingFind)
+            .onChange(of: selectedMeeting?.id) { _, _ in
+                meetingFind.resetForMeetingChange()
+            }
+            .background {
+                FindShortcutHost(
+                    onMeetingFind: focusMeetingOrLibraryFind,
+                    onLibraryFind: openFind,
+                    onNext: meetingFind.nextTranscriptMatch,
+                    onPrevious: meetingFind.previousTranscriptMatch
+                )
+            }
+    }
+
+    private var chrome: some View {
         VStack(spacing: 0) {
+            CaptureKillSwitchBar(viewModel: recordingViewModel)
             HStack(spacing: 0) {
                 SidebarView(
                     selection: $selectedDestination,
@@ -105,12 +165,35 @@ struct ContentView: View {
             }
             CallPromptBar(viewModel: recordingViewModel)
             ReProcessingStatusBar()
+            MeetingReanalysisStatusBar(onOpenMeeting: openMeeting(id:))
             TransientActivityStatusBar()
+            ReanalyzeAllConfirmationHost(
+                isPresented: $showReanalyzeAllConfirm,
+                count: reanalyzeAllCount
+            )
+            ReanalyzeFocusedValuesHost(
+                selectedMeetingIDs: selectedMeetingIDs,
+                showReanalyzeAllConfirm: $showReanalyzeAllConfirm,
+                reanalyzeAllCount: $reanalyzeAllCount,
+                extractLaunch: $extractLaunch,
+                modelContext: modelContext
+            )
+        }
+        .sheet(item: $extractLaunch) { launch in
+            ArchiveExtractSheet(launch: launch)
         }
         .toolbar {
             // Title-bar badge marking a local Debug run (empty in Release).
             ToolbarItem(placement: .navigation) {
                 DevBuildBanner()
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    openFind()
+                } label: {
+                    Label("Find", systemImage: "magnifyingglass")
+                }
+                .helpTip(.toolbarFind)
             }
             if selectedDestination == .meetings || selectedDestination == .archive || selectedDestination == .recording || selectedDestination == .interviews {
                 ToolbarItem(placement: .primaryAction) {
@@ -120,6 +203,7 @@ struct ContentView: View {
                         Label("Toggle Insights", systemImage: "sidebar.right")
                     }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                    .helpTip(.toolbarInspector)
                 }
             }
         }
@@ -131,9 +215,15 @@ struct ContentView: View {
                 selectedDestination = .interviews
             } else {
                 selectedMeeting = meeting
+                selectedMeetingIDs = [meeting.id]
                 selectedDestination = .meetings
             }
             recordingViewModel.completedMeeting = nil
+        }
+        .onChange(of: selectedMeeting?.id) { _, newID in
+            if let newID, !selectedMeetingIDs.contains(newID) {
+                selectedMeetingIDs = [newID]
+            }
         }
         .onChange(of: developerToolsEnabled) { _, enabled in
             if !enabled && selectedDestination == .activityLog {
@@ -148,10 +238,17 @@ struct ContentView: View {
             // services directly with their own contexts instead.
             guard !TestEnvironment.isRunningTests else { return }
 
-            checkForInterruptedRecording()
-            recoverOrphanedInterviews()
-            // Prompt for profile if not configured (with slight delay so window settles)
-            if myContactIDString.isEmpty {
+            TransientActivityCoordinator.shared.run("Checking for an interrupted recording…") {
+                checkForInterruptedRecording()
+            }
+            TransientActivityCoordinator.shared.run("Checking interviews…") {
+                recoverOrphanedInterviews()
+            }
+            if !legalNoticeAccepted {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    showLegalNotice = true
+                }
+            } else if myContactIDString.isEmpty {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     showProfileSetup = true
                 }
@@ -170,7 +267,11 @@ struct ContentView: View {
                 // Unthrottled (unlike maintenance): rows lost to a schema
                 // downgrade should come back on the very next launch, and
                 // the no-op case costs one fetch + a directory check.
-                let recovered = await ScreenFrameRecoveryService.recoverAtLaunch(modelContext: modelContext)
+                let recovered = await TransientActivityCoordinator.shared.runAsync(
+                    "Checking screen-share frames…"
+                ) {
+                    await ScreenFrameRecoveryService.recoverAtLaunch(modelContext: modelContext)
+                }
                 if recovered > 0 {
                     TransientActivityCoordinator.shared.flash("Recovered \(recovered) screen-share frame(s)")
                 }
@@ -182,6 +283,16 @@ struct ContentView: View {
         // Lets Help → What's New present the sheet in this window when it's the
         // key one — see FocusedValues.whatsNewPresentation.
         .focusedSceneValue(\.whatsNewPresentation, $whatsNew)
+        .sheet(isPresented: $showLegalNotice) {
+            LegalNoticeSheet {
+                legalNoticeAccepted = true
+                showLegalNotice = false
+                if myContactIDString.isEmpty {
+                    showProfileSetup = true
+                }
+            }
+            .interactiveDismissDisabled()
+        }
         .sheet(isPresented: $showProfileSetup) {
             MyProfileSetupSheet()
         }
@@ -294,7 +405,7 @@ struct ContentView: View {
 
         // Sequence behind the first-run profile sheet so the two never stack.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            guard !showProfileSetup else { return }
+            guard !showProfileSetup, !showLegalNotice else { return }
             whatsNew = WhatsNewPresentation(highlights: pending)
         }
     }
@@ -433,6 +544,61 @@ struct ContentView: View {
         }
     }
 
+    private func openMeetingFromIntelligence(_ meeting: Meeting) {
+        selectedMeeting = meeting
+        selectedMeetingIDs = [meeting.id]
+        selectedDestination = .meetings
+    }
+
+    private func openFindHit(_ hit: LibrarySearchHit) {
+        let meetingID = hit.meetingID
+        var descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.id == meetingID })
+        descriptor.fetchLimit = 1
+        guard let meeting = try? modelContext.fetch(descriptor).first else { return }
+        selectedMeeting = meeting
+        selectedMeetingIDs = [meeting.id]
+        selectedDestination = .meetings
+        if let segmentID = hit.segmentID {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                pendingScrollSegmentID = segmentID
+            }
+        } else {
+            showInspector = true
+        }
+    }
+
+    private func openFind() {
+        selectedDestination = .find
+    }
+
+    private func focusMeetingOrLibraryFind() {
+        let onMeeting = selectedDestination == .meetings || selectedDestination == .archive
+        if onMeeting, selectedMeeting != nil {
+            meetingFind.requestFocus()
+        } else {
+            openFind()
+        }
+    }
+
+    private func openMeeting(id: UUID) {
+        var descriptor = FetchDescriptor<Meeting>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        guard let meeting = try? modelContext.fetch(descriptor).first else { return }
+        selectedMeeting = meeting
+        selectedMeetingIDs = [meeting.id]
+        selectedDestination = .meetings
+    }
+
+    private func openTopicDialog(meeting: Meeting, segmentID: UUID) {
+        selectedMeeting = meeting
+        selectedMeetingIDs = [meeting.id]
+        pendingScrollSegmentID = segmentID
+        showInspector = true
+        if selectedDestination != .meetings && selectedDestination != .archive {
+            selectedDestination = .meetings
+        }
+    }
+
     private func inspectorDragHandle(containerWidth: CGFloat) -> some View {
         Rectangle()
             .fill(Color.clear)
@@ -461,15 +627,23 @@ struct ContentView: View {
     private var contentArea: some View {
         switch selectedDestination {
         case .dashboard:
-            DashboardView { meeting in
-                selectedMeeting = meeting
-                selectedDestination = .meetings
-            }
+            DashboardView(
+                onMeetingSelected: { meeting in
+                    selectedMeeting = meeting
+                    selectedMeetingIDs = [meeting.id]
+                    selectedDestination = .meetings
+                },
+                onSelectDestination: { destination in
+                    selectedDestination = destination
+                }
+            )
         case .meetings:
             NavigationSplitView {
                 MeetingListView(
                     selectedMeeting: $selectedMeeting,
-                    onShowArchive: { selectedDestination = .archive }
+                    selectedMeetingIDs: $selectedMeetingIDs,
+                    onShowArchive: { selectedDestination = .archive },
+                    onExtract: { extractLaunch = $0 }
                 )
                     .navigationSplitViewColumnWidth(min: 280, ideal: 300)
             } detail: {
@@ -491,7 +665,9 @@ struct ContentView: View {
                                 MeetingIntelligenceView(
                                     meeting: meeting,
                                     pendingSeekTime: $pendingSeekTime,
-                                    onPlayheadSegment: { pendingScrollSegmentID = $0 }
+                                    onPlayheadSegment: { pendingScrollSegmentID = $0 },
+                                    onOpenDialog: openTopicDialog(meeting:segmentID:),
+                                    onSelectDestination: { selectedDestination = $0 }
                                 )
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -521,7 +697,11 @@ struct ContentView: View {
             }
         case .archive:
             NavigationSplitView {
-                ArchiveView(selectedMeeting: $selectedMeeting)
+                ArchiveView(
+                    selectedMeeting: $selectedMeeting,
+                    selectedMeetingIDs: $selectedMeetingIDs,
+                    onExtract: { extractLaunch = $0 }
+                )
                     .navigationSplitViewColumnWidth(min: 360, ideal: 480)
             } detail: {
                 if let meeting = selectedMeeting {
@@ -537,7 +717,9 @@ struct ContentView: View {
                                 MeetingIntelligenceView(
                                     meeting: meeting,
                                     pendingSeekTime: $pendingSeekTime,
-                                    onPlayheadSegment: { pendingScrollSegmentID = $0 }
+                                    onPlayheadSegment: { pendingScrollSegmentID = $0 },
+                                    onOpenDialog: openTopicDialog(meeting:segmentID:),
+                                    onSelectDestination: { selectedDestination = $0 }
                                 )
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -566,27 +748,51 @@ struct ContentView: View {
                 }
             }
         case .recording:
-            GeometryReader { geo in
-                // Keep the live transcript a healthy panel but never let it crowd
-                // the recording pane (whose toolbar is horizontally dense): floor
-                // the recording side at ~50% by clamping the inspector to 50% max.
-                let defaultWidth = geo.size.width * 0.4
-                let width = inspectorWidth ?? defaultWidth
-                let clampedWidth = min(max(width, 280), geo.size.width * 0.5)
+            VStack(spacing: 0) {
+                SpeakerRosterBar(
+                    roster: recordingViewModel.speakerRoster,
+                    segments: recordingViewModel.segments,
+                    onAssignVoice: { voice, seat in
+                        recordingViewModel.assignDetectedVoice(voice, to: seat)
+                    },
+                    onAddedPerson: { _, contact in
+                        if let meeting = recordingViewModel.currentMeeting {
+                            recordingViewModel.applyRosterToMeeting(meeting, in: modelContext)
+                            if let contact, !meeting.attendees.contains(where: { $0.id == contact.id }) {
+                                meeting.attendees.append(contact)
+                            }
+                        }
+                    },
+                    onEnrollVoicePrint: { speaker in
+                        recordingViewModel.enrollVoicePrint(for: speaker)
+                    }
+                )
+                .onAppear {
+                    recordingViewModel.speakerRoster.ensureMe(named: SpeakerNames.effectiveMeName)
+                }
+                Divider()
+                GeometryReader { geo in
+                    // Keep the live transcript a healthy panel but never let it crowd
+                    // the recording pane (whose toolbar is horizontally dense): floor
+                    // the recording side at ~50% by clamping the inspector to 50% max.
+                    let defaultWidth = geo.size.width * 0.4
+                    let width = inspectorWidth ?? defaultWidth
+                    let clampedWidth = min(max(width, 280), geo.size.width * 0.5)
 
-                HStack(spacing: 0) {
-                    RecordingView(viewModel: recordingViewModel, showsTranscript: false)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(2)
-                    // Only show the live transcript pane while a recording is
-                    // active. When idle (e.g. returning here to start a new one)
-                    // there's nothing live to show, and rendering it would
-                    // surface the previous recording's transcript.
-                    if showInspector && recordingViewModel.state != .idle {
-                        inspectorDragHandle(containerWidth: geo.size.width)
-                        RecordingInspectorPanel(viewModel: recordingViewModel)
-                            .frame(width: clampedWidth)
-                            .layoutPriority(0)
+                    HStack(spacing: 0) {
+                        RecordingView(viewModel: recordingViewModel, showsTranscript: false)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .layoutPriority(2)
+                        // Only show the live transcript pane while a recording is
+                        // active. When idle (e.g. returning here to start a new one)
+                        // there's nothing live to show, and rendering it would
+                        // surface the previous recording's transcript.
+                        if showInspector && recordingViewModel.state != .idle {
+                            inspectorDragHandle(containerWidth: geo.size.width)
+                            RecordingInspectorPanel(viewModel: recordingViewModel)
+                                .frame(width: clampedWidth)
+                                .layoutPriority(0)
+                        }
                     }
                 }
             }
@@ -597,20 +803,47 @@ struct ContentView: View {
                 showInspector: $showInspector,
                 inspectorWidth: $inspectorWidth
             )
+        case .insights:
+            InsightsHubView(
+                selectedMeetingIDs: selectedMeetingIDs,
+                onMeetingSelected: openMeetingFromIntelligence(_:),
+                onSelectDestination: { selectedDestination = $0 }
+            )
+        case .questions:
+            AllQuestionsView(
+                selectedMeetingIDs: selectedMeetingIDs,
+                onMeetingSelected: openMeetingFromIntelligence(_:)
+            )
         case .tasks:
-            AllTasksView()
+            AllTasksView(
+                selectedMeetingIDs: selectedMeetingIDs,
+                onMeetingSelected: openMeetingFromIntelligence(_:)
+            )
+        case .summaries:
+            AllSummariesView(onMeetingSelected: openMeetingFromIntelligence(_:))
         case .people:
             PeopleView()
         case .topicMap:
             TopicMapView(viewModel: topicMapViewModel, onMeetingSelected: { meeting in
                 selectedMeeting = meeting
+                selectedMeetingIDs = [meeting.id]
                 selectedDestination = .meetings
             })
+        case .find:
+            LibrarySearchView(
+                currentMeetingID: selectedMeeting?.id,
+                selectedMeetingIDs: selectedMeetingIDs,
+                preferredScope: selectedMeeting == nil && selectedMeetingIDs.isEmpty
+                    ? .allMeetings
+                    : (selectedMeetingIDs.count > 1 ? .selectedMeetings : .thisMeeting),
+                onOpenHit: openFindHit(_:)
+            )
         case .ask:
             AskView(viewModel: askViewModel, onResultSelected: { result in
                 let descriptor = FetchDescriptor<Meeting>()
                 if let meeting = (try? modelContext.fetch(descriptor))?.first(where: { $0.id == result.meetingID }) {
                     selectedMeeting = meeting
+                    selectedMeetingIDs = [meeting.id]
                     selectedDestination = .meetings
                     if result.sourceKind == .transcriptSegment {
                         // Delay so MeetingDetailView mounts before we try to scroll
@@ -644,326 +877,37 @@ struct ContentView: View {
     }
 }
 
-enum TaskFilter: String, CaseIterable, Identifiable {
-    case mine = "Mine + Unassigned"
-    case all = "All"
-    var id: String { rawValue }
-}
-
-enum TaskSort: String, CaseIterable, Identifiable {
-    case created = "Date Created"
-    case dueDate = "Due Date"
-    case meetingDate = "Meeting Date"
-    case alphabetical = "Alphabetical"
-    var id: String { rawValue }
-}
-
-enum TaskSortDirection: String, CaseIterable, Identifiable {
-    case descending = "Descending"
-    case ascending = "Ascending"
-    var id: String { rawValue }
-}
-
-private let selfAssigneeSynonyms: Set<String> = ["me", "myself", "i"]
-
-struct AllTasksView: View {
-    @Environment(\.modelContext) private var modelContext
-    @AppStorage("stalledThresholdDays") private var stalledThresholdDays = 7
-    @AppStorage("myContactID") private var myContactIDString = ""
-    @AppStorage("taskFilter") private var filterRaw = TaskFilter.mine.rawValue
-    @AppStorage("taskSort") private var sortRaw = TaskSort.created.rawValue
-    @AppStorage("taskSortDirection") private var sortDirectionRaw = TaskSortDirection.descending.rawValue
-    @AppStorage("taskShowCompleted") private var showCompleted = true
-    @AppStorage("taskShowDismissed") private var showDismissed = false
-    @Query(filter: #Predicate<ActionItem> { !$0.isCompleted && $0.dismissedAt == nil })
-    private var pendingItems: [ActionItem]
-
-    @Query(filter: #Predicate<ActionItem> { $0.isCompleted })
-    private var completedItems: [ActionItem]
-
-    @Query(filter: #Predicate<ActionItem> { $0.dismissedAt != nil })
-    private var dismissedItems: [ActionItem]
-
-    @Query private var allContacts: [Contact]
-
-    @State private var detailTask: ActionItem?
-    @State private var showBulkDismissConfirmation = false
-
-    private var filter: TaskFilter {
-        TaskFilter(rawValue: filterRaw) ?? .mine
-    }
-
-    private var sort: TaskSort {
-        TaskSort(rawValue: sortRaw) ?? .created
-    }
-
-    private var sortDirection: TaskSortDirection {
-        TaskSortDirection(rawValue: sortDirectionRaw) ?? .descending
-    }
-
-    private var myContact: Contact? {
-        guard let id = UUID(uuidString: myContactIDString) else { return nil }
-        return allContacts.first { $0.id == id }
-    }
-
-    /// Normalized tokens that should match an assignee string if it refers to "me".
-    /// Includes raw synonyms ("me", "myself"), the full contact name, and the first
-    /// word of the name — enough to catch the common AI-parsed forms.
-    private var mySelfTokens: Set<String> {
-        var tokens = selfAssigneeSynonyms
-        if let name = myContact?.name {
-            let lower = name.lowercased()
-            tokens.insert(lower)
-            if let first = lower.split(separator: " ").first {
-                tokens.insert(String(first))
-            }
-        }
-        return tokens
-    }
-
-    private func isUnassigned(_ item: ActionItem) -> Bool {
-        item.assignedContact == nil
-            && (item.assignee?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
-    }
-
-    private func isMine(_ item: ActionItem) -> Bool {
-        if let assigned = item.assignedContact {
-            return assigned.id == myContact?.id
-        }
-        guard let raw = item.assignee?.trimmingCharacters(in: .whitespaces),
-              !raw.isEmpty else { return false }
-        return mySelfTokens.contains(raw.lowercased())
-    }
-
-    private func isVisible(_ item: ActionItem) -> Bool {
-        switch filter {
-        case .all:
-            return true
-        case .mine:
-            return isMine(item) || isUnassigned(item)
-        }
-    }
-
-    /// Single comparator used by every sorted view in this screen so the
-    /// stalled section, the pending section, and the completed section all
-    /// reorder consistently when the user picks a sort.
-    private func compare(_ a: ActionItem, _ b: ActionItem) -> Bool {
-        let ascending = sortDirection == .ascending
-        switch sort {
-        case .created:
-            return ascending ? a.createdAt < b.createdAt : a.createdAt > b.createdAt
-        case .dueDate:
-            // Nil due dates always sink to the bottom regardless of direction.
-            switch (a.dueDate, b.dueDate) {
-            case (.some, .none): return true
-            case (.none, .some): return false
-            case (.none, .none): return a.createdAt > b.createdAt
-            case let (.some(x), .some(y)): return ascending ? x < y : x > y
-            }
-        case .meetingDate:
-            let ad = a.meeting?.date ?? .distantPast
-            let bd = b.meeting?.date ?? .distantPast
-            return ascending ? ad < bd : ad > bd
-        case .alphabetical:
-            let result = a.text.localizedCaseInsensitiveCompare(b.text)
-            return ascending ? result == .orderedAscending : result == .orderedDescending
-        }
-    }
-
-    private func sorted(_ items: [ActionItem]) -> [ActionItem] {
-        items.sorted(by: compare)
-    }
-
-    private var stalledItems: [StalledCommitment] {
-        CommitmentTrackingService()
-            .stalledCommitments(in: modelContext, threshold: stalledThresholdDays)
-            .filter { isVisible($0.actionItem) }
-            .sorted { compare($0.actionItem, $1.actionItem) }
-    }
-
-    private var visiblePending: [ActionItem] {
-        sorted(pendingItems.filter(isVisible))
-    }
-
-    private var visibleCompleted: [ActionItem] {
-        showCompleted ? sorted(completedItems.filter(isVisible)) : []
-    }
-
-    private var visibleDismissed: [ActionItem] {
-        showDismissed ? sorted(dismissedItems.filter(isVisible)) : []
-    }
-
-    private var nonStalledPending: [ActionItem] {
-        let stalledIDs = Set(stalledItems.map(\.id))
-        return visiblePending.filter { !stalledIDs.contains($0.id) }
-    }
-
-    private func bulkDismissStalled() {
-        for stalled in stalledItems {
-            stalled.actionItem.dismissedAt = .now
-        }
-        PersistenceGate.save(
-            modelContext,
-            site: "AllTasksView.bulkDismissStalled"
-        )
-        LogManager.send("Marked \(stalledItems.count) stalled task(s) as Won't Do (filter: \(filter.rawValue))", category: .general)
-    }
+private struct FindShortcutHost: View {
+    var onMeetingFind: () -> Void
+    var onLibraryFind: () -> Void
+    var onNext: () -> Void
+    var onPrevious: () -> Void
 
     var body: some View {
-        List {
-            if !stalledItems.isEmpty {
-                Section {
-                    ForEach(stalledItems) { stalled in
-                        HStack {
-                            ActionItemRow(item: stalled.actionItem, onShowDetails: { detailTask = $0 })
-                            Spacer()
-                            Text("\(stalled.daysStalled)d")
-                                .font(.caption2)
-                                .fontDesign(.monospaced)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    (stalled.daysStalled > 14 ? Color.red : .orange).opacity(0.15),
-                                    in: Capsule()
-                                )
-                                .foregroundStyle(stalled.daysStalled > 14 ? .red : .orange)
-                        }
-                    }
-                } header: {
-                    Label("Stalled (\(stalledItems.count))", systemImage: "exclamationmark.triangle")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.orange)
-                        .textCase(nil)
-                }
-            }
-
-            Section {
-                ForEach(nonStalledPending) { item in
-                    ActionItemRow(item: item, onShowDetails: { detailTask = $0 })
-                }
-            } header: {
-                Label("Pending (\(nonStalledPending.count))", systemImage: "circle")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .textCase(nil)
-            }
-
-            if !visibleCompleted.isEmpty {
-                Section {
-                    ForEach(visibleCompleted) { item in
-                        ActionItemRow(item: item, onShowDetails: { detailTask = $0 })
-                    }
-                } header: {
-                    Label("Completed (\(visibleCompleted.count))", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .textCase(nil)
-                }
-            }
-
-            if !visibleDismissed.isEmpty {
-                Section {
-                    ForEach(visibleDismissed) { item in
-                        ActionItemRow(item: item, onShowDetails: { detailTask = $0 })
-                    }
-                } header: {
-                    Label("Won't Do (\(visibleDismissed.count))", systemImage: "nosign")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(nil)
-                }
-            }
+        Group {
+            Button("Find in Meeting", action: onMeetingFind)
+                .keyboardShortcut("f", modifiers: .command)
+            Button("Library Find", action: onLibraryFind)
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("Find Next", action: onNext)
+                .keyboardShortcut("g", modifiers: .command)
+            Button("Find Previous", action: onPrevious)
+                .keyboardShortcut("g", modifiers: [.command, .shift])
         }
-        .navigationTitle("All Tasks")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Picker("Filter", selection: $filterRaw) {
-                    ForEach(TaskFilter.allCases) { f in
-                        Text(f.rawValue).tag(f.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .help(myContactIDString.isEmpty
-                      ? "Set your contact in Settings to filter by Mine"
-                      : "Filter tasks")
-                .disabled(myContactIDString.isEmpty)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Section("Sort by") {
-                        Picker("Sort", selection: $sortRaw) {
-                            ForEach(TaskSort.allCases) { s in
-                                Text(s.rawValue).tag(s.rawValue)
-                            }
-                        }
-                    }
-                    Section("Direction") {
-                        Picker("Direction", selection: $sortDirectionRaw) {
-                            ForEach(TaskSortDirection.allCases) { d in
-                                Label(
-                                    d.rawValue,
-                                    systemImage: d == .ascending ? "arrow.up" : "arrow.down"
-                                ).tag(d.rawValue)
-                            }
-                        }
-                    }
-                    Section {
-                        Toggle("Show Completed", isOn: $showCompleted)
-                        Toggle("Show Won't Do", isOn: $showDismissed)
-                    }
-                    if !stalledItems.isEmpty {
-                        Section {
-                            Button(role: .destructive) {
-                                showBulkDismissConfirmation = true
-                            } label: {
-                                Label("Mark Stalled as Won't Do (\(stalledItems.count))", systemImage: "nosign")
-                            }
-                        }
-                    }
-                } label: {
-                    Label("Options", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                .help("Sort and display options")
-            }
-        }
-        .confirmationDialog(
-            "Mark \(stalledItems.count) stalled task\(stalledItems.count == 1 ? "" : "s") as Won't Do?",
-            isPresented: $showBulkDismissConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Mark as Won't Do", role: .destructive) {
-                bulkDismissStalled()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Affects the current \(filter.rawValue) filter. Items can be restored from the Won't Do section.")
-        }
-        .overlay {
-            if visiblePending.isEmpty && visibleCompleted.isEmpty {
-                ContentUnavailableView(
-                    pendingItems.isEmpty && completedItems.isEmpty
-                        ? "No Action Items"
-                        : "No Tasks Match Filter",
-                    systemImage: "checkmark.circle",
-                    description: Text(
-                        pendingItems.isEmpty && completedItems.isEmpty
-                            ? "Action items from meetings will appear here"
-                            : "Switch to All to see tasks assigned to others"
-                    )
-                )
-            }
-        }
-        .sheet(item: $detailTask) { task in
-            TaskDetailView(task: task)
-        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 }
 
 struct ActionItemRow: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.meetingFindQuery) private var findQuery
     @Bindable var item: ActionItem
     var onDelete: ((ActionItem) -> Void)?
     var onShowDetails: ((ActionItem) -> Void)?
+    var showsMeetingContext: Bool = false
+    var onOpenMeeting: ((Meeting) -> Void)?
     @State private var showContactPicker = false
 
     private func persist(_ site: String) {
@@ -987,12 +931,17 @@ struct ActionItemRow: View {
                     .foregroundStyle(item.isCompleted ? .green : .secondary)
             }
             .buttonStyle(.plain)
+            .help(item.isCompleted ? "Mark this action incomplete" : "Mark this action complete")
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.text)
-                    .strikethrough(item.isCompleted || item.isDismissed)
-                    .foregroundStyle(item.isCompleted || item.isDismissed ? .secondary : .primary)
-                    .textSelection(.enabled)
+                HighlightedBody(
+                    text: item.text,
+                    query: findQuery,
+                    font: .body,
+                    color: item.isCompleted || item.isDismissed ? Color.secondary : Color.primary,
+                    strikethrough: item.isCompleted || item.isDismissed
+                )
+                .textSelection(.enabled)
                 // Assignee row only when one is set — assign/unlink live in the
                 // context menu, so unassigned items stay a single clean line
                 // rather than a second row with a dangling icon.
@@ -1012,6 +961,28 @@ struct ActionItemRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if showsMeetingContext {
+                    HStack(spacing: 8) {
+                        if let meeting = item.meeting {
+                            Button {
+                                onOpenMeeting?(meeting)
+                            } label: {
+                                Label(meeting.title, systemImage: "calendar")
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Open \(meeting.title)")
+                            Text(meeting.date.formatted(date: .abbreviated, time: .omitted))
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let due = item.dueDate {
+                            Text("due \(due.formatted(date: .abbreviated, time: .omitted))")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .font(.caption)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1030,6 +1001,11 @@ struct ActionItemRow: View {
         .contextMenu {
             if onShowDetails != nil {
                 Button("Show Details") { onShowDetails?(item) }
+            }
+            if let meeting = item.meeting, onOpenMeeting != nil {
+                Button("Open Meeting") { onOpenMeeting?(meeting) }
+            }
+            if onShowDetails != nil || onOpenMeeting != nil {
                 Divider()
             }
             Button("Copy") {

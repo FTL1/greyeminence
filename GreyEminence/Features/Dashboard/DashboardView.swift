@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
+import AppKit
 
 struct DashboardView: View {
     var onMeetingSelected: (Meeting) -> Void = { _ in }
+    var onSelectDestination: (SidebarDestination) -> Void = { _ in }
 
     @Environment(\.modelContext) private var modelContext
     @Query private var allMeetings: [Meeting]
@@ -56,28 +58,36 @@ struct DashboardView: View {
                         value: "\(meetingsThisWeek.count)",
                         subtitle: "meetings",
                         icon: "calendar",
-                        color: .blue
+                        color: .blue,
+                        help: "Open Meetings — this week’s recordings",
+                        action: { onSelectDestination(.meetings) }
                     )
                     StatCard(
                         title: "Total Meetings",
                         value: "\(allMeetings.count)",
                         subtitle: "all time",
                         icon: "person.2",
-                        color: .purple
+                        color: .purple,
+                        help: "Open Meetings — full library",
+                        action: { onSelectDestination(.meetings) }
                     )
                     StatCard(
                         title: "Pending Actions",
                         value: "\(pendingActions.count)",
                         subtitle: "to complete",
                         icon: "checkmark.circle",
-                        color: pendingActions.isEmpty ? .green : .orange
+                        color: pendingActions.isEmpty ? .green : .orange,
+                        help: "Open Tasks — pending actions",
+                        action: { onSelectDestination(.tasks) }
                     )
                     StatCard(
                         title: "Stalled Items",
                         value: "\(stalledCount)",
                         subtitle: stalledCount == 0 ? "all clear" : "need attention",
                         icon: "exclamationmark.triangle",
-                        color: stalledCount == 0 ? .green : .orange
+                        color: stalledCount == 0 ? .green : .orange,
+                        help: "Open Tasks — stalled items",
+                        action: { onSelectDestination(.tasks) }
                     )
                 }
                 .padding(.horizontal)
@@ -150,34 +160,64 @@ struct StatCard: View {
     let subtitle: String
     let icon: String
     let color: Color
+    var help: String? = nil
+    var action: (() -> Void)? = nil
+
+    @State private var isHovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 26, height: 26)
-                    .background(color.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                Spacer()
+        Button {
+            action?()
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 26, height: 26)
+                        .background(color.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Spacer()
+                }
+                Text(value)
+                    .font(.system(.title, design: .rounded, weight: .bold))
+                    .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
-            Text(value)
-                .font(.system(.title, design: .rounded, weight: .bold))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(
+                (isHovering ? Color.primary.opacity(0.06) : Color.clear),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .background(.background, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(
+                        isHovering ? AnyShapeStyle(.secondary.opacity(0.35)) : AnyShapeStyle(.quaternary),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+        .help(help ?? title)
+        .onHover { hovering in
+            isHovering = hovering && action != nil
+            if isHovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
             }
         }
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.quaternary, lineWidth: 1)
-        )
     }
 }
 

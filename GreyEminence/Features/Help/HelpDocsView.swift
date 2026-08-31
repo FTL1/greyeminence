@@ -13,7 +13,7 @@ struct HelpMenuCommands: View {
         // Where macOS apps conventionally put this (cf. Xcode's "What's New in
         // Xcode"). Shows the headline set rather than `pending`, which is empty
         // once the post-update sheet has recorded this version.
-        Button("What's New in Grey Eminence") {
+        Button("What's New in \(AppIdentity.displayName)") {
             whatsNewPresentation?.wrappedValue = WhatsNewPresentation(
                 highlights: FeatureHighlightCatalog.headline()
             )
@@ -27,11 +27,23 @@ struct HelpMenuCommands: View {
                 openWindow(id: "help-doc", value: doc)
             }
         }
+
+        Divider()
+
+        Button("Send feedback…") {
+            openWindow(id: "feedback")
+        }
     }
 }
 
 /// One of the bundled in-app docs surfaced from the Help menu.
 enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
+    case guide = "GUIDE"
+    case controls = "CONTROL-REFERENCE"
+    case features = "FEATURES"
+    case name = "NAME"
+    case divergence = "DIVERGENCE"
+    case disclaimer = "DISCLAIMER"
     case readme = "README"
     case contributing = "CONTRIBUTING"
     case changelog = "CHANGELOG"
@@ -40,6 +52,12 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
     var id: String { rawValue }
     var menuTitle: String {
         switch self {
+        case .guide: "How to use Grey Conseil"
+        case .controls: "Controls and options"
+        case .features: "What's in Grey Conseil"
+        case .name: "Why Grey Conseil"
+        case .divergence: "How we differ from Grey Eminence"
+        case .disclaimer: "Disclaimer (no warranty)"
         case .readme: "Read Me"
         case .contributing: "Contributing"
         case .changelog: "Changelog"
@@ -49,6 +67,12 @@ enum HelpDoc: String, CaseIterable, Identifiable, Hashable, Codable {
     var resourceName: String { rawValue }
     var iconName: String {
         switch self {
+        case .guide: "sparkles"
+        case .controls: "questionmark.circle"
+        case .features: "list.bullet.rectangle"
+        case .name: "text.book.closed"
+        case .divergence: "arrow.triangle.branch"
+        case .disclaimer: "exclamationmark.shield"
         case .readme: "book"
         case .contributing: "hammer"
         case .changelog: "clock.arrow.circlepath"

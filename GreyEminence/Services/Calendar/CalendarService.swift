@@ -122,9 +122,13 @@ final class CalendarService {
             merged = deduplicate(local: merged, remote: graphEvents)
         }
 
-        return merged.sorted {
-            abs($0.startDate.timeIntervalSince(date)) < abs($1.startDate.timeIntervalSince(date))
-        }
+        // Dropped here rather than in the picker, so a called-off meeting can
+        // also never be auto-linked to a recording or fed to meeting prep.
+        return merged
+            .filter { !$0.isCancelled }
+            .sorted {
+                abs($0.startDate.timeIntervalSince(date)) < abs($1.startDate.timeIntervalSince(date))
+            }
     }
 
     /// Drop Graph events that are the same meeting as a local one (the account
@@ -212,6 +216,8 @@ final class CalendarService {
             endDate: event.endDate ?? event.startDate,
             attendees: attendeeNames(for: event),
             isRecurring: event.hasRecurrenceRules,
+            isCancelled: event.status == .canceled
+                || CalendarEvent.titleIndicatesCancellation(event.title),
             source: .eventKit
         )
     }
@@ -219,21 +225,35 @@ final class CalendarService {
     /// Extract attendees (with emails) from an EventKit event. Rooms and
     /// equipment aren't people — they never become contacts.
     private static func attendeeNames(for event: EKEvent) -> [EventAttendee] {
-        guard let attendees = event.attendees else { return [] }
-        return attendees.compactMap { participant in
+        let attendees = event.attendees ?? []
+        var people: [EventAttendee] = []
+        func append(_ participant: EKParticipant) {
             switch participant.participantType {
-            case .room, .resource: return nil
+            case .room, .resource: return
             default: break
             }
-            // EKParticipant carries the address as a mailto: URL.
             let email = participant.url.absoluteString.components(separatedBy: ":").last
                 .flatMap { $0.contains("@") ? $0 : nil }
-            return EventAttendee.resolve(
+            guard let person = EventAttendee.resolve(
                 name: participant.name,
                 email: email,
                 isCurrentUser: participant.isCurrentUser
-            )
+            ) else { return }
+            if people.contains(where: { samePerson($0, person) }) { return }
+            people.append(person)
         }
+        if let organizer = event.organizer {
+            append(organizer)
+        }
+        for participant in attendees {
+            append(participant)
+        }
+        return people
+    }
+
+    private static func samePerson(_ a: EventAttendee, _ b: EventAttendee) -> Bool {
+        if let ae = a.email, let be = b.email, ae == be { return true }
+        return a.name.compare(b.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
     }
 
     /// Log every event calendar EventKit can see, with its account/source type.

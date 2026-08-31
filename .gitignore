@@ -12,3 +12,10 @@ Packages/
 
 # Claude
 .claude/
+
+# Sparkle private keys (never commit)
+.sparkle-keys/
+**/eddsa_private_seed.b64
+
+__pycache__/
+*.pyc

@@ -15,6 +15,24 @@ struct ContactDetailView: View {
                 }
             }
 
+            Section("Voice") {
+                if contact.hasVoicePrint {
+                    Label("Voice print enrolled", systemImage: "waveform")
+                    if let date = contact.voicePrintUpdatedAt {
+                        Text("Updated \(date.formatted(.relative(presentation: .named)))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Remove voice print", role: .destructive) {
+                        contact.clearVoicePrint()
+                    }
+                } else {
+                    Text("No voice print yet. Right-click this person in a transcript and choose Enroll voice print.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Details") {
                 TextField("Name", text: $contact.name)
                 TextField("Nickname", text: Binding(

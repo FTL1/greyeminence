@@ -26,7 +26,7 @@ struct MyProfileSetupSheet: View {
                     .foregroundStyle(.blue)
                 Text("Who are you?")
                     .font(.title3.weight(.semibold))
-                Text("Grey Eminence needs to know which contact is you so it can attribute \"Me\" in transcripts to the right person.")
+                Text("Grey Conseil needs to know which contact is you so it can attribute \"Me\" in transcripts to the right person.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

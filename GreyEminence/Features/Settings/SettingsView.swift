@@ -95,6 +95,7 @@ struct SettingsView: View {
                     pane.iconView
                 }
                 .tag(pane)
+                .help("\(pane.title) settings. Hover each control for what / how / why. Full text: Help → Controls and options.")
             }
             .listStyle(.sidebar)
             .frame(width: 190)

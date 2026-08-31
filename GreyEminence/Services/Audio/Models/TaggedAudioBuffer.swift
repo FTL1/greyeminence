@@ -12,7 +12,7 @@ struct TaggedAudioBuffer: @unchecked Sendable {
 
     var speaker: Speaker {
         switch source {
-        case .microphone: .me
+        case .microphone: Speaker.resolvedMe()
         case .system: .other("System")
         }
     }

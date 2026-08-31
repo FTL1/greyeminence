@@ -9,8 +9,10 @@ final class AIRetryTests: XCTestCase {
 
     // MARK: - URLError classification
 
-    func test_urlError_timedOut_isRetryable() {
-        XCTAssertTrue(AIRetry.isRetryable(URLError(.timedOut)))
+    func test_urlError_timedOut_isNotRetryable() {
+        // Meeting analysis already waited the full budget; retrying stacked
+        // three 60s "The request timed out" failures for the user.
+        XCTAssertFalse(AIRetry.isRetryable(URLError(.timedOut)))
     }
 
     func test_urlError_networkLost_isRetryable() {
@@ -105,8 +107,16 @@ final class AIRetryTests: XCTestCase {
 
     // MARK: - AITimeoutError
 
-    func test_aiTimeout_isRetryable() {
-        XCTAssertTrue(AIRetry.isRetryable(AITimeoutError.timedOut(seconds: 90)))
+    func test_aiTimeout_isNotRetryable() {
+        XCTAssertFalse(AIRetry.isRetryable(AITimeoutError.timedOut(seconds: 90)))
+    }
+
+    func test_xai_rateLimit_isRetryable() {
+        XCTAssertTrue(AIRetry.isRetryable(XAIAPIError.httpError(statusCode: 429)))
+    }
+
+    func test_xai_unauthorized_isNotRetryable() {
+        XCTAssertFalse(AIRetry.isRetryable(XAIAPIError.httpError(statusCode: 401)))
     }
 
     // MARK: - Unknown errors

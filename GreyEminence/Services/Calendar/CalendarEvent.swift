@@ -90,10 +90,24 @@ struct CalendarEvent: Identifiable, Sendable, Hashable {
     /// already extracted from the provider's participant objects.
     let attendees: [EventAttendee]
     let isRecurring: Bool
+    /// The organizer called it off. Cancelled events are filtered out before
+    /// they reach the UI; the flag exists so the two calendar providers can
+    /// report it the same way.
+    var isCancelled: Bool = false
     let source: Source
 
     /// Recurrence/series key, or nil for a one-off event.
     var recurrenceID: String? { isRecurring ? linkIdentifier : nil }
+
+    /// Exchange and Outlook commonly deliver a cancellation by *retitling* the
+    /// event "Canceled: <subject>" rather than by setting a status the client
+    /// can read — a cancelled meeting can still arrive as `.confirmed`.
+    static func titleIndicatesCancellation(_ title: String?) -> Bool {
+        guard let title = title?.trimmingCharacters(in: .whitespaces).lowercased() else {
+            return false
+        }
+        return title.hasPrefix("canceled:") || title.hasPrefix("cancelled:")
+    }
 
     /// Start time formatted for display (e.g. "10:30 AM"). One definition for
     /// every calendar-event row instead of re-formatting at each call site.

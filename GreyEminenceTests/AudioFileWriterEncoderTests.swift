@@ -60,6 +60,55 @@ final class AudioFileWriterEncoderTests: XCTestCase {
         XCTAssertNoThrow(try AudioFileWriter.preflightEncoder(for: fmt))
     }
 
+    func test_preflight_interleaved_mono_48000_passes() throws {
+        let fmt = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48000,
+            channels: 1,
+            interleaved: true
+        ))
+        XCTAssertNoThrow(try AudioFileWriter.preflightEncoder(for: fmt))
+        let writeable = AudioFileWriter.writeableFormat(from: fmt)
+        XCTAssertFalse(writeable.isInterleaved)
+        XCTAssertEqual(writeable.channelCount, 1)
+        XCTAssertEqual(writeable.commonFormat, .pcmFormatFloat32)
+    }
+
+    func test_writeableFormat_clamps_aggregate_channel_count() throws {
+        guard let fmt = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48000,
+            channels: 4,
+            interleaved: false
+        ) else {
+            throw XCTSkip("4-channel PCM is not available on this host")
+        }
+        let writeable = AudioFileWriter.writeableFormat(from: fmt)
+        XCTAssertLessThanOrEqual(writeable.channelCount, 2)
+        XCTAssertFalse(writeable.isInterleaved)
+        XCTAssertNoThrow(try AudioFileWriter.preflightEncoder(for: fmt))
+    }
+
+    func test_start_and_write_interleaved_mono() async throws {
+        let base = tempDir.appendingPathComponent("mic-agg.m4a")
+        let writer = AudioFileWriter(outputURL: base)
+        let fmt = try XCTUnwrap(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48000,
+            channels: 1,
+            interleaved: true
+        ))
+        try await writer.start(inputFormat: fmt)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: 4800))
+        buffer.frameLength = 4800
+        try await writer.write(buffer)
+        await writer.stop()
+        let chunks = AudioFileWriter.existingChunkURLs(base: base)
+        XCTAssertEqual(chunks.count, 1)
+        let readable = try AVAudioFile(forReading: try XCTUnwrap(chunks.first))
+        XCTAssertGreaterThan(readable.length, 0)
+    }
+
     // MARK: - End-to-end: write, checkpoint, verify readable
 
     func test_write_and_reopen_stereo_48000() async throws {
@@ -111,27 +160,21 @@ final class AudioFileWriterEncoderTests: XCTestCase {
 
     // MARK: - Failure counter
 
-    func test_writeFailure_counter_increments_on_invalid_buffer() async throws {
+    func test_write_converts_stereo_into_mono_writer() async throws {
         let base = tempDir.appendingPathComponent("mic.m4a")
         let writer = AudioFileWriter(outputURL: base)
         let fmt = try makeFormat(sampleRate: 48000, channels: 1)
         try await writer.start(inputFormat: fmt)
 
-        // Wrong-format buffer (stereo source into mono writer).
-        let wrongFmt = try makeFormat(sampleRate: 48000, channels: 2)
-        let wrong = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: wrongFmt, frameCapacity: 1024))
-        wrong.frameLength = 1024
-
-        do {
-            try await writer.write(wrong)
-            XCTFail("Expected write to throw on format mismatch")
-        } catch {
-            // Expected
-        }
+        let stereo = try makeFormat(sampleRate: 48000, channels: 2)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: stereo, frameCapacity: 1024))
+        buffer.frameLength = 1024
+        try await writer.write(buffer)
 
         let consecutive = await writer.consecutiveWriteFailures
-        let total = await writer.totalWriteFailures
-        XCTAssertEqual(consecutive, 1)
-        XCTAssertEqual(total, 1)
+        XCTAssertEqual(consecutive, 0)
+        await writer.stop()
+        let chunks = AudioFileWriter.existingChunkURLs(base: base)
+        XCTAssertEqual(chunks.count, 1)
     }
 }

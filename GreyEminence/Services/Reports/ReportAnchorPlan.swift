@@ -58,6 +58,31 @@ struct ReportAnchorPlan: Codable, Sendable, Equatable {
 
 extension ReportModel {
 
+    /// Keep only the summary sections the user ticked.
+    ///
+    /// Must run AFTER anchoring: the cached plan's `sectionIndex` values index
+    /// into the full section list, so filtering first would silently attach
+    /// figures to the wrong headings. A screenshot tied to a dropped section
+    /// loses that tie rather than keeping a dead PDF link.
+    func keepingSections(_ ids: Set<Int>) -> ReportModel {
+        var result = self
+        result.sections = sections.filter { ids.contains($0.id) }
+
+        func retie(_ figure: Figure) -> Figure {
+            guard let index = figure.sectionIndex, !ids.contains(index) else { return figure }
+            var figure = figure
+            figure.sectionIndex = nil
+            figure.sectionTitle = nil
+            return figure
+        }
+        result.shareSessions = shareSessions.map { session in
+            var session = session
+            session.figures = session.figures.map(retie)
+            return session
+        }
+        return result
+    }
+
     /// Keep at most `limit` appendix screenshots, spread across the meeting.
     ///
     /// The no-plan path: with nothing tying pictures to sections, printing

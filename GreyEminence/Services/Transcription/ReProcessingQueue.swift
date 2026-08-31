@@ -318,7 +318,41 @@ final class ReProcessingQueue {
         // redo if interrupted, so no further checkpointing is needed.
         StorageManager.shared.deleteReProcessCheckpoint(for: meetingID)
 
-        let (segmentSnapshots, audioRanges) = swapSegments(meeting: meeting, upgraded: upgraded, in: context)
+        var (segmentSnapshots, audioRanges) = swapSegments(meeting: meeting, upgraded: upgraded, in: context)
+        do {
+            let contacts = (try? context.fetch(FetchDescriptor<Contact>())) ?? []
+            let expected = MeetingSpeakerRecovery.candidates(meeting: meeting, contacts: contacts)
+                .filter(\.isPreselected)
+            let relabeled = try await MeetingSpeakerRecovery.recover(
+                meeting: meeting,
+                expected: expected
+            )
+            if relabeled.changed > 0 {
+                PersistenceGate.save(context, site: "reProcess/relabelSpeakers", critical: true, meetingID: meetingID)
+                segmentSnapshots = meeting.segments
+                    .sorted { $0.startTime < $1.startTime }
+                    .map {
+                        SegmentSnapshot(
+                            speaker: $0.speaker,
+                            text: $0.text,
+                            formattedTimestamp: "",
+                            isFinal: true
+                        )
+                    }
+                LogManager.send(
+                    "Re-process assigned \(relabeled.changed) remote line(s); \(relabeled.unknownSpeakers.count) unknown leftover(s)",
+                    category: .transcription,
+                    meetingID: meetingID
+                )
+            }
+        } catch {
+            LogManager.send(
+                "Re-process speaker recovery skipped: \(error.localizedDescription)",
+                category: .transcription,
+                level: .warning,
+                meetingID: meetingID
+            )
+        }
 
         setPhase(.analyzing, for: meeting, in: context)
         phaseStart = Date()
@@ -404,7 +438,7 @@ final class ReProcessingQueue {
         // same phrase captured by both the mic and the system audio tap)
         // shows up twice in the final transcript.
         let raw: [TranscriptSegment] = upgraded.map { seg in
-            let speaker: Speaker = seg.source == .mic ? .me : .other("Speaker")
+            let speaker: Speaker = seg.source == .mic ? Speaker.resolvedMe() : .other(Speaker.guestLabel(index: 1))
             return TranscriptSegment(
                 speaker: speaker,
                 text: seg.text,
@@ -442,8 +476,7 @@ final class ReProcessingQueue {
         guard !segments.isEmpty, let client = try? await AIClientFactory.makeClient() else { return }
         let service = AIIntelligenceService(
             client: client,
-            meetingID: meeting.id,
-            relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
+            meetingID: meeting.id
         )
         do {
             let roster = MeetingRoster.snapshot(for: meeting)
@@ -455,8 +488,12 @@ final class ReProcessingQueue {
                 LogManager.send("Re-analysis: injecting screen context (\(meeting.sessionSummaries.count) recap(s), \(meeting.screenFrames.count) frame(s))", category: .screen, meetingID: meeting.id)
             }
             let finalResult = try await AIUsageContext.attribute(.reanalysis, meetingID: meeting.id) {
-                _ = try await service.analyze(segments: segments, roster: roster, screenObservations: screenBlock)
-                return try await service.performFinalAnalysis(segments: segments, roster: roster, screenObservations: screenBlock)
+                try await service.reanalyze(
+                    segments: segments,
+                    roster: roster,
+                    screenObservations: screenBlock,
+                    calendarTitle: meeting.analysisTitleHint
+                )
             }
             guard let result = finalResult else { return }
             for old in meeting.insights { context.delete(old) }

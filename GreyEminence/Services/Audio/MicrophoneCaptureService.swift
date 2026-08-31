@@ -116,6 +116,7 @@ actor MicrophoneCaptureService {
         guard inputFormat.sampleRate > 0 && inputFormat.channelCount > 0 else {
             throw MicCaptureError.noInputDevice
         }
+        LogManager.send("Mic tap format: \(AudioFileWriter.describeFormat(inputFormat))", category: .audio)
 
         // Log the actual input device name + mute/volume so silent recordings
         // are diagnosable. Yeti's hardware mute, input volume at 0, or "Mute"

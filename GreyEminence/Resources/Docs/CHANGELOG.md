@@ -4,6 +4,404 @@ All notable changes are listed here, newest first. Recent releases have
 full detail; older ones are summarized. The version number tracks
 `MARKETING_VERSION` in `project.yml`.
 
+Grey Conseil test builds below are **this fork only**. They are not Matt’s shipping
+Grey Eminence releases.
+
+## 0.28.4-ftl51 — 2026-08-28
+
+**Help on every control; Send feedback.** Hover a control for a short what / how / why. **Help → Controls and options** is the full page (also `docs/CONTROL-REFERENCE.md`). **Help → Send feedback…** opens a GitHub issue as text only (pane + what you want). Screenshot is off unless you check it; the picture stays on this Mac until you attach it. Emails and phone numbers in the text are scrubbed. No transcript is attached.
+
+## 0.28.4-ftl50 — 2026-08-28
+
+**GitHub is FTL1/grey-conseil.** Check for Updates uses that repo (old `FTL1/greyeminence` URLs redirect). Docs, Settings About/export copy, Grok plugin comments, and the Desktop DMG folder say Grey Conseil. Bundle ID, SwiftData store, Keychain, and Outlook OAuth stay `com.ftl1.greyeminence` / `com.greyeminence.app` so the library and grants stay. About copyright still names Matthew Purdon; Help still has **How we differ from Grey Eminence**.
+
+## 0.28.4-ftl49 — 2026-08-28
+
+**Outlook connect, voice IDs, Grok library.** Settings → Calendar always shows Connect / Validate and a field for the Microsoft client ID (it was hidden while the ID was a placeholder). Voice prints load only for **you and this meeting’s invitees**, not everyone in People — that is why Jordan kept getting the other seat. Enrolled match is tighter. Open Grey Conseil once so it writes the Grok library; the local `grey-conseil` plugin is already in Grok config.
+
+## 0.28.4-ftl48 — 2026-08-27
+
+**Permissions pane.** Open System Settings no longer uses `x-apple.systemsettings:…Privacy_AudioCapture` (Tahoe has no handler — Search App Store dialog). System Audio opens Screen & System Audio Recording. Developer → Permissions only checks the **active** AI provider, so a missing Anthropic key is not an error when Grok is selected.
+
+## 0.28.4-ftl47 — 2026-08-27
+
+**Rename a session.** Click the meeting name in the header (or on Record), or double-click it in Meetings / Archive. Return saves, Escape cancels. Reanalyze keeps a name you typed.
+
+## 0.28.4-ftl46 — 2026-08-27
+
+**Mic meter and full permissions.** Settings → Audio level LEDs used a linear 0…1 scale, so speech only lit the first bar while the number still moved. The bar is dBFS now (−50…−8). Developer → Permissions lists microphone, screen, system audio (Test tap), calendar, contacts, notifications, Microsoft 365, Anthropic/xAI keys (Validate), Bedrock, recordings folder, and the Sparkle feed.
+
+## 0.28.4-ftl45 — 2026-08-27
+
+**Check for Updates and mic grant.** Sparkle was fetching `github.com/FTL1/grey-conseil` (that repo does not exist), so the in-app updater 404ed. Feed is `FTL1/greyeminence` again. Opening Record, or first capture after a new DMG, prompts for Microphone; a denial opens System Settings. Screen Recording / System Audio is requested on record start (ad-hoc DMGs orphan TCC).
+
+## 0.28.4-ftl44 — 2026-08-27
+
+**Secretary access.** Grey Conseil writes a Grok library (full archive: transcript + intel + actions) on launch, after a recording, and after reanalyze. Local Grok plugin `grey-conseil` searches it. No new organizer in the app.
+
+## 0.28.4-ftl43 — 2026-08-26
+
+**Grey Conseil. Archive Export (zip or PDF).**
+
+- Archive (and Meetings) **Export…** — it was labeled Extract; it is an export.
+- **Zip** still packs markdown plus optional audio, stills, and a screen-share time-lapse.
+- **One PDF** concatenates the set; each meeting starts on a new page.
+- **One PDF per meeting** writes a file per meeting into a folder you choose.
+- GitHub repo is **FTL1/grey-conseil**. Bundle ID is still `com.ftl1.greyeminence`. Check for Updates uses that repo. Copyright names Matthew Purdon; Unofficial Grey Conseil portions under the same license.
+
+## 0.28.4-ftl42 — 2026-08-26
+
+**this fork only. Blank screen-share stills.**
+
+- ScreenCaptureKit sometimes returns a white rectangle for Teams/Electron
+  windows. Capture now sizes from the filter's content rect, falls back to
+  a window-server snapshot, and **drops** uniform white/black frames so
+  they are not kept or sent to vision.
+
+## 0.28.4-ftl41 — 2026-08-26
+
+**this fork only. speaker-1 and calendar self-intro.**
+
+- Unnamed remotes are **speaker-1, speaker-2** — not Guest vs Unknown.
+- Calendar invitees include the **organizer**. Linking an event still
+  puts those names on the People bar.
+- If a remote voice says **I'm Bob** (or my name is) in the first eight
+  minutes, that voice is Bob. If Bob is on the invite, the full invite
+  name is used. Me saying “this is Bob” does not count.
+
+## 0.28.4-ftl40 — 2026-08-25
+
+**this fork only. Archive is the whole library.**
+
+- Archive lists **every** meeting (not only older than three months) so
+  extract can hit Weekly Standup from last week.
+- Right-click or the selection bar: **Archive Meeting** / **Archive
+  Selected** files them away from the recent Meetings list. **Put Back
+  on Meetings** restores a filed meeting that is still in the three-month
+  window.
+
+## 0.28.4-ftl39 — 2026-08-25
+
+**this fork only. Extract transcripts and intel from Archive.**
+
+- Archive (and the recent Meetings list): **Extract…** for the current
+  meeting, a recurring series (Weekly Standup), selected meetings, or
+  everything currently listed. Optional **per speaker**.
+- Checkboxes: transcript, intel, audio, screen captures, and a **video**
+  time-lapse of those stills. There is no camera movie of the call.
+
+## 0.28.4-ftl38 — 2026-08-25
+
+**this fork only. Why the name is Grey Conseil.**
+
+- **Grey Eminence** is *éminence grise* — unofficial counselor
+  (https://wordhistories.net/2019/07/24/eminence-grise/). **Grey Conseil**
+  keeps the grey and adds Verne’s servant Conseil (counsel) from *Twenty
+  Thousand Leagues Under the Sea*
+  (https://archive.org/details/in.ernet.dli.2015.459144). Homage, plus
+  humor. Help → **Why Grey Conseil**.
+
+## 0.28.4-ftl37 — 2026-08-25
+
+**this fork only. Product name is Grey Conseil.**
+
+- Dock name is **Grey Conseil** — not Grey Eminence. Bundle ID is unchanged
+  (`com.ftl1.greyeminence`), so the existing library stays. Drag this app in
+  and remove **older Notebook** / older test builds if those icons are still
+  in Applications.
+
+## 0.28.4-ftl36 — 2026-08-25
+
+**this fork only. Renamed older Notebook; updates from this repo; legal notice.**
+
+- Dock name became **older Notebook** (later **Grey Conseil** in ftl37).
+  Bundle ID unchanged. Unofficial fork, not Grey Eminence.
+- **Check for Updates** uses github.com/FTL1/greyeminence Releases, not
+  Matt’s Sparkle feed. First launch asks you to acknowledge: no warranty,
+  use at your own risk, lawful use only (you are responsible).
+- Help: **Disclaimer** and **How we differ from Grey Eminence**.
+
+## 0.28.4-ftl35 — 2026-08-24
+
+**this fork only. Port of Matt 0.30 copy-with-format and open-questions callout.**
+
+- Copy on a summary (and on follow-up questions / action items) now also
+  puts HTML on the clipboard, so Teams, Slack, Outlook, and Notes paste
+  real headings and lists. Plain text is still there for everything else.
+- PDF / HTML reports lead with open questions in a callout, not buried
+  under the summary looking like one more section.
+
+## 0.28.4-ftl34 — 2026-08-24
+
+**this fork only. One mixer chip for you.**
+
+- Calendar “Alex Morgan” and Me “Alex you” were two chips on the same
+  lines (two colors, the same 53% twice). The roster now treats those as
+  one person: one name, one color, one talk-share. Jordan and Pat stay
+  separate.
+
+## 0.28.4-ftl33 — 2026-08-24
+
+**this fork only. Mic capture on aggregate devices.**
+
+- Built-in mic behind `CADefaultDeviceAggregate` was delivering a format
+  AAC refused (`avfaudio -66567`), so Alex’s audio was dropped and the
+  encoder banner appeared. Mic buffers are now converted to a standard
+  float32 layout before encoding. Transcription keeps running even if a
+  file cannot be written.
+
+## 0.28.4-ftl32 — 2026-08-24
+
+**this fork only. Tagging guest-1 as Jordan actually merges them.**
+
+- Selecting guest-1 / guest-2 and setting them to Jordan now puts those lines
+  on Jordan’s seat (same chip, same hide/show, same color). It was only
+  renaming the badge. **Click to show** on a hide stub reveals that
+  person instead of rolling up the other copy.
+
+## 0.28.4-ftl31 — 2026-08-24
+
+**this fork only. First snippet of every speaker actually hides.**
+
+- Mixer hide was still leaving the first Alex / guest-1 / guest-2 line
+  playable. Playable rows were tagged with a UUID while hide stubs used
+  a String, so SwiftUI recycled index 0 as the original snippet and
+  deselect/select did nothing to it. Every transcript row now uses the
+  same String identity, and hide rebuilds the list. Click a grey chip
+  or **Show all** — the first comment goes with the rest.
+
+## 0.28.4-ftl30 — 2026-08-24
+
+**this fork only. First hidden line actually hides.**
+
+- Mixer hide stubs no longer reuse the first line’s UUID. SwiftUI was
+  keeping that original playable row, so Alex at 0:00 and the first
+  guest-1 / guest-2 snippets stayed on screen. Hide now shows a “Show
+  …” stub instead of the first comment.
+
+## 0.28.4-ftl29 — 2026-08-24
+
+**this fork only. Live AI lasts the whole meeting.**
+
+- Live AI no longer stops at 90 minutes while you are still recording.
+  It follows the meeting: on until you turn **Live AI** off, hit **Stop
+  all**, or the recording itself ends (including the 4-hour / idle-speech
+  auto-stops).
+
+## 0.28.4-ftl28 — 2026-08-24
+
+**this fork only. Intelligence item editing, Alex hide leak, capture kill switch.**
+
+- Follow-up questions, action items, summary sections, and topics: **click**
+  to select, **right-click** to modify / research / delete, **drag** to
+  reorder. Research uses this meeting’s transcript only (no invented facts).
+- Hiding **you** now hides the first Alex line at 0:00 as well (Alex as a
+  remote label vs Me).
+- Top bar: **Watch for meetings**, **Live AI**, **Stop all**. Idle does not
+  capture this Mac’s mic. Auto-record stops after 4 hours, or after 20
+  minutes of silence on an auto-started call. Live AI originally stopped
+  after 90 minutes even if you kept recording (changed in ftl29).
+
+## 0.28.4-ftl27 — 2026-08-21
+
+**this fork only. Speaker re-analyze with voice stamps, hide-filter leak, capture-permission probe.**
+
+- **Re-analyze speakers** now opens a sheet: pre-select who was actually on
+  the call. Saved voice stamps for those people are used first. Leftover
+  clusters are **unknown-1, unknown-2…** (not extra guest names). Select
+  one or more unknowns and assign them to a known person, a contact, or a
+  typed name. A voice stamp is saved and tied to that contact.
+- Hiding **Me** and **Jordan** now hides every identity for those people,
+  including the first transcript lines (Alex labeled as a remote, Jordan
+  Hale vs Jordan). Unassigned leftover guests stay visible.
+- Screen-share no longer treats every ScreenCaptureKit error as “permission
+  off.” If macOS already granted this binary, a transient list-windows
+  failure does not latch the red banner.
+- **Settings → Developer → Capture permissions**: test/validate/log
+  CGPreflight, ScreenCaptureKit, mic, bundle path, and signing. Copy the
+  log. Each ad-hoc Grey Conseil DMG is a new identity — System Settings can show ON
+  for an older copy.
+
+## 0.28.4-ftl26 — 2026-08-20
+
+**this fork only. Deep / Deepest reanalyze on every intelligence section.**
+
+- Follow-up Questions, Action Items, Summary, and Topics each have a
+  **Reanalyze** control. Click runs **Deep** (a more thorough prompt for
+  that section only). Arrow: Deep, **Deepest** (adds measured vocal
+  energy from the saved audio — not invented emotions), **Revert**,
+  **View log**.
+- The top Reanalyze button keeps a normal full rewrite on click.
+  Its arrow adds Deep, Deepest, Revert, View log; re-transcribe with
+  large-v3 is at the bottom.
+- Prior insights are kept so revert and the log work.
+
+## 0.28.4-ftl25 — 2026-08-20
+
+**this fork only. Meeting dossier export (chatbot pack, series, one-pagers).**
+
+- Meeting Intelligence **Export** arrow: **Create dossier…**, **One-pagers
+  for everyone**, **Series dossier…** when related meetings exist. Still
+  dumps a single file the old way below those items.
+- A dossier is a zip: README, written report (md/txt/pdf/docx/rtf/json),
+  optional transcript, optional AAC audio, optional screen stills, and a
+  **prompt pack** (`PROMPT.md` + `meeting.json`) you upload to a separate
+  Grok. The prompt forbids inventing facts.
+- One-pagers: `_general.md` plus one short page per speaker.
+- Series: calendar series if linked, otherwise meetings that share the
+  first two name words.
+- Analysis now **stores everyone’s action items**. The on-screen list is
+  still yours (plus unowned, plus the other person in a 1:1). Reanalyze
+  to fill other people’s tasks on older meetings.
+
+## 0.28.4-ftl24 — 2026-08-20
+
+**this fork only. Reanalyze infers purpose, not calendar subject.**
+
+- **Reanalyze** now runs a fresh purpose-first prompt instead of replaying
+  the live first-pass. It infers what you (Me) were trying to get done —
+  fix outbound documents, align language with what someone actually said —
+  rather than summarizing the calendar title or a PDF on screen.
+- Follow-up questions are unanswered in-room questions and outstanding
+  work, not a generic due-diligence questionnaire.
+- Previous summary / questions / topics are replaced. Untouched suggested
+  tasks are replaced; completed, dated, or assigned tasks stay.
+- Calendar-linked meeting names stay as the event. The intelligence pane
+  shows the AI purpose title when it differs.
+- Whisper re-transcribe, split, and topic-map analysis use the same
+  rewrite (one pass, not first-pass then polish).
+
+## 0.28.4-ftl23 — 2026-08-20
+
+**this fork only. Play a merged line’s full audio.**
+
+- The play button on a joined transcript line now plays from that line’s
+  start through the next line, covering every original crumb — including
+  across split audio files. No HLS rewrite; it just walks the matching
+  time ranges.
+
+## 0.28.4-ftl22 — 2026-08-20
+
+**this fork only. Auto-merge actually runs on existing transcripts.**
+
+- Opening a finished meeting now merges same-speaker crumbs after the
+  lines are loaded (ftl21 ran too early against an empty list, then
+  never retried).
+- Pause default is 4s, window 15s, so streaming fragments 3–5s apart
+  join. Existing 2s/10s settings are bumped once.
+- **⋯ → Merge consecutive lines** still does a one-shot pass.
+- Developer → Edit AI Prompts no longer says the prompts are “sent to Claude.” They go to whichever provider is selected (Grok for Grey Conseil).
+
+## 0.28.4-ftl21 — 2026-08-19
+
+**this fork only. In-meeting Find, auto-merge, transcript ⋯ menu.**
+
+- **⌘F** searches the open meeting (header field). Tick **Transcript** to
+  highlight and jump lines in the inspector. **⇧⌘F** is still library Find.
+- **Settings → Transcript**: auto-merge same-speaker fragments (10–30s
+  window or a long pause, whichever comes first). Dedupes ASR crumbs.
+  Undo is in the transcript **⋯** menu. Does not run while recording.
+- Transcript toolbar: Select / export / re-analyze stay visible. Undo,
+  revert, merge-now, and DEV tools move into **⋯** so a narrow pane no
+  longer clips labels.
+
+## 0.28.4-ftl20 — 2026-08-19
+
+**this fork only. Find in transcripts and Meeting Intelligence.**
+
+- Sidebar **Find** is a main-pane search (toolbar magnifying glass, **⇧⌘F**).
+  Scope: this meeting, selected meetings, or the whole library.
+- Filters: meeting name, speaker (Me, Jordan, …), from/to date, and text
+  (plain or **Regex**). Tick **Transcript**, **Intelligence**, or both.
+- Click a hit to open that meeting. Transcript hits jump to the line.
+- **Ask** is still the AI question box. Per-speaker **Find in their lines**
+  is still on the speaker menu.
+
+## 0.28.4-ftl19 — 2026-08-18
+
+**this fork only. People chips, colors, line playback, merge.**
+
+- Click a People chip to hide or show that speaker. Color = on, grey = off.
+  Talk % sits on the chip. The extra talk-share row and chip chevrons are gone.
+- Show all sits next to the names. Empty leftover guests drop off the bar.
+- Same person, same color in the meeting header and the transcript. Pick and
+  lock a color in the speaker menu. A clash keeps the more common speaker.
+- Apply renames only the selected line(s). Rename inline is gone. Prior
+  speakers are a dropdown. Hide is one toggle. Set as Me is under Rename.
+- Play on each line plays that line’s saved audio.
+- Select two or more lines and **Merge**.
+
+## 0.28.4-ftl18 — 2026-08-18
+
+**this fork only. Speaker remap no longer eats hidden Me lines.**
+
+- Isolate Guest-1, then assign: only those visible lines change. Hidden
+  speakers (including you) stay put. **Select Visible** replaced Select All.
+- The isolate banner says how many lines will change and has **Assign these N**.
+- Remapping a guest never overwrites Me.
+- **Undo speaker change** puts the last remap back. **Revert speaker labels**
+  restores the original names. **Re-analyze speakers** listens to the saved
+  audio again and relabels remotes as guest-1, guest-2…. You stay you.
+
+## 0.28.4-ftl17 — 2026-08-18
+
+**this fork only. Shorter export names, and three ports from Matt 0.29.**
+
+- Export files are now `Title_yyyyMMdd-47m-intel.pdf` and
+  `Title_yyyyMMdd-47m-tr.txt`.
+- Launch no longer beachballs while Core Audio enumerates devices.
+  Startup names the interrupted-recording, interview, and screen-frame
+  checks in the footer.
+- Cancelled Outlook/Exchange meetings (`Canceled: …`) no longer appear
+  in the calendar picker.
+- While recording, shared-screen thumbnails show as soon as frames
+  exist (text list only until the first frame lands).
+- Intelligence Export drops summary sections *after* screenshot
+  anchoring, so the PDF cannot grow a dead figure link.
+
+## 0.28.4-ftl16 — 2026-08-18
+
+**this fork only. Smaller transcript button, per-name locks, richer Intelligence Export.**
+
+- **Transcript** in the meeting header and transcript bar is a small
+  control. Same formats as before.
+- Speaker names wrap in the People bar so they all stay visible. Each
+  name has a lock icon you click to lock or unlock that ID. The old
+  **Lock IDs** button is gone.
+- Meeting Intelligence **Export** (was Export PDF) lets you tick
+  sections, add the raw transcript with **De-dupe** on by default, and
+  save as PDF, Word, Excel, CSV, JSON, RTF, or Markdown.
+
+## 0.28.4-ftl15 — 2026-08-18
+
+**this fork only. Export the full transcript, and name Intelligence files clearly.**
+
+- **Export Full Transcript** on the meeting header and the transcript toolbar.
+  Saves every line (speaker, timestamp, text) as Plain Text, Markdown, RTF,
+  CSV, Excel, or PDF. Suggested name:
+  `Title-Full-Transcript_yyyyMMdd-<minutes>.txt`. Copy Full Transcript puts
+  the same text on the clipboard. This is not the developer
+  `.getranscript.json` used for rubric tests.
+- Meeting Intelligence **Export PDF** (and csv / rtf / xlsx) now suggests
+  `Title-Meeting-Intelligence_yyyyMMdd-<minutes>.pdf`. The old
+  `Title — 2026-08-18 (RP).pdf` pattern is gone.
+- **You** are whoever is on the Mac microphone. Everyone else is the
+  meeting app (Teams, Meet, Slack) on the system-audio tap. Voice prints
+  name remotes; they do not decide who Me is.
+
+## 0.28.4-ftl14 — 2026-08-18
+
+**this fork only. People bar, voice prints, this-meeting / prior speakers.**
+
+- One **People** strip across Record: chips for who is here, talk-share for
+  who is speaking. Click a chip to isolate them.
+- Pre-tag invitees, assign `guest-1` → **This is Pat**, **Lock IDs**.
+- Right-click a badge: **This meeting** and **Prior speakers**, enroll a
+  voice print onto a People contact, hide (and **Show Pat**), search that
+  stays open. A click on the name does not hide them.
+- Enrolled prints load at the next recording so a match is labeled Pat
+  instead of a new guest-N.
+
 ## 0.28.4 — 2026-08-13
 
 **Fixed: the release build failed to compile**

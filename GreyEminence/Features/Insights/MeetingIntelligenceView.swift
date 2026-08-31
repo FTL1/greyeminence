@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AppKit
 
 struct MeetingIntelligenceView: View {
     @Bindable var meeting: Meeting
@@ -7,10 +8,10 @@ struct MeetingIntelligenceView: View {
     /// panes wire these; other hosts get a self-contained player).
     var pendingSeekTime: Binding<TimeInterval?> = .constant(nil)
     var onPlayheadSegment: ((UUID) -> Void)? = nil
+    var onOpenDialog: ((Meeting, UUID) -> Void)? = nil
+    var onSelectDestination: ((SidebarDestination) -> Void)? = nil
     @Environment(\.modelContext) private var modelContext
-    @State private var isReanalyzing = false
-    @State private var reanalysisError: String?
-    @State private var reanalyzeTask: Task<Void, Never>?
+    @Bindable private var reanalysisQueue = MeetingReanalysisQueue.shared
     @State private var reanalyzeSharesTrigger = false
     @State private var isExportingReport = false
     @State private var exportError: String?
@@ -19,27 +20,48 @@ struct MeetingIntelligenceView: View {
     /// the summary. Inline reads better when the pictures are good; at the
     /// end keeps the prose continuous and is what makes the links useful.
     @AppStorage("reportFiguresAtEnd") private var reportFiguresAtEnd = true
+    @AppStorage("intelExportSummary") private var includeSummary = true
+    @AppStorage("intelExportActions") private var includeActionItems = true
+    @AppStorage("intelExportQuestions") private var includeQuestions = true
+    @AppStorage("intelExportTopics") private var includeTopics = true
+    @AppStorage("intelExportScreens") private var includeSharedScreens = true
+    @AppStorage("intelExportTranscript") private var includeTranscript = false
+    @AppStorage("intelExportDedupe") private var dedupeTranscript = true
+    @AppStorage("intelExportFormat") private var intelExportFormat = IntelligenceExportFormat.pdf.rawValue
+    @Query(sort: \Meeting.date, order: .reverse) private var library: [Meeting]
+    @State private var showDossierSheet = false
+    @State private var dossierRequest = DossierRequest()
+    @State private var historyScope: InsightScope?
+    @State private var analyzingScope: InsightScope?
+    @State private var researchItem: ResearchItem?
+    @Environment(MeetingFindController.self) private var meetingFind
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack {
-                    Label {
-                        Text("Meeting Intelligence")
-                    } icon: {
-                        Image(systemName: "brain")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 26, height: 26)
-                            .background(Color.purple.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Button {
+                        onSelectDestination?(.insights)
+                    } label: {
+                        Label {
+                            Text("Meeting Intelligence")
+                        } icon: {
+                            Image(systemName: "brain")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 26, height: 26)
+                                .background(Color.purple.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .font(.headline)
                     }
-                    .font(.headline)
+                    .buttonStyle(.plain)
+                    .help("Open Insights — organize intelligence across meetings")
 
                     Spacer()
 
                     // Truncates first when the pane narrows — the Reanalyze
                     // controls must never be pushed off screen by a caption.
-                    MeetingAIUsageCaption(meetingID: meeting.id, isAnalyzing: isReanalyzing || meeting.isAnalyzing)
+                    MeetingAIUsageCaption(meetingID: meeting.id, isAnalyzing: isThisMeetingBusy)
                         .layoutPriority(-1)
 
                     if meeting.status == .completed {
@@ -55,86 +77,116 @@ struct MeetingIntelligenceView: View {
                             // arrow picks a different one — the same shape as
                             // the Reanalyze control beside it.
                             Menu {
-                                Picker("Template", selection: $reportTemplateID) {
+                                Button("Create dossier…") {
+                                    dossierRequest.onePagers = false
+                                    showDossierSheet = true
+                                }
+                                Button("One-pagers for everyone") {
+                                    var request = DossierRequest()
+                                    request.onePagers = true
+                                    request.includePromptPackage = true
+                                    request.includeReport = false
+                                    request.depth = .brief
+                                    runDossier(request)
+                                }
+                                if DossierFacts.relatedMeetings(to: meeting, library: library).count > 1 {
+                                    Button("Series dossier…") {
+                                        dossierRequest.includeSeries = true
+                                        dossierRequest.onePagers = false
+                                        showDossierSheet = true
+                                    }
+                                }
+                                Divider()
+                                Toggle("All sections", isOn: allSectionsBinding)
+                                Toggle("Summary", isOn: $includeSummary)
+                                Toggle("Action items", isOn: $includeActionItems)
+                                Toggle("Follow-up questions", isOn: $includeQuestions)
+                                Toggle("Topics", isOn: $includeTopics)
+                                Toggle("Shared screens", isOn: $includeSharedScreens)
+                                Divider()
+                                Toggle("Raw transcript", isOn: $includeTranscript)
+                                Toggle("De-dupe transcript", isOn: $dedupeTranscript)
+                                    .disabled(!includeTranscript)
+                                Divider()
+                                Picker("PDF theme", selection: $reportTemplateID) {
                                     ForEach(ReportTemplateCatalog.all) { template in
-                                        // The code is in the filename, so
-                                        // showing it here tells you which
-                                        // file on disk came from which theme.
                                         Text("\(template.name)  (\(template.code))").tag(template.id)
                                     }
                                 }
                                 .pickerStyle(.inline)
-                                Divider()
                                 Picker("Screenshots", selection: $reportFiguresAtEnd) {
                                     Text("Collected at the end").tag(true)
                                     Text("Inline with the summary").tag(false)
                                 }
                                 .pickerStyle(.inline)
                                 Divider()
-                                Text(ReportTemplateCatalog.template(id: reportTemplateID).summary)
+                                ForEach(IntelligenceExportFormat.allCases) { format in
+                                    Button(format.menuTitle) {
+                                        intelExportFormat = format.rawValue
+                                        exportReport(format)
+                                    }
+                                }
                             } label: {
-                                Label("Export PDF", systemImage: "doc.richtext")
+                                Label("Export", systemImage: "square.and.arrow.up")
                                     .font(.caption)
                             } primaryAction: {
-                                exportReport()
+                                exportReport(IntelligenceExportFormat(rawValue: intelExportFormat) ?? .pdf)
                             }
                             .menuStyle(.button)
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .fixedSize()
-                            .help("Click: export as \(ReportTemplateCatalog.template(id: reportTemplateID).name). Arrow: choose a template.")
+                            .help("Click: export in the last format. Arrow: dossier (chatbot pack, series, one-pagers) or the older single-file dump.")
                         }
                     }
 
                     if meeting.status == .completed && !meeting.segments.isEmpty {
-                        if isReanalyzing || meeting.isAnalyzing {
+                        if isThisMeetingBusy {
                             HStack(spacing: 6) {
                                 ProgressView()
                                     .controlSize(.small)
-                                Text("Analyzing...")
+                                Text(busyLabel)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 Button {
-                                    cancelAnalysis()
+                                    if reanalysisQueue.contains(meeting.id) {
+                                        reanalysisQueue.cancelMeeting(meeting.id)
+                                    } else {
+                                        meeting.isAnalyzing = false
+                                        meeting.analysisError = "Analysis canceled by user."
+                                        analyzingScope = nil
+                                        PersistenceGate.save(
+                                            modelContext,
+                                            site: "MeetingIntelligenceView.cancelAnalysis",
+                                            meetingID: meeting.id
+                                        )
+                                    }
                                 } label: {
                                     Label("Cancel", systemImage: "stop.circle")
                                         .font(.caption)
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
-                                .help("Cancel the in-progress analysis and reset the meeting state")
+                                .help("Cancel analysis for this meeting")
                             }
                         } else {
-                            Menu {
-                                Button {
-                                    ReProcessingQueue.shared.enqueue(meetingID: meeting.id)
-                                } label: {
-                                    Label("Re-transcribe with large-v3", systemImage: "waveform.badge.checkmark")
-                                }
-                                if !meeting.screenFrames.isEmpty {
-                                    Button {
-                                        reanalyzeSharesTrigger = true
-                                    } label: {
-                                        Label("Re-analyze screen shares", systemImage: "rectangle.dashed.badge.record")
-                                    }
-                                }
-                            } label: {
-                                Label("Reanalyze", systemImage: "arrow.clockwise")
-                                    .font(.caption)
-                            } primaryAction: {
-                                reanalyzeTask = Task { await reanalyze() }
-                            }
-                            .menuStyle(.button)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .fixedSize()
-                            .help("Click: re-run AI on the current transcript. Arrow: full re-transcription with large-v3.")
+                            fullReanalyzeControl
                         }
                     }
                 }
                 .padding(.horizontal)
 
-                if let error = exportError ?? reanalysisError ?? meeting.analysisError {
+                if let generated = meeting.generatedTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !generated.isEmpty,
+                   generated.caseInsensitiveCompare(meeting.title) != .orderedSame {
+                    Text(generated)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                        .help("AI purpose title. The list still shows the calendar event name while this meeting is linked.")
+                }
+
+                if let error = exportError ?? meeting.analysisError {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -144,7 +196,6 @@ struct MeetingIntelligenceView: View {
                         Spacer()
                         Button("Dismiss") {
                             exportError = nil
-                            reanalysisError = nil
                             meeting.analysisError = nil
                         }
                             .font(.caption)
@@ -162,30 +213,103 @@ struct MeetingIntelligenceView: View {
                 )
 
                 if let insight = meeting.latestInsight {
-                    FollowUpQuestionsSection(questions: insight.followUpQuestions) { index in
-                        let question = insight.followUpQuestions[index]
-                        let key = Self.normalizeKey(question)
-                        if !meeting.suppressedFollowUps.contains(key) {
-                            meeting.suppressedFollowUps.append(key)
+                    FollowUpQuestionsSection(
+                        questions: insight.followUpQuestions,
+                        onOpenWorkspace: { onSelectDestination?(.questions) },
+                        reanalyzeControl: sectionControl(.followUps),
+                        onDelete: { index in
+                            let question = insight.followUpQuestions[index]
+                            let key = Self.normalizeKey(question)
+                            if !meeting.suppressedFollowUps.contains(key) {
+                                meeting.suppressedFollowUps.append(key)
+                            }
+                            insight.followUpQuestions.remove(at: index)
+                            saveInsight("deleteFollowUp")
+                        },
+                        onMove: { source, dest in
+                            insight.followUpQuestions.move(fromOffsets: source, toOffset: dest)
+                            saveInsight("reorderFollowUps")
+                        },
+                        onModify: { index, text in
+                            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
+                            insight.followUpQuestions[index] = trimmed
+                            saveInsight("modifyFollowUp")
+                        },
+                        onResearch: { text in
+                            researchItem = ResearchItem(title: "Follow-up", text: text)
                         }
-                        insight.followUpQuestions.remove(at: index)
-                        PersistenceGate.save(modelContext, site: "MeetingIntelligenceView.deleteFollowUp", meetingID: meeting.id)
-                    }
-                    ActionItemsSection(items: meeting.actionItems) { item in
-                        let key = Self.normalizeKey(item.text)
-                        if !meeting.suppressedActionItems.contains(key) {
-                            meeting.suppressedActionItems.append(key)
+                    )
+                    ActionItemsSection(
+                        items: meeting.paneActionItems(),
+                        onOpenWorkspace: { onSelectDestination?(.tasks) },
+                        reanalyzeControl: sectionControl(.actionItems),
+                        onDelete: { item in
+                            let key = Self.normalizeKey(item.text)
+                            if !meeting.suppressedActionItems.contains(key) {
+                                meeting.suppressedActionItems.append(key)
+                            }
+                            modelContext.delete(item)
+                            saveInsight("deleteActionItem")
+                        },
+                        onMove: { source, dest in
+                            var items = meeting.paneActionItems()
+                            items.move(fromOffsets: source, toOffset: dest)
+                            for (index, item) in items.enumerated() {
+                                item.sortIndex = index
+                            }
+                            saveInsight("reorderActionItems")
+                        },
+                        onModify: { item, text in
+                            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
+                            item.text = trimmed
+                            saveInsight("modifyActionItem")
+                        },
+                        onResearch: { item in
+                            researchItem = ResearchItem(title: "Action item", text: item.text)
                         }
-                        modelContext.delete(item)
-                        PersistenceGate.save(modelContext, site: "MeetingIntelligenceView.deleteActionItem", meetingID: meeting.id)
-                    }
-                    AISummarySection(summary: insight.summary)
-                    KnowledgeLinksSection(topics: insight.topics)
-                } else if meeting.isAnalyzing || isReanalyzing {
+                    )
+                    AISummarySection(
+                        summary: insight.summary,
+                        onOpenWorkspace: { onSelectDestination?(.summaries) },
+                        reanalyzeControl: sectionControl(.summary),
+                        onReplaceSummary: { text in
+                            insight.summary = text
+                            saveInsight("modifySummary")
+                        },
+                        onResearch: { text in
+                            researchItem = ResearchItem(title: "Summary", text: text)
+                        }
+                    )
+                    KnowledgeLinksSection(
+                        topics: insight.topics,
+                        meeting: meeting,
+                        onOpenSegment: onOpenDialog,
+                        reanalyzeControl: sectionControl(.topics),
+                        onMove: { source, dest in
+                            insight.topics.move(fromOffsets: source, toOffset: dest)
+                            saveInsight("reorderTopics")
+                        },
+                        onDelete: { index in
+                            insight.topics.remove(at: index)
+                            saveInsight("deleteTopic")
+                        },
+                        onModify: { index, text in
+                            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
+                            insight.topics[index] = trimmed
+                            saveInsight("modifyTopic")
+                        },
+                        onResearch: { text in
+                            researchItem = ResearchItem(title: "Topic", text: text)
+                        }
+                    )
+                } else if meeting.isAnalyzing || isThisMeetingBusy {
                     VStack(spacing: 12) {
                         ProgressView()
                             .controlSize(.large)
-                        Text(isReanalyzing ? "Reanalyzing meeting..." : "Analyzing meeting...")
+                        Text(busyLabel == "Queued" ? "Queued for reanalysis..." : "Reanalyzing meeting...")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -200,10 +324,55 @@ struct MeetingIntelligenceView: View {
                 }
             }
             .padding(.vertical)
+            .environment(\.meetingFindQuery, meetingFind.query)
+        }
+        .sheet(item: $researchItem) { item in
+            InsightResearchSheet(title: item.title, itemText: item.text, meeting: meeting)
+        }
+        .sheet(isPresented: $showDossierSheet) {
+            DossierComposerSheet(
+                meeting: meeting,
+                library: library,
+                request: $dossierRequest,
+                onExport: { runDossier($0) }
+            )
+        }
+        .sheet(item: $historyScope) { scope in
+            InsightHistorySheet(meeting: meeting, scope: scope) { insight in
+                revertInsight(scope: scope, from: insight)
+            }
         }
     }
 
-    private func exportReport() {
+    private var allSectionsBinding: Binding<Bool> {
+        Binding(
+            get: {
+                includeSummary && includeActionItems && includeQuestions
+                    && includeTopics && includeSharedScreens
+            },
+            set: { value in
+                includeSummary = value
+                includeActionItems = value
+                includeQuestions = value
+                includeTopics = value
+                includeSharedScreens = value
+            }
+        )
+    }
+
+    private var currentExportSelection: IntelligenceExportSelection {
+        IntelligenceExportSelection(
+            includeSummary: includeSummary,
+            includeActionItems: includeActionItems,
+            includeQuestions: includeQuestions,
+            includeTopics: includeTopics,
+            includeSharedScreens: includeSharedScreens,
+            includeTranscript: includeTranscript,
+            dedupeTranscript: dedupeTranscript
+        )
+    }
+
+    private func exportReport(_ format: IntelligenceExportFormat) {
         guard !isExportingReport else { return }
         isExportingReport = true
         exportError = nil
@@ -211,8 +380,10 @@ struct MeetingIntelligenceView: View {
             defer { isExportingReport = false }
             do {
                 let template = ReportTemplateCatalog.template(id: reportTemplateID)
-                if let url = try await ReportExportService.exportPDF(
+                if let url = try await ReportExportService.export(
                     for: meeting,
+                    selection: currentExportSelection,
+                    format: format,
                     template: template,
                     figuresAtEnd: reportFiguresAtEnd
                 ) {
@@ -226,162 +397,142 @@ struct MeetingIntelligenceView: View {
         }
     }
 
-    @MainActor
-    private func reanalyze() async {
-        guard !isReanalyzing else { return }
-        isReanalyzing = true
-        reanalysisError = nil
-        meeting.analysisError = nil
-
-        defer { isReanalyzing = false }
-
-        do {
-            guard let client = try await AIClientFactory.makeClient() else {
-                reanalysisError = "AI not configured. Check Settings."
-                return
+    private func runDossier(_ request: DossierRequest) {
+        guard !isExportingReport else { return }
+        isExportingReport = true
+        exportError = nil
+        Task { @MainActor in
+            defer { isExportingReport = false }
+            do {
+                if let url = try await DossierPackageWriter.export(
+                    meeting: meeting,
+                    library: library,
+                    request: request
+                ) {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                }
+            } catch {
+                exportError = error.localizedDescription
             }
-            let service = AIIntelligenceService(
-                client: client,
-                meetingID: meeting.id,
-                suppressedActionItems: meeting.suppressedActionItems,
-                suppressedFollowUps: meeting.suppressedFollowUps,
-                relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
-            )
-
-            let snapshots: [SegmentSnapshot] = meeting.segments
-                .sorted { $0.startTime < $1.startTime }
-                .map { SegmentSnapshot(speaker: $0.speaker, text: $0.text, formattedTimestamp: $0.formattedTimestamp, isFinal: $0.isFinal) }
-
-            guard !snapshots.isEmpty else {
-                reanalysisError = "No transcript segments to analyze."
-                return
-            }
-
-            // Seed with analyze() first so performFinalAnalysis has a prior
-            // summary to refine. Then always run the final pass — it produces
-            // the polished result including the meeting title. Screen-share
-            // observations persisted on the frames ride along so a re-run
-            // stays screen-aware like the original live analysis.
-            let roster = MeetingRoster.snapshot(for: meeting)
-            let screenBlock = ScreenObservationFormatter.finalBlock(for: meeting)
-            if screenBlock != nil {
-                LogManager.shared.log("Reanalyze: injecting screen context (\(meeting.sessionSummaries.count) recap(s), \(meeting.screenFrames.count) frame(s))", category: .screen, meetingID: meeting.id)
-            }
-            let maybeResult = try await AIUsageContext.attribute(.reanalysis, meetingID: meeting.id) {
-                _ = try await service.analyze(segments: snapshots, roster: roster, screenObservations: screenBlock)
-                return try await service.performFinalAnalysis(segments: snapshots, roster: roster, screenObservations: screenBlock)
-            }
-            guard let rawResult = maybeResult else {
-                reanalysisError = "Analysis returned no results."
-                return
-            }
-
-            // Belt-and-braces: enforce the user's suppression list locally even if
-            // the model ignored the prompt instruction and re-suggested items.
-            let suppressedActions = Set(meeting.suppressedActionItems)
-            let suppressedQuestions = Set(meeting.suppressedFollowUps)
-            let result = AnalysisResult(
-                title: rawResult.title,
-                summary: rawResult.summary,
-                actionItems: rawResult.actionItems.filter { !suppressedActions.contains(Self.normalizeKey($0.text)) },
-                followUps: rawResult.followUps.filter { !suppressedQuestions.contains(Self.normalizeKey($0)) },
-                topics: rawResult.topics,
-                rawResponse: rawResult.rawResponse
-            )
-
-            // Update meeting title if generated (kept out of `title` while the
-            // meeting is linked to a calendar event).
-            if let title = result.title {
-                meeting.applyGeneratedTitle(title)
-            }
-
-            // Persist new insight (append; keep history of prior insights)
-            let insight = MeetingInsight(
-                summary: result.summary,
-                followUpQuestions: result.followUps,
-                topics: result.topics,
-                rawLLMResponse: result.rawResponse,
-                modelIdentifier: client.modelIdentifier,
-                promptVersion: AIPromptTemplates.promptVersion
-            )
-            insight.meeting = meeting
-            modelContext.insert(insight)
-
-            // Merge action items: preserve any with user state (completed, due date,
-            // assigned contact) and add new parsed items that don't already exist by text.
-            mergeActionItems(parsed: result.actionItems, into: meeting)
-
-            let saved = PersistenceGate.save(
-                modelContext,
-                site: "MeetingIntelligenceView.reanalyze",
-                critical: true,
-                meetingID: meeting.id
-            )
-            if !saved {
-                reanalysisError = "Reanalysis succeeded but saving to database failed: \(PersistenceGate.lastFailureMessage ?? "unknown")"
-            }
-        } catch {
-            reanalysisError = error.localizedDescription
-            LogManager.send("Reanalysis failed: \(error.localizedDescription)", category: .ai, level: .error)
         }
     }
 
-    @MainActor
-    private func cancelAnalysis() {
-        reanalyzeTask?.cancel()
-        reanalyzeTask = nil
-        isReanalyzing = false
-        meeting.isAnalyzing = false
-        meeting.analysisError = "Analysis canceled by user."
-        PersistenceGate.save(
-            modelContext,
-            site: "MeetingIntelligenceView.cancelAnalysis",
-            meetingID: meeting.id
+    private var isThisMeetingBusy: Bool {
+        meeting.isAnalyzing || reanalysisQueue.contains(meeting.id)
+    }
+
+    private var busyLabel: String {
+        if let analyzingScope {
+            return analyzingScope == .full ? "Analyzing..." : "Deep \(analyzingScope.label)…"
+        }
+        if reanalysisQueue.currentID == meeting.id || meeting.isAnalyzing {
+            return "Analyzing..."
+        }
+        return "Queued"
+    }
+
+    private var fullReanalyzeControl: InsightReanalyzeControl {
+        insightControl(scope: .full, extras: fullExtras)
+    }
+
+    private var fullExtras: [InsightReanalyzeExtra] {
+        var extras: [InsightReanalyzeExtra] = []
+        if !meeting.screenFrames.isEmpty {
+            extras.append(
+                InsightReanalyzeExtra(
+                    id: "screens",
+                    title: "Re-analyze screen shares",
+                    systemImage: "rectangle.dashed.badge.record"
+                ) { reanalyzeSharesTrigger = true }
+            )
+        }
+        extras.append(
+            InsightReanalyzeExtra(
+                id: "retranscribe",
+                title: "Re-transcribe with large-v3",
+                systemImage: "waveform.badge.checkmark"
+            ) { ReProcessingQueue.shared.enqueue(meetingID: meeting.id) }
         )
-        LogManager.send("Analysis canceled for meeting \(meeting.id)", category: .ai, level: .info)
+        return extras
     }
 
-    /// Merges AI-parsed action items into the meeting while preserving user state
-    /// (completion, due dates, assigned contacts). Existing items with matching
-    /// normalized text are kept; new parsed items are appended. Items the user has
-    /// already completed or assigned are never deleted by a re-run.
-    private func mergeActionItems(parsed: [ParsedActionItem], into meeting: Meeting) {
-        let existing = meeting.actionItems
-        let existingKeys = Set(existing.map { Self.normalizeKey($0.text) })
-        let suppressedKeys = Set(meeting.suppressedActionItems)
+    private func saveInsight(_ site: String) {
+        PersistenceGate.save(modelContext, site: "MeetingIntelligenceView.\(site)", meetingID: meeting.id)
+    }
 
-        // Delete only existing items that have no user state attached AND that the
-        // new parse no longer produces. This keeps the list fresh for unstarted items
-        // while protecting anything the user has touched.
-        let parsedKeys = Set(parsed.map { Self.normalizeKey($0.text) })
-        let stale = existing.filter { item in
-            let untouched = !item.isCompleted
-                && item.dueDate == nil
-                && item.assignedContact == nil
-            let droppedByNewRun = !parsedKeys.contains(Self.normalizeKey(item.text))
-            return untouched && droppedByNewRun
-        }
-        for item in stale {
-            modelContext.delete(item)
-        }
+    private func sectionControl(_ scope: InsightScope) -> InsightReanalyzeControl {
+        insightControl(scope: scope, extras: [])
+    }
 
-        // Append new parsed items that don't already exist and aren't suppressed.
-        for parsedItem in parsed {
-            let key = Self.normalizeKey(parsedItem.text)
-            guard !existingKeys.contains(key), !suppressedKeys.contains(key) else { continue }
-            let item = ActionItem(parsed: parsedItem, sourceSegments: meeting.segments)
-            item.meeting = meeting
-            modelContext.insert(item)
+    private func insightControl(scope: InsightScope, extras: [InsightReanalyzeExtra]) -> InsightReanalyzeControl {
+        InsightReanalyzeControl(
+            title: "Reanalyze",
+            scope: scope,
+            isBusy: analyzingScope == scope,
+            canRevert: InsightRevision.canRevert(meeting),
+            extras: extras,
+            onRun: { depth in runInsight(scope: scope, depth: depth) },
+            onRevert: { revertInsight(scope: scope) },
+            onViewLog: { historyScope = scope }
+        )
+    }
+
+    private func runInsight(scope: InsightScope, depth: InsightDepth) {
+        if scope == .full, depth == .standard {
+            reanalysisQueue.enqueueEligible(in: modelContext, restrictingTo: [meeting.id])
+            return
+        }
+        guard !isThisMeetingBusy else { return }
+        analyzingScope = scope
+        meeting.isAnalyzing = true
+        meeting.analysisError = nil
+        Task { @MainActor in
+            defer {
+                meeting.isAnalyzing = false
+                analyzingScope = nil
+            }
+            do {
+                guard let client = try await AIClientFactory.makeClient() else {
+                    meeting.analysisError = MeetingReanalysis.Failure.notConfigured.localizedDescription
+                    return
+                }
+                try await MeetingReanalysis.run(
+                    meeting: meeting,
+                    client: client,
+                    context: modelContext,
+                    scope: scope,
+                    depth: depth
+                )
+            } catch {
+                meeting.analysisError = error.localizedDescription
+            }
+        }
+    }
+
+    private func revertInsight(scope: InsightScope, from insight: MeetingInsight? = nil) {
+        do {
+            try MeetingReanalysis.revert(
+                meeting: meeting,
+                scope: scope,
+                context: modelContext,
+                from: insight
+            )
+        } catch {
+            meeting.analysisError = error.localizedDescription
         }
     }
 
     /// Normalized key for action-item deduping: lowercased, whitespace-collapsed,
     /// trailing punctuation stripped.
     private static func normalizeKey(_ text: String) -> String {
-        let lowered = text.lowercased()
-        let collapsed = lowered.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        return collapsed.trimmingCharacters(in: CharacterSet(charactersIn: " .!?,;:"))
+        MeetingReanalysis.normalizeKey(text)
     }
+}
+
+private struct ResearchItem: Identifiable {
+    var id = UUID()
+    var title: String
+    var text: String
 }
 
 struct LiveMeetingIntelligenceView: View {
@@ -392,9 +543,24 @@ struct LiveMeetingIntelligenceView: View {
     var aiActivityState: RecordingViewModel.AIActivityState = .idle
     var shareObservations: [ScreenFrameAnalysisService.FrameObservation] = []
     var isCapturingShare: Bool = false
+    /// The in-progress meeting, when there is one. The screenshot player
+    /// reads frames from the model; without it a live recording can only
+    /// show observations as text.
+    var meeting: Meeting?
 
     private var hasResults: Bool {
-        !summary.isEmpty || !actionItems.isEmpty
+        !summary.isEmpty || !visibleLiveActionItems.isEmpty
+    }
+
+    private var visibleLiveActionItems: [ActionItem] {
+        guard let meeting else { return actionItems }
+        let roster = MeetingRoster.snapshot(for: meeting)
+        return actionItems.filter {
+            AIIntelligenceService.keepsActionItem(
+                assignee: $0.displayAssignee ?? $0.assignee,
+                roster: roster
+            )
+        }
     }
 
     var body: some View {
@@ -439,15 +605,17 @@ struct LiveMeetingIntelligenceView: View {
                     FollowUpQuestionsSection(questions: followUpQuestions)
                 }
 
-                if !actionItems.isEmpty {
-                    LiveActionItemsSection(items: actionItems)
+                if !visibleLiveActionItems.isEmpty {
+                    LiveActionItemsSection(items: visibleLiveActionItems)
                 }
 
                 if !summary.isEmpty {
                     AISummarySection(summary: summary)
                 }
 
-                if !shareObservations.isEmpty {
+                if let meeting, !meeting.screenFrames.isEmpty {
+                    ScreenSharePlayerSection(meeting: meeting, pendingSeekTime: .constant(nil))
+                } else if !shareObservations.isEmpty {
                     LiveSharedContentSection(
                         observations: shareObservations,
                         isCapturing: isCapturingShare

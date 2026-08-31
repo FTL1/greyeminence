@@ -83,7 +83,7 @@ struct TopicMapView: View {
                 if !simulating { applyPendingFocus() }
             }
         }
-        .searchable(text: $viewModel.searchText, prompt: "Search topics")
+        .searchable(text: $viewModel.searchText, prompt: "Search topics, people, speakers")
     }
 
     @ViewBuilder
@@ -97,7 +97,7 @@ struct TopicMapView: View {
                 controlButtons
             }
 
-            if viewModel.selectedNode != nil {
+            if viewModel.showsDetail {
                 Divider()
                 TopicDetailPanel(
                     viewModel: viewModel,
@@ -125,28 +125,125 @@ struct TopicMapView: View {
 
     private var topicSidebar: some View {
         VStack(spacing: 0) {
-            Picker("Sort", selection: $sortOrder) {
-                ForEach(TopicMapSort.allCases, id: \.self) { option in
-                    Text(option.label).tag(option)
+            Picker("Browse", selection: $viewModel.browseMode) {
+                ForEach(TopicMapBrowseMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.top, 6)
+            .onChange(of: viewModel.browseMode) { _, mode in
+                viewModel.setBrowseMode(mode)
+            }
+            .help("Browse topics, people, or speakers")
+
+            if viewModel.browseMode == .topics {
+                Picker("Sort", selection: $sortOrder) {
+                    ForEach(TopicMapSort.allCases, id: \.self) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            } else {
+                Color.clear.frame(height: 6)
+            }
 
             Divider()
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(rankedNodes) { node in
-                        topicRow(node)
+                    switch viewModel.browseMode {
+                    case .topics:
+                        ForEach(rankedNodes) { node in
+                            topicRow(node)
+                        }
+                    case .people:
+                        ForEach(filteredPeople) { person in
+                            personRow(person)
+                        }
+                    case .speakers:
+                        ForEach(filteredSpeakers) { speaker in
+                            speakerRow(speaker)
+                        }
                     }
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, 4)
             }
         }
+    }
+
+    private var filteredPeople: [TopicMapRoster.Person] {
+        let query = viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return viewModel.rosterPeople }
+        return viewModel.rosterPeople.filter { $0.name.lowercased().contains(query) }
+    }
+
+    private var filteredSpeakers: [TopicMapRoster.SpeakerRow] {
+        let query = viewModel.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return viewModel.rosterSpeakers }
+        return viewModel.rosterSpeakers.filter { $0.displayName.lowercased().contains(query) }
+    }
+
+    @ViewBuilder
+    private func personRow(_ person: TopicMapRoster.Person) -> some View {
+        let isSelected = person.id == viewModel.selectedPersonID
+        Button {
+            viewModel.setSelectedPerson(viewModel.selectedPersonID == person.id ? nil : person.id)
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(person.meetingCount)")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, alignment: .trailing)
+                Text(person.name)
+                    .font(.system(size: 10))
+                    .lineLimit(1)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 4)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Highlight topics \(person.name) discussed")
+    }
+
+    @ViewBuilder
+    private func speakerRow(_ speaker: TopicMapRoster.SpeakerRow) -> some View {
+        let isSelected = speaker.id == viewModel.selectedSpeakerID
+        Button {
+            viewModel.setSelectedSpeaker(viewModel.selectedSpeakerID == speaker.id ? nil : speaker.id)
+        } label: {
+            HStack(spacing: 6) {
+                Text("\(speaker.talkPercent)%")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, alignment: .trailing)
+                Text(speaker.displayName)
+                    .font(.system(size: 10))
+                    .lineLimit(1)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                isSelected ? Color.accentColor.opacity(0.15) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 4)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Highlight topics \(speaker.displayName) talked about most")
     }
 
     @ViewBuilder
@@ -438,8 +535,7 @@ struct TopicMapView: View {
 
             let service = AIIntelligenceService(
                 client: client,
-                meetingID: meeting.id,
-                relatedContextProvider: RelatedMeetingContext.provider(excludingMeetingID: meeting.id)
+                meetingID: meeting.id
             )
             let snapshots: [SegmentSnapshot] = meeting.segments
                 .sorted { $0.startTime < $1.startTime }
@@ -448,11 +544,13 @@ struct TopicMapView: View {
             guard !snapshots.isEmpty else { continue }
 
             do {
-                // Seed with first pass, then final
                 let roster = MeetingRoster.snapshot(for: meeting)
                 let finalResult = try await AIUsageContext.attribute(.reanalysis, meetingID: meeting.id) {
-                    _ = try await service.analyze(segments: snapshots, roster: roster)
-                    return try await service.performFinalAnalysis(segments: snapshots, roster: roster)
+                    try await service.reanalyze(
+                        segments: snapshots,
+                        roster: roster,
+                        calendarTitle: meeting.analysisTitleHint
+                    )
                 }
                 guard let result = finalResult else {
                     continue

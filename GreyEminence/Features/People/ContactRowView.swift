@@ -31,6 +31,13 @@ struct ContactRowView: View {
 
             Spacer()
 
+            if contact.hasVoicePrint {
+                Image(systemName: "waveform")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help("Voice print enrolled")
+            }
+
             if !contact.meetings.isEmpty {
                 Text("\(contact.meetings.count)")
                     .font(.caption2)

@@ -1,35 +1,36 @@
 import SwiftUI
 import SwiftData
 
-/// Long-tail meeting browser. The recent list (MeetingListView) only carries
-/// the current month plus two priors so it stays scannable as the meeting
-/// count grows. Everything older lives here, behind search + filters, grouped
-/// by quarter so users don't scroll past hundreds of identical-looking rows.
+/// Full meeting library for extract, and a place to file meetings away from
+/// the recent list. The Meetings sidebar stays the last three months minus
+/// anything filed here.
 struct ArchiveView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Meeting.date, order: .reverse) private var allMeetings: [Meeting]
     @Binding var selectedMeeting: Meeting?
+    @Binding var selectedMeetingIDs: Set<UUID>
+    var onExtract: (ArchiveExtractLaunch) -> Void
 
     @State private var query: String = ""
     @State private var selectedYear: Int? = nil
     @State private var requireInsights = false
     @State private var requireExported = false
     @State private var requireActionItems = false
+    @State private var requireFiled = false
     @State private var collapsedQuarters: Set<String> = []
+    @State private var renamingMeetingID: UUID?
+    @AppStorage("meetingListGroupBy") private var groupByRaw = MeetingListGroupBy.date.rawValue
 
-    /// Same cutoff as MeetingListView — meetings with date >= cutoff are in
-    /// the recent list and don't belong here.
-    private static let monthsVisible = 3
+    private var groupBy: MeetingListGroupBy {
+        MeetingListGroupBy(rawValue: groupByRaw) ?? .date
+    }
 
     private var cutoffDate: Date {
-        let cal = Calendar.current
-        let startOfCurrentMonth = cal.dateInterval(of: .month, for: .now)?.start ?? .now
-        return cal.date(byAdding: .month, value: -(Self.monthsVisible - 1), to: startOfCurrentMonth) ?? .distantPast
+        MeetingLibrary.recentCutoff()
     }
 
     private var archivedMeetings: [Meeting] {
-        let cutoff = cutoffDate
-        return allMeetings.filter { !$0.isInterviewMeeting && $0.date < cutoff }
+        allMeetings.filter { MeetingLibrary.isLibrary($0) }
     }
 
     private var availableYears: [Int] {
@@ -48,6 +49,7 @@ struct ArchiveView: View {
             if requireInsights && meeting.insights.isEmpty { return false }
             if requireExported && !meeting.isExportedToObsidian { return false }
             if requireActionItems && meeting.pendingActionCount == 0 { return false }
+            if requireFiled && !meeting.isArchived { return false }
             if !trimmedQuery.isEmpty {
                 let titleMatches = meeting.title.lowercased().contains(trimmedQuery)
                 let attendeeMatches = meeting.attendees.contains { $0.name.lowercased().contains(trimmedQuery) }
@@ -55,6 +57,21 @@ struct ArchiveView: View {
                 if !(titleMatches || attendeeMatches || summaryMatches) { return false }
             }
             return true
+        }
+    }
+
+    /// Date mode: calendar quarters. Series / Related: same buckets as the
+    /// recent Meetings list.
+    private var archiveGroups: [(String, [Meeting])] {
+        switch groupBy {
+        case .date:
+            return quarterlyGroups
+        case .series, .related:
+            return MeetingListGrouping.sections(
+                for: filteredMeetings,
+                groupBy: groupBy,
+                now: .now
+            )
         }
     }
 
@@ -70,7 +87,9 @@ struct ArchiveView: View {
             let quarter = (month - 1) / 3 + 1
             return "Q\(quarter) \(year)"
         }
-        return grouped.sorted { quarterSortKey($0.key) > quarterSortKey($1.key) }
+        return grouped
+            .map { key, values in (key, values.sorted { $0.date > $1.date }) }
+            .sorted { quarterSortKey($0.0) > quarterSortKey($1.0) }
     }
 
     /// "Q3 2025" → 2025 * 4 + 3 = 8103. Higher = more recent.
@@ -83,7 +102,7 @@ struct ArchiveView: View {
     }
 
     private var hasActiveFilters: Bool {
-        selectedYear != nil || requireInsights || requireExported || requireActionItems || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        selectedYear != nil || requireInsights || requireExported || requireActionItems || requireFiled || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func clearFilters() {
@@ -92,13 +111,37 @@ struct ArchiveView: View {
         requireInsights = false
         requireExported = false
         requireActionItems = false
+        requireFiled = false
+    }
+
+    private func setArchived(_ meeting: Meeting, _ archived: Bool) {
+        MeetingLibrary.setArchived([meeting], archived, in: modelContext)
+    }
+
+    private func archiveSelected() {
+        let targets = allMeetings.filter { selectedMeetingIDs.contains($0.id) }
+        MeetingLibrary.setArchived(targets, true, in: modelContext)
     }
 
     private func deleteMeeting(_ meeting: Meeting) {
-        if selectedMeeting == meeting {
-            selectedMeeting = nil
-        }
+        selectedMeetingIDs.remove(meeting.id)
         MeetingDeletion.delete(meeting, in: modelContext, allMeetings: allMeetings)
+    }
+
+    private func makeLaunch(
+        scope: ArchiveExtractScope,
+        meeting: Meeting?,
+        group: [Meeting] = [],
+        seriesLabel: String? = nil
+    ) -> ArchiveExtractLaunch {
+        ArchiveExtractLaunch(
+            initialScope: scope,
+            seriesLabel: seriesLabel,
+            seedMeetingID: meeting?.id,
+            selectedIDs: selectedMeetingIDs,
+            visibleIDs: Set(filteredMeetings.map(\.id)),
+            groupMeetingIDs: Set(group.map(\.id))
+        )
     }
 
     var body: some View {
@@ -111,9 +154,9 @@ struct ArchiveView: View {
             Group {
                 if archivedMeetings.isEmpty {
                     ContentUnavailableView(
-                        "Nothing in the archive yet",
+                        "No meetings yet",
                         systemImage: "archivebox",
-                        description: Text("Meetings older than three months will appear here.")
+                        description: Text("Every recording shows up here so you can extract it. File any meeting away from the recent Meetings list without waiting three months.")
                     )
                 } else if filteredMeetings.isEmpty {
                     ContentUnavailableView(
@@ -129,11 +172,37 @@ struct ArchiveView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Archive")
+        .onChange(of: selectedMeetingIDs) { oldIDs, newIDs in
+            let next = MeetingListSelection.detailMeeting(
+                previousIDs: oldIDs,
+                newIDs: newIDs,
+                current: selectedMeeting,
+                from: allMeetings
+            )
+            if selectedMeeting?.id != next?.id {
+                selectedMeeting = next
+            }
+        }
     }
 
     private var searchAndFilterBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
+                Menu {
+                    ForEach(MeetingListGroupBy.allCases) { option in
+                        Button {
+                            groupByRaw = option.rawValue
+                        } label: {
+                            HStack {
+                                Text(option.rawValue)
+                                if groupBy == option { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Group: \(groupBy.rawValue)", systemImage: groupBy.systemImage)
+                }
+                .help(groupBy.help)
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                 TextField("Search title, attendee, or summary…", text: $query)
@@ -161,6 +230,7 @@ struct ArchiveView: View {
                 filterChip("Insights", systemImage: "lightbulb", isOn: $requireInsights)
                 filterChip("Exported", systemImage: "arrow.up.doc", isOn: $requireExported)
                 filterChip("Actions", systemImage: "checkmark.circle", isOn: $requireActionItems)
+                filterChip("Filed away", systemImage: "archivebox", isOn: $requireFiled)
             }
 
             HStack(spacing: 8) {
@@ -174,6 +244,18 @@ struct ArchiveView: View {
                         .controlSize(.small)
                         .foregroundStyle(.secondary)
                 }
+                Button {
+                    onExtract(makeLaunch(
+                        scope: selectedMeetingIDs.isEmpty ? .allVisible : .selected,
+                        meeting: selectedMeeting
+                    ))
+                } label: {
+                    Label("Export…", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(filteredMeetings.isEmpty)
+                .help("Export transcripts and intel as a zip or PDF for the selected meetings, a series, or everything currently listed.")
             }
         }
     }
@@ -241,14 +323,56 @@ struct ArchiveView: View {
     }
 
     private var meetingList: some View {
-        List(selection: $selectedMeeting) {
-            ForEach(quarterlyGroups, id: \.0) { quarter, quarterMeetings in
+        List(selection: $selectedMeetingIDs) {
+            ForEach(archiveGroups, id: \.0) { quarter, quarterMeetings in
                 Section {
                     if !collapsedQuarters.contains(quarter) {
                         ForEach(quarterMeetings) { meeting in
-                            MeetingRowView(meeting: meeting)
-                                .tag(meeting)
+                            MeetingRowView(meeting: meeting, renamingID: $renamingMeetingID)
+                                .tag(meeting.id)
                                 .contextMenu {
+                                    Button("Rename") {
+                                        renamingMeetingID = meeting.id
+                                    }
+                                    MeetingExtractContextButtons(
+                                        meeting: meeting,
+                                        selectedIDs: selectedMeetingIDs,
+                                        visibleIDs: Set(filteredMeetings.map(\.id)),
+                                        library: allMeetings,
+                                        onExtract: onExtract
+                                    )
+                                    if meeting.isArchived {
+                                        Button {
+                                            setArchived(meeting, false)
+                                        } label: {
+                                            Label("Put Back on Meetings", systemImage: "tray.and.arrow.up")
+                                        }
+                                        .disabled(meeting.date < cutoffDate)
+                                        .help(meeting.date < cutoffDate
+                                              ? "Older than three months — it stays in Archive."
+                                              : "Show this meeting on the recent Meetings list again.")
+                                    } else {
+                                        Button {
+                                            if selectedMeetingIDs.count > 1, selectedMeetingIDs.contains(meeting.id) {
+                                                archiveSelected()
+                                            } else {
+                                                setArchived(meeting, true)
+                                            }
+                                        } label: {
+                                            if selectedMeetingIDs.count > 1, selectedMeetingIDs.contains(meeting.id) {
+                                                Label("File Selected Away (\(selectedMeetingIDs.count))", systemImage: "archivebox")
+                                            } else {
+                                                Label("File Away from Meetings", systemImage: "archivebox")
+                                            }
+                                        }
+                                        .help("Hide from the recent Meetings list. It stays here for extract.")
+                                    }
+                                    Divider()
+                                    MeetingReanalyzeContextButtons(
+                                        meeting: meeting,
+                                        selectedIDs: selectedMeetingIDs
+                                    )
+                                    Divider()
                                     Button(role: .destructive) {
                                         deleteMeeting(meeting)
                                     } label: {
@@ -280,11 +404,33 @@ struct ArchiveView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            let scope: ArchiveExtractScope = (groupBy == .date) ? .thisGroup : .thisSeries
+                            onExtract(makeLaunch(
+                                scope: scope,
+                                meeting: quarterMeetings.first,
+                                group: quarterMeetings,
+                                seriesLabel: quarter
+                            ))
+                        } label: {
+                            Label("Export \(quarter)…", systemImage: "square.and.arrow.up")
+                        }
+                    }
                     .textCase(nil)
                 }
             }
         }
         .listStyle(.inset)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            MeetingSelectionBar(
+                selectedIDs: selectedMeetingIDs,
+                onExtract: {
+                    onExtract(makeLaunch(scope: .selected, meeting: selectedMeeting))
+                },
+                onArchive: { archiveSelected() }
+            )
+        }
     }
 }
 

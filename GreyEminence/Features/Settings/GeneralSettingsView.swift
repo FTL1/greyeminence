@@ -12,9 +12,14 @@ struct GeneralSettingsView: View {
     @AppStorage("stalledThresholdDays") private var stalledThresholdDays = 7
     @AppStorage("appFontSize") private var appFontSize = "medium"
     @AppStorage("myContactID") private var myContactIDString = ""
+    @AppStorage(SpeakerNames.globalMeDisplayNameKey) private var myDisplayName = ""
     /// 0 = unlimited (default). >0 means delete audio for any completed
     /// meeting older than that many days. Transcripts always stay.
     @AppStorage("recordingRetentionDays") private var recordingRetentionDays = 0
+    @AppStorage("autoMergeSameSpeaker") private var autoMergeSameSpeaker = true
+    @AppStorage("autoMergeMaxWindowSeconds") private var autoMergeMaxWindowSeconds = 15
+    @AppStorage("autoMergePauseSeconds") private var autoMergePauseSeconds = 4.0
+    @AppStorage("autoMergeSettingsVersion") private var autoMergeSettingsVersion = 0
     @Query(sort: \Contact.name) private var contacts: [Contact]
     @Query private var allMeetings: [Meeting]
     @State private var lastRetentionResult: String?
@@ -42,6 +47,7 @@ struct GeneralSettingsView: View {
                         Text(contact.name).tag(contact.id.uuidString)
                     }
                 }
+                .helpTip(.settingsMyProfile)
                 if let contact = myContact {
                     HStack(spacing: 6) {
                         Text(contact.initials)
@@ -58,7 +64,13 @@ struct GeneralSettingsView: View {
                         }
                     }
                 }
-                Text("This identifies you in meetings and interviews. The \"Me\" speaker label will be attributed to this contact.")
+                Text("This identifies you in meetings and interviews. The local speaker label will be attributed to this contact.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextField("My display name", text: $myDisplayName)
+                    .helpTip(.settingsDisplayName)
+                Text("Pre-fills the local/mic speaker label on new recordings (instead of \"Me\"). Renaming during a meeting overrides this for that session only unless you choose Save as Default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
@@ -70,7 +82,9 @@ struct GeneralSettingsView: View {
 
             Section {
                 Toggle("Launch at login", isOn: $launchAtLogin)
+                    .helpTip(.settingsLaunchAtLogin)
                 Toggle("Show menu bar icon", isOn: $showMenuBar)
+                    .helpTip(.settingsMenuBar)
             } header: {
                 Label("Startup", systemImage: "power")
                     .font(.subheadline.weight(.semibold))
@@ -86,6 +100,7 @@ struct GeneralSettingsView: View {
                     Text("Large").tag("large")
                     Text("Extra Large").tag("xLarge")
                 }
+                .helpTip(.settingsTextSize)
             } header: {
                 Label("Appearance", systemImage: "textformat.size")
                     .font(.subheadline.weight(.semibold))
@@ -94,7 +109,38 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle("Auto-start recording when meeting app detected", isOn: $autoStart)
+                Toggle("Auto-merge same-speaker fragments", isOn: $autoMergeSameSpeaker)
+                    .helpTip(.settingsAutoMerge)
+                if autoMergeSameSpeaker {
+                    Picker("Maximum group length", selection: $autoMergeMaxWindowSeconds) {
+                        Text("10 seconds").tag(10)
+                        Text("15 seconds").tag(15)
+                        Text("20 seconds").tag(20)
+                        Text("30 seconds").tag(30)
+                    }
+                    Picker("Break on pause longer than", selection: $autoMergePauseSeconds) {
+                        Text("2 seconds").tag(2.0)
+                        Text("3 seconds").tag(3.0)
+                        Text("4 seconds").tag(4.0)
+                        Text("5 seconds").tag(5.0)
+                    }
+                }
+                Text("Joins consecutive lines from the same person when nobody else talks in between, up to the window or a long pause — whichever comes first. Near-duplicate ASR crumbs are collapsed, not repeated. Undo is in the transcript ⋯ menu. Does not run while recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Transcript", systemImage: "text.bubble")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .textCase(nil)
+            }
+
+            Section {
+                Toggle("Watch for meetings (auto-record when a call starts)", isOn: $autoStart)
+                    .helpTip(.watchForMeetings)
+                Text("When on, the app waits for Teams, Zoom, Meet, Slack, Webex, or FaceTime and records that call. Discord asks first. It does not capture your mic 24/7. Stop all (top of the window) turns this off and cancels live AI. Full text: Help → Controls and options.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Divider()
 
@@ -105,6 +151,7 @@ struct GeneralSettingsView: View {
                         set: { recordingRetentionDays = $0 ? max(recordingRetentionDays, 30) : 0 }
                     )
                 )
+                .helpTip(.settingsRetention)
                 if recordingRetentionDays > 0 {
                     Stepper(
                         "Keep audio for \(recordingRetentionDays) day\(recordingRetentionDays == 1 ? "" : "s")",
@@ -139,6 +186,7 @@ struct GeneralSettingsView: View {
                     value: $stalledThresholdDays,
                     in: 1...90
                 )
+                .helpTip(.settingsStalled)
                 Text("Action items older than this are flagged as stalled in the Tasks view.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -150,6 +198,16 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                LabeledContent("App") {
+                    Text(AppIdentity.displayName)
+                }
+                Text("Unofficial fork of Grey Eminence. Not Matt Purdon’s product. No warranty. Use at your own risk. Lawful use only — you are responsible for consent and recording laws. The name: Help → Why Grey Conseil (éminence grise + Verne’s Conseil).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String
+                     ?? "Copyright © 2026 Matthew Purdon. Unofficial Grey Conseil portions under the same license.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 LabeledContent("Version") {
                     HStack(spacing: 8) {
                         Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0")
@@ -164,6 +222,7 @@ struct GeneralSettingsView: View {
                     updater?.checkForUpdates()
                 }
                 .disabled(!updateViewModel.canCheckForUpdates)
+                .helpTip(.settingsCheckUpdates)
             } header: {
                 Label("About", systemImage: "info.circle")
                     .font(.subheadline.weight(.semibold))
@@ -172,6 +231,13 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            if autoMergeSettingsVersion < 1 {
+                if autoMergePauseSeconds <= 2.0 { autoMergePauseSeconds = 4.0 }
+                if autoMergeMaxWindowSeconds <= 10 { autoMergeMaxWindowSeconds = 15 }
+                autoMergeSettingsVersion = 1
+            }
+        }
     }
 
     private func runRetentionNow() {

@@ -43,12 +43,10 @@ sign-in page shows a "request approval" link if so.
 ## 4. Wire it in
 
 - **Overview** → copy the **Application (client) ID**.
-- Paste it into `GraphConfig.clientID` (replacing `"<PASTE_CLIENT_ID>"`).
+- In Grey Conseil: **Settings → Calendar** → paste the ID → **Connect Microsoft 365**.
+  (You can still compile it into `GraphConfig.compiledClientID` if you want it baked in.)
 
-That's it. In the app: **Settings → Calendar → Connect Microsoft 365**. The
-in-app sheet shares your Safari session, so an already-signed-in account is often
-a single consent tap. Connected state, an include-toggle, and Disconnect live in
-the same pane. Tokens are stored in the Keychain and refreshed automatically.
+That's it. The in-app sheet shares your Safari session, so an already-signed-in account is often a single consent tap. Use **Validate connection** to confirm. Connected state, an include-toggle, and Disconnect live in the same pane. Tokens are stored in the Keychain and refreshed automatically.
 
 ## Notes
 

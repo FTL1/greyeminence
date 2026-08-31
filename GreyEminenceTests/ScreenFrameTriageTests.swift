@@ -102,6 +102,17 @@ final class ScreenFrameTriageTests: XCTestCase {
         XCTAssertTrue(ScreenFrameTriage.shouldKeep(hash: 0xFF, lastKeptHash: 0, threshold: 8))
     }
 
+    func testSolidWhiteIsBlankCapture() {
+        XCTAssertTrue(ScreenFrameTriage.isBlankCapture(solidImage(gray: 255)))
+        XCTAssertTrue(ScreenFrameTriage.isBlankCapture(solidImage(gray: 250)))
+        XCTAssertTrue(ScreenFrameTriage.isBlankCapture(solidImage(gray: 0)))
+    }
+
+    func testGradientIsNotBlankCapture() {
+        XCTAssertFalse(ScreenFrameTriage.isBlankCapture(gradientImage()))
+        XCTAssertFalse(ScreenFrameTriage.isBlankCapture(splitImage()))
+    }
+
     // MARK: - Visual-only change
 
     func testIdenticalOCRIsVisualOnly() {

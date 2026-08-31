@@ -10,15 +10,25 @@ struct AudioSettingsView: View {
     var body: some View {
         Form {
             Section {
+                if audioManager.micPermission == .denied {
+                    Text("Microphone is denied for this copy of Grey Conseil. Each ad-hoc DMG is a new identity — turn Microphone on for this app, then quit and reopen.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Open Microphone settings") {
+                        AudioSessionManager.openMicrophonePrivacySettings()
+                    }
+                }
                 Picker("Input Device", selection: $audioManager.selectedInputDevice) {
                     ForEach(audioManager.availableInputDevices) { device in
                         Text(device.name).tag(device as AudioSessionManager.AudioDevice?)
                     }
                 }
+                .helpTip(.settingsInputDevice)
 
                 HStack {
                     Text("Input Gain")
                     Slider(value: $inputGain, in: 0.25...4.0)
+                        .helpTip(.settingsInputGain)
                     Text(String(format: "%.1fx", inputGain))
                         .font(.caption)
                         .fontDesign(.monospaced)
@@ -47,11 +57,15 @@ struct AudioSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .helpTip(.settingsSystemAudio)
 
                 if captureSystemAudio {
                     Text("System audio will be captured and transcribed as \"Other\" speaker.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button("Open System Audio settings") {
+                        AudioSessionManager.openSystemAudioPrivacySettings()
+                    }
                 }
             } header: {
                 Label("System Audio", systemImage: "speaker.wave.2")
@@ -62,6 +76,7 @@ struct AudioSettingsView: View {
 
             Section {
                 Toggle("Re-transcribe meetings after recording", isOn: $autoReprocessMeetings)
+                    .helpTip(.settingsRetranscribe)
                 Text("Live transcription uses a fast model (FluidAudio Parakeet). When a meeting ends, the audio is re-transcribed in the background with WhisperKit large-v3, and AI insights + embeddings are rebuilt on the upgraded transcript. Re-processing pauses automatically while another recording is in progress.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -83,7 +98,7 @@ struct AudioSettingsView: View {
                     Text("16kHz mono Float32")
                 }
                 LabeledContent("Storage Location") {
-                    Text("~/Library/Application Support/GreyEminence/Recordings")
+                    Text("~/Library/Application Support/com.ftl1.greyeminence/Recordings")
                         .font(.caption)
                         .fontDesign(.monospaced)
                 }
@@ -118,20 +133,23 @@ private struct MicLevelMeter: View {
     let monitor: MicLevelMonitor
 
     var body: some View {
+        let lit = AudioLevelMeter.litSegments(rms: monitor.level, count: 20)
+        let db = AudioLevelMeter.dBFS(rms: monitor.level)
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 2) {
                 Text("Level")
                     .font(.caption)
                 ForEach(0..<20, id: \.self) { i in
                     Rectangle()
-                        .fill(i < 14 ? .green : (i < 17 ? .yellow : .red))
+                        .fill(i < 14 ? Color.green : (i < 17 ? Color.yellow : Color.red))
                         .frame(width: 8, height: 12)
-                        .opacity(Double(i) / 20.0 < Double(monitor.level) ? 1.0 : 0.2)
+                        .opacity(i < lit ? 1.0 : 0.2)
                 }
-                Text(String(format: "%.3f", monitor.level))
+                Text(db > -80 ? String(format: "%.0f dBFS", db) : "— dBFS")
                     .font(.caption)
                     .fontDesign(.monospaced)
                     .foregroundStyle(.secondary)
+                    .frame(minWidth: 58, alignment: .trailing)
             }
             .opacity(monitor.statusMessage == nil ? 1 : 0.4)
 

@@ -64,11 +64,12 @@ enum AIRetry {
     /// not explicitly recognized is treated as non-retryable so we don't mask
     /// real bugs by silently retrying them.
     static func isRetryable(_ error: Error) -> Bool {
-        // URLSession network errors
+        // URLSession network errors. `.timedOut` is not retried: meeting
+        // analysis already waited 2–4 minutes; three more identical calls
+        // just stacked "The request timed out" for the user.
         if let urlError = error as? URLError {
             switch urlError.code {
-            case .timedOut,
-                 .networkConnectionLost,
+            case .networkConnectionLost,
                  .notConnectedToInternet,
                  .cannotConnectToHost,
                  .dnsLookupFailed,
@@ -100,9 +101,19 @@ enum AIRetry {
             }
         }
 
-        // Our own timeout wrapper
+        if let xai = error as? XAIAPIError {
+            switch xai {
+            case .httpError(let statusCode),
+                 .apiError(let statusCode, _):
+                return isRetryableStatusCode(statusCode)
+            default:
+                return false
+            }
+        }
+
+        // Our own timeout wrapper — already waited the full budget.
         if error is AITimeoutError {
-            return true
+            return false
         }
 
         return false

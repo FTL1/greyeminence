@@ -3,7 +3,9 @@ import SwiftData
 
 struct TaskDetailView: View {
     @Bindable var task: ActionItem
+    var onOpenMeeting: ((Meeting) -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
 
     private var meeting: Meeting? { task.meeting }
 
@@ -70,16 +72,44 @@ struct TaskDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                if let due = task.dueDate {
-                    Label(due.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if task.dueDate != nil {
+                    DatePicker(
+                        "Due",
+                        selection: Binding(
+                            get: { task.dueDate ?? Date.now },
+                            set: { newValue in
+                                task.dueDate = newValue
+                                persist("dueDate")
+                            }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .labelsHidden()
+                    .datePickerStyle(.field)
+                    .frame(width: 120)
+                    .help("Due date")
+                    Button("Clear due") {
+                        task.dueDate = nil
+                        persist("clearDue")
+                    }
+                    .controlSize(.small)
+                    .buttonStyle(.borderless)
+                } else {
+                    Button("Set due date") {
+                        task.dueDate = Calendar.current.startOfDay(for: Date.now)
+                        persist("setDue")
+                    }
+                    .controlSize(.small)
                 }
                 Label("Created \(task.createdAt.formatted(date: .abbreviated, time: .omitted))", systemImage: "clock")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    private func persist(_ site: String) {
+        PersistenceGate.save(modelContext, site: "TaskDetailView.\(site)", meetingID: task.meeting?.id)
     }
 
     private func meetingBlock(_ meeting: Meeting) -> some View {
@@ -97,6 +127,13 @@ struct TaskDetailView: View {
                 Text(meeting.date.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if onOpenMeeting != nil {
+                    Button("Open") {
+                        dismiss()
+                        onOpenMeeting?(meeting)
+                    }
+                    .controlSize(.small)
+                }
             }
             .padding(10)
             .background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
@@ -147,6 +184,26 @@ struct TaskDetailView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
+            Button {
+                task.isCompleted.toggle()
+                persist("toggleCompleted")
+            } label: {
+                Label(
+                    task.isCompleted ? "Mark Incomplete" : "Mark Complete",
+                    systemImage: task.isCompleted ? "circle" : "checkmark.circle"
+                )
+            }
+            if task.isDismissed {
+                Button("Restore") {
+                    task.dismissedAt = nil
+                    persist("restore")
+                }
+            } else if !task.isCompleted {
+                Button("Won't Do") {
+                    task.dismissedAt = .now
+                    persist("dismiss")
+                }
+            }
             Button {
                 // TODO: implement JIRA ticket draft + preview + create flow.
             } label: {

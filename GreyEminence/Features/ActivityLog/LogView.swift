@@ -173,11 +173,13 @@ struct LogView: View {
         case .obsidian: .indigo
         case .update: .teal
         case .general: .gray
+        case .ui: .mint
         }
     }
 
     private func levelColor(_ level: LogEntry.Level) -> Color {
         switch level {
+        case .debug: .secondary
         case .info: .primary
         case .warning: .orange
         case .error: .red

@@ -1,15 +1,20 @@
 import SwiftUI
 import SwiftData
+import Contacts
 
 struct ContactPicker: View {
     @Query(sort: \Contact.name) private var allContacts: [Contact]
+    @Environment(\.modelContext) private var modelContext
     @State private var searchText = ""
     @State private var hoveredID: PersistentIdentifier?
+    @State private var appleHits: [AppleDirectoryHit] = []
+    @State private var appleStatus: String?
     @FocusState private var searchFocused: Bool
     var excludedContacts: Set<PersistentIdentifier>
     /// Contacts to surface above the divider — typically the attendees of the
     /// meeting this picker is being shown from.
     var prioritizedContacts: [Contact] = []
+    var includeAppleDirectory: Bool = false
     var onSelect: (Contact) -> Void
 
     private struct Partition {
@@ -72,7 +77,8 @@ struct ContactPicker: View {
 
             Divider()
 
-            let isEmpty = searchText.isEmpty ? partition.isEmpty : flatSearchResults.isEmpty
+            let isEmpty = (searchText.isEmpty ? partition.isEmpty : flatSearchResults.isEmpty)
+                && visibleAppleHits.isEmpty && appleStatus == nil
             if isEmpty {
                 VStack(spacing: 4) {
                     Image(systemName: "person.slash")
@@ -89,10 +95,12 @@ struct ContactPicker: View {
                     LazyVStack(spacing: 1) {
                         if searchText.isEmpty {
                             groupedRows(partition)
+                            appleDirectorySection
                         } else {
                             ForEach(flatSearchResults) { contact in
                                 row(for: contact)
                             }
+                            appleDirectorySection
                         }
                     }
                     .padding(.vertical, 4)
@@ -101,7 +109,70 @@ struct ContactPicker: View {
             }
         }
         .frame(width: 320)
-        .onAppear { searchFocused = true }
+        .onAppear {
+            searchFocused = true
+            if includeAppleDirectory {
+                Task { await loadAppleDirectory() }
+            }
+        }
+    }
+
+    private var visibleAppleHits: [AppleDirectoryHit] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let existingEmails = Set(allContacts.compactMap { $0.email?.lowercased() })
+        return appleHits.filter { hit in
+            if let email = hit.email, existingEmails.contains(email.lowercased()) { return false }
+            if query.isEmpty { return true }
+            return hit.name.lowercased().contains(query)
+                || (hit.email?.lowercased().contains(query) ?? false)
+        }
+    }
+
+    @MainActor
+    private func loadAppleDirectory() async {
+        let store = CNContactStore()
+        do {
+            let granted = try await store.requestAccess(for: .contacts)
+            guard granted else {
+                appleStatus = "Apple Contacts access denied"
+                return
+            }
+            let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactNicknameKey, CNContactEmailAddressesKey] as [CNKeyDescriptor]
+            let request = CNContactFetchRequest(keysToFetch: keys)
+            var hits: [AppleDirectoryHit] = []
+            try store.enumerateContacts(with: request) { contact, _ in
+                let name = [contact.givenName, contact.familyName]
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
+                let nickname = contact.nickname.trimmingCharacters(in: .whitespaces)
+                let display = name.isEmpty ? nickname : name
+                guard !display.isEmpty else { return }
+                let email = contact.emailAddresses.first.map { String($0.value) }
+                hits.append(AppleDirectoryHit(id: contact.identifier, name: display, email: email))
+            }
+            appleHits = hits.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            appleStatus = appleHits.isEmpty ? "No Apple Contacts found" : nil
+        } catch {
+            appleStatus = error.localizedDescription
+        }
+    }
+
+    private func selectApple(_ hit: AppleDirectoryHit) {
+        if let email = hit.email,
+           let existing = allContacts.first(where: { $0.email?.lowercased() == email.lowercased() }) {
+            onSelect(existing)
+            return
+        }
+        if let existing = allContacts.first(where: { $0.name.caseInsensitiveCompare(hit.name) == .orderedSame }) {
+            onSelect(existing)
+            return
+        }
+        let contact = Contact(name: hit.name, email: hit.email)
+        contact.externalSource = "apple"
+        contact.externalID = hit.id
+        modelContext.insert(contact)
+        onSelect(contact)
     }
 
     @ViewBuilder
@@ -133,6 +204,54 @@ struct ContactPicker: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .padding(.bottom, 2)
+    }
+
+    @ViewBuilder
+    private var appleDirectorySection: some View {
+        if includeAppleDirectory {
+        let hits = visibleAppleHits
+        if !hits.isEmpty {
+            Divider().padding(.vertical, 4)
+            sectionHeader("Apple / Outlook Contacts")
+            ForEach(hits.prefix(40)) { hit in
+                Button {
+                    selectApple(hit)
+                    searchText = ""
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 26, height: 26)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(hit.name)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            if let email = hit.email {
+                                Text(email)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        } else if let appleStatus {
+            Divider().padding(.vertical, 4)
+            Text(appleStatus)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
+        }
     }
 
     @ViewBuilder
@@ -187,4 +306,10 @@ struct ContactPicker: View {
             hoveredID = hovering ? contact.persistentModelID : nil
         }
     }
+}
+
+private struct AppleDirectoryHit: Identifiable {
+    let id: String
+    let name: String
+    let email: String?
 }

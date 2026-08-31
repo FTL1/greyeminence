@@ -1,0 +1,202 @@
+name: Build Grey Conseil DMG
+
+# Unofficial Grey Conseil build. Does not use Matt's signing secrets or Sparkle feed.
+# Ad-hoc signed, unsandboxed arm64 app named "Grey Conseil" so it can sit
+# next to production Grey Eminence. Publishes a GitHub Release so Check for
+# Updates (Sparkle) can install the next build from this repo.
+#
+# Tahoe 26 kills a sandboxed ad-hoc binary at launch
+# (OSStatus -67030 / _libsecinit_appsandbox). Do not re-enable the
+# production entitlements file here without a real Developer ID.
+on:
+  workflow_dispatch:
+
+env:
+  SCHEME: GreyEminence
+  GC_PRODUCT_NAME: "Grey Conseil"
+  GC_BUNDLE_ID: com.ftl1.greyeminence
+  GC_MARKETING_VERSION: "0.28.4-ftl51"
+
+jobs:
+  build-dmg:
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project GreyEminence.xcodeproj \
+            -scheme "$SCHEME"
+
+      - name: Test speaker remapping
+        run: |
+          xcodebuild test \
+            -project GreyEminence.xcodeproj \
+            -scheme "$SCHEME" \
+            -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-test" \
+            -only-testing:GreyEminenceTests/SpeakerRelabelTests \
+            -only-testing:GreyEminenceTests/SpeakerPaletteTests \
+            -only-testing:GreyEminenceTests/LibrarySearchTests \
+            -only-testing:GreyEminenceTests/TranscriptAutoMergeTests \
+            -only-testing:GreyEminenceTests/SegmentAudioPlayerTests \
+            -only-testing:GreyEminenceTests/MeetingReanalysisTests \
+            -only-testing:GreyEminenceTests/AIPromptTemplatesTests \
+            -only-testing:GreyEminenceTests/DossierTests \
+            -only-testing:GreyEminenceTests/ArchiveExtractTests \
+            -only-testing:GreyEminenceTests/GrokLibraryTests \
+            -only-testing:GreyEminenceTests/AudioLevelMeterTests \
+            -only-testing:GreyEminenceTests/PermissionsHealthTests \
+            -only-testing:GreyEminenceTests/SpeakerRosterTests \
+            -only-testing:GreyEminenceTests/SpeakerReanalyzeTests \
+            -only-testing:GreyEminenceTests/SpeakerTests \
+            -only-testing:GreyEminenceTests/GraphCalendarTests \
+            -only-testing:GreyEminenceTests/ScreenFrameTriageTests \
+            -only-testing:GreyEminenceTests/ScreenCapturePermissionTests \
+            -only-testing:GreyEminenceTests/CaptureSafetyPolicyTests \
+            -only-testing:GreyEminenceTests/InsightItemTests \
+            -only-testing:GreyEminenceTests/AudioFileWriterEncoderTests \
+            -only-testing:GreyEminenceTests/RichClipboardTests \
+            -only-testing:GreyEminenceTests/ReportRenderingTests \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            CODE_SIGNING_ALLOWED=YES
+
+      - name: Build Release arm64
+        run: |
+          # Do not override PRODUCT_NAME here — SPM resource bundles inherit it
+          # and collide as "Grey Conseil.bundle". Rename the .app after.
+          # CFBundleVersion must increase vs installed builds (was 20260813090536).
+          BUILD_NO="$(date -u +%Y%m%d%H%M%S)"
+          echo "CURRENT_PROJECT_VERSION=$BUILD_NO" >> "$GITHUB_ENV"
+          xcodebuild build \
+            -project GreyEminence.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "platform=macOS,arch=arm64" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            PRODUCT_BUNDLE_IDENTIFIER="$GC_BUNDLE_ID" \
+            MARKETING_VERSION="$GC_MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NO" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            CODE_SIGN_ENTITLEMENTS="$PWD/GreyEminence/GreyConseil.entitlements" \
+            ENABLE_APP_SANDBOX=NO \
+            ENABLE_HARDENED_RUNTIME=NO \
+            ONLY_ACTIVE_ARCH=YES
+
+      - name: Create DMG
+        run: |
+          BUILT_APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/Grey Eminence.app"
+          test -d "$BUILT_APP"
+          STAGING="$RUNNER_TEMP/dmg-staging"
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING"
+          APP_PATH="$STAGING/${GC_PRODUCT_NAME}.app"
+          ditto "$BUILT_APP" "$APP_PATH"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleName $GC_PRODUCT_NAME" "$APP_PATH/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $GC_PRODUCT_NAME" "$APP_PATH/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :SUFeedURL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml" "$APP_PATH/Contents/Info.plist"
+          defaults read "$APP_PATH/Contents/Info.plist" CFBundleIdentifier
+          defaults read "$APP_PATH/Contents/Info.plist" CFBundleName
+          defaults read "$APP_PATH/Contents/Info.plist" CFBundleDisplayName
+          defaults read "$APP_PATH/Contents/Info.plist" CFBundleShortVersionString
+          defaults read "$APP_PATH/Contents/Info.plist" CFBundleVersion
+          defaults read "$APP_PATH/Contents/Info.plist" SUFeedURL
+
+          codesign --force --deep --sign - --timestamp=none "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          echo "---- entitlements (sandbox must be absent) ----"
+          codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | plutil -p - || true
+          if codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -q "app-sandbox"; then
+            echo "ERROR: App Sandbox is still present; Tahoe will crash on launch"
+            exit 1
+          fi
+
+          brew install create-dmg
+          DMG_PATH="$RUNNER_TEMP/GreyConseil.dmg"
+          create-dmg \
+            --volname "Grey Conseil" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 128 \
+            --icon "${GC_PRODUCT_NAME}.app" 165 180 \
+            --app-drop-link 495 180 \
+            --hide-extension "${GC_PRODUCT_NAME}.app" \
+            "$DMG_PATH" \
+            "$APP_PATH" || {
+              test -f "$DMG_PATH"
+            }
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GreyConseil
+          path: ${{ runner.temp }}/GreyConseil.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Sign Sparkle appcast and publish GitHub Release
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+            echo "::warning::SPARKLE_PRIVATE_KEY secret is missing. DMG artifact is still uploaded; Check for Updates will not work until the secret is set and this workflow is re-run."
+            exit 0
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/Sparkle.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.7.1/Sparkle-2.7.1.tar.xz
+          mkdir -p "$RUNNER_TEMP/Sparkle"
+          tar -xJf "$RUNNER_TEMP/Sparkle.tar.xz" -C "$RUNNER_TEMP/Sparkle"
+          GEN=$(find "$RUNNER_TEMP/Sparkle" -name generate_appcast -type f | head -1)
+          test -n "$GEN"
+          chmod +x "$GEN" || true
+
+          TAG="v${GC_MARKETING_VERSION}"
+          ASSET="GreyConseil-${GC_MARKETING_VERSION}.dmg"
+          FEED="$RUNNER_TEMP/sparkle-feed"
+          mkdir -p "$FEED"
+          cp "$DMG_PATH" "$FEED/$ASSET"
+          printf '%s\n' "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle_ed.key"
+          chmod 600 "$RUNNER_TEMP/sparkle_ed.key"
+          PREFIX="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/"
+          "$GEN" --ed-key-file "$RUNNER_TEMP/sparkle_ed.key" \
+            --download-url-prefix "$PREFIX" \
+            "$FEED"
+          test -f "$FEED/appcast.xml"
+          rm -f "$RUNNER_TEMP/sparkle_ed.key"
+
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          cat > "$NOTES" <<EOF
+          Grey Conseil ${GC_MARKETING_VERSION}
+
+          Unofficial fork of Grey Eminence. Not Matt Purdon’s product.
+          NO WARRANTY. USE AT YOUR OWN RISK.
+          Lawful use only — you are responsible for consent and recording laws.
+
+          After this install, **Check for Updates** fetches this repo repo
+          (not Grey Eminence’s Sparkle feed). Drag **Grey Conseil** onto
+          Applications and remove **older Notebook** / **older test builds**
+          if those icons are still there. Same bundle ID — your library stays.
+          EOF
+
+          gh release delete "$TAG" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Grey Conseil ${GC_MARKETING_VERSION}" \
+            --notes-file "$NOTES" \
+            "$FEED/$ASSET" \
+            "$FEED/appcast.xml"

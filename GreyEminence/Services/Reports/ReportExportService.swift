@@ -17,7 +17,7 @@ enum ReportExportService {
         var errorDescription: String? {
             switch self {
             case .nothingToReport:
-                "This meeting has no summary, action items or shared screens to report on yet."
+                "This meeting has nothing selected to export yet."
             }
         }
     }
@@ -32,17 +32,46 @@ enum ReportExportService {
         template: ReportTemplate = ReportTemplateCatalog.plain,
         figuresAtEnd: Bool? = nil
     ) async throws -> URL? {
+        try await export(
+            for: meeting,
+            selection: IntelligenceExportSelection(
+                includeSummary: true,
+                includeActionItems: true,
+                includeQuestions: true,
+                includeTopics: true,
+                includeSharedScreens: true,
+                includeTranscript: template.includesTranscript,
+                dedupeTranscript: true
+            ),
+            format: .pdf,
+            template: template,
+            figuresAtEnd: figuresAtEnd
+        )
+    }
+
+    @discardableResult
+    static func export(
+        for meeting: Meeting,
+        selection: IntelligenceExportSelection,
+        format: IntelligenceExportFormat,
+        template: ReportTemplate = ReportTemplateCatalog.plain,
+        figuresAtEnd: Bool? = nil
+    ) async throws -> URL? {
         var report = ReportModelBuilder.build(
             from: meeting,
-            includeTranscript: template.includesTranscript
+            includeTranscript: selection.includeTranscript,
+            dedupeTranscript: selection.dedupeTranscript
         )
-        guard !report.isEmpty else { throw ExportError.nothingToReport }
+        guard selection.includesAnything else { throw ExportError.nothingToReport }
 
         // Ask before rendering: a cancelled save should not have cost the
         // user a few seconds of layout and a pile of base64.
-        guard let destination = savePanelURL(for: report.meta, template: template) else { return nil }
+        guard let destination = savePanelURL(
+            for: report.meta,
+            format: format
+        ) else { return nil }
 
-        if template.includesFigures {
+        if format == .pdf, template.includesFigures, selection.includeSharedScreens || selection.includeSummary {
             if let plan = await anchorPlan(for: meeting, report: report) {
                 report = report.applyingAnchors(
                     plan,
@@ -58,17 +87,21 @@ enum ReportExportService {
             }
         }
 
-        let html = ReportHTMLRenderer.render(report, template: template)
-        try await ReportPDFRenderer.writePDF(html: html, to: destination)
+        // Last, so the anchoring above still sees the full section list its
+        // cached plan was computed against.
+        report = selection.applying(to: report)
+        guard !report.isEmpty else { throw ExportError.nothingToReport }
+
+        try await write(report, format: format, template: template, selection: selection, to: destination)
 
         LogManager.send(
-            "Exported report: \"\(report.meta.title)\" (\(report.sections.count) sections, \(report.allFigures.count) figures, template \(template.id))",
+            "Exported report: \"\(report.meta.title)\" (\(format.fileExtension), \(report.sections.count) sections, \(report.allFigures.count) figures)",
             category: .general,
             meetingID: meeting.id
         )
         // A report with no pictures is the most confusing possible outcome, so
         // say which of the several reasons it was.
-        if template.includesFigures && report.allFigures.isEmpty {
+        if format == .pdf, template.includesFigures, report.allFigures.isEmpty {
             LogManager.send(
                 "Report has no figures: \(figureDiagnosis(for: meeting))",
                 category: .general,
@@ -77,6 +110,37 @@ enum ReportExportService {
             )
         }
         return destination
+    }
+
+    private static func write(
+        _ report: ReportModel,
+        format: IntelligenceExportFormat,
+        template: ReportTemplate,
+        selection: IntelligenceExportSelection,
+        to url: URL
+    ) async throws {
+        switch format {
+        case .pdf:
+            var themed = template
+            themed.includesTranscript = selection.includeTranscript
+            themed.includesActionItems = selection.includeActionItems
+            themed.includesFollowUps = selection.includeQuestions
+            themed.includesShareAppendix = selection.includeSharedScreens
+            let html = ReportHTMLRenderer.render(report, template: themed)
+            try await ReportPDFRenderer.writePDF(html: html, to: url)
+        case .markdown:
+            try IntelligenceExport.markdown(report).write(to: url, atomically: true, encoding: .utf8)
+        case .csv:
+            try IntelligenceExport.csv(report).write(to: url, atomically: true, encoding: .utf8)
+        case .json:
+            try IntelligenceExport.json(report).write(to: url)
+        case .rtf:
+            try IntelligenceExport.rtf(report).write(to: url)
+        case .xlsx:
+            try IntelligenceExport.xlsx(report).write(to: url)
+        case .docx:
+            try IntelligenceExport.docx(report).write(to: url)
+        }
     }
 
     /// Why a report came out with no pictures. Checked in the order the
@@ -174,34 +238,65 @@ enum ReportExportService {
         }
     }
 
-    private static func savePanelURL(for meta: ReportModel.Meta, template: ReportTemplate) -> URL? {
+    private static func savePanelURL(
+        for meta: ReportModel.Meta,
+        format: IntelligenceExportFormat
+    ) -> URL? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.pdf]
-        panel.nameFieldStringValue = suggestedFilename(for: meta, template: template)
-        panel.title = "Export Meeting Report"
+        panel.allowedContentTypes = [format.utType]
+        panel.nameFieldStringValue = intelligenceFilename(for: meta, fileExtension: format.fileExtension)
+        panel.title = "Export Meeting Intelligence"
         panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
         guard panel.runModal() == .OK else { return nil }
         return panel.url
     }
 
-    /// "Architecture Braintrust — 2026-08-12 (TJ).pdf", with anything the
-    /// file system would object to removed.
-    ///
-    /// The template tag is what lets you export the same meeting under every
-    /// template into one folder and compare them side by side, instead of
-    /// each export overwriting the last.
-    static func suggestedFilename(for meta: ReportModel.Meta, template: ReportTemplate) -> String {
-        let calendar = Calendar.current
-        let day = String(
-            format: "%04d-%02d-%02d",
-            calendar.component(.year, from: meta.date),
-            calendar.component(.month, from: meta.date),
-            calendar.component(.day, from: meta.date)
-        )
-        return sanitize("\(meta.title) — \(day) (\(template.code))") + ".pdf"
+    /// "North Campus Engineering Scope Review_20260818-47m-intel.pdf"
+    nonisolated static func suggestedFilename(
+        for meta: ReportModel.Meta,
+        template _: ReportTemplate,
+        fileExtension: String = "pdf"
+    ) -> String {
+        intelligenceFilename(for: meta, fileExtension: fileExtension)
     }
 
-    private static func sanitize(_ name: String) -> String {
+    nonisolated static func intelligenceFilename(
+        for meta: ReportModel.Meta,
+        fileExtension: String
+    ) -> String {
+        exportFilename(
+            title: meta.title,
+            date: meta.date,
+            minutes: meta.durationMinutes,
+            kind: "intel",
+            fileExtension: fileExtension
+        )
+    }
+
+    /// `Title_yyyyMMdd-47m-intel.pdf` / `Title_yyyyMMdd-47m-tr.txt`
+    nonisolated static func exportFilename(
+        title: String,
+        date: Date,
+        minutes: Int,
+        kind: String,
+        fileExtension: String
+    ) -> String {
+        let calendar = Calendar.current
+        let day = String(
+            format: "%04d%02d%02d",
+            calendar.component(.year, from: date),
+            calendar.component(.month, from: date),
+            calendar.component(.day, from: date)
+        )
+        let ext = fileExtension.hasPrefix(".")
+            ? String(fileExtension.dropFirst())
+            : fileExtension
+        let stem = sanitize("\(title)_\(day)-\(minutes)m-\(kind)")
+        return "\(stem).\(ext)"
+    }
+
+    nonisolated private static func sanitize(_ name: String) -> String {
         let illegal = CharacterSet(charactersIn: "/:\\?\"<>|*")
         return name.unicodeScalars
             .filter { !illegal.contains($0) }

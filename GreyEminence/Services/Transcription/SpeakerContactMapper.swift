@@ -7,6 +7,16 @@ final class SpeakerContactMapper {
     /// Maps speaker display names to Contact records for the current session.
     private(set) var speakerToContact: [String: Contact] = [:]
 
+    /// Store the alias without rewriting segments — used when the caller
+    /// applies the contact name through the session rename path.
+    func remember(_ speakerName: String, contact: Contact) {
+        speakerToContact[speakerName] = contact
+        let lowered = speakerName.lowercased()
+        if !contact.speakerAliases.contains(where: { $0.lowercased() == lowered }) {
+            contact.speakerAliases.append(speakerName)
+        }
+    }
+
     /// Link a speaker label to a contact. Relabels existing segments and adds alias.
     func linkSpeaker(
         _ speakerName: String,

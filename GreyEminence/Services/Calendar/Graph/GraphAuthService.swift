@@ -77,6 +77,28 @@ final class GraphAuthService {
         }
     }
 
+    /// Hit Graph `/me` with the stored token. Used by Settings → Validate.
+    func validate() async {
+        guard GraphConfig.isConfigured else {
+            lastError = "Paste a Microsoft Application (client) ID in Settings → Calendar first."
+            return
+        }
+        guard let token = await validAccessToken() else {
+            lastError = lastError ?? "Not signed in — use Connect Microsoft 365."
+            needsReconnect = connectedEmail != nil
+            return
+        }
+        do {
+            try await fetchAndStoreProfile(accessToken: token)
+            lastError = nil
+            needsReconnect = false
+            LogManager.send("Graph: validated as \(connectedEmail ?? "unknown")", category: .general)
+        } catch {
+            lastError = Self.friendly(error)
+            needsReconnect = true
+        }
+    }
+
     func disconnect() {
         keychainRemove(Key.access)
         keychainRemove(Key.refresh)

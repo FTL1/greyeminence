@@ -331,6 +331,12 @@ actor HighQualityTranscriber {
     /// WhisperKit expects for `transcribe(audioArray:)`. Tries AVAudioFile
     /// first; falls back to AVAssetReader for slightly malformed containers
     /// that AVAudioFile refuses to open.
+    /// Shared with speaker recovery so re-process and "Recover speakers"
+    /// decode AAC the same way.
+    nonisolated static func decodeFileTo16kFloatMono(url: URL) throws -> [Float] {
+        try decodeTo16kFloatMono(url: url)
+    }
+
     nonisolated private static func decodeTo16kFloatMono(url: URL) throws -> [Float] {
         do {
             return try decodeViaAVAudioFile(url: url)
